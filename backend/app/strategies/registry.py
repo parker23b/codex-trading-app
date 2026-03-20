@@ -1,33 +1,99 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from collections.abc import Callable
 
+from app.strategies.breakout_guard import BreakoutGuardStrategy
+from app.strategies.carry_drift import CarryDriftStrategy
 from app.strategies.base import Strategy
 from app.strategies.mean_reversion import MeanReversionStrategy
+
+
+@dataclass(frozen=True, slots=True)
+class StrategyParameterDefinition:
+    key: str
+    label: str
+    value: float
+    step: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class StrategyMetadata:
+    name: str
+    description: str
+    default_instrument: str
+    position_size: float
+    risk_per_trade: float
+    parameters: tuple[StrategyParameterDefinition, ...]
 
 
 class StrategyRegistry:
     def __init__(self) -> None:
         self._strategies: dict[str, Callable[[], Strategy]] = {}
-        self._descriptions: dict[str, str] = {}
+        self._metadata: dict[str, StrategyMetadata] = {}
 
-    def register(self, name: str, factory: Callable[[], Strategy], description: str) -> None:
+    def register(self, metadata: StrategyMetadata, factory: Callable[[], Strategy]) -> None:
+        name = metadata.name
         self._strategies[name] = factory
-        self._descriptions[name] = description
+        self._metadata[name] = metadata
 
     def create(self, name: str) -> Strategy:
         if name not in self._strategies:
             raise ValueError(f"Strategy '{name}' is not registered.")
         return self._strategies[name]()
 
-    def describe(self) -> dict[str, str]:
-        return dict(self._descriptions)
+    def list_metadata(self) -> list[StrategyMetadata]:
+        return list(self._metadata.values())
+
+    def get_metadata(self, name: str) -> StrategyMetadata:
+        if name not in self._metadata:
+            raise ValueError(f"Strategy '{name}' is not registered.")
+        return self._metadata[name]
 
 
 strategy_registry = StrategyRegistry()
 strategy_registry.register(
-    name=MeanReversionStrategy.name,
+    metadata=StrategyMetadata(
+        name=MeanReversionStrategy.name,
+        description="Buys when price is sufficiently below the rolling mean and sells when above it.",
+        default_instrument="IX.D.FTSE.DAILY.IP",
+        position_size=1.0,
+        risk_per_trade=0.8,
+        parameters=(
+            StrategyParameterDefinition(key="window", label="Window", value=20, step=1),
+            StrategyParameterDefinition(key="entry_threshold", label="Entry Threshold", value=1.2, step=0.1),
+            StrategyParameterDefinition(key="exit_threshold", label="Exit Threshold", value=0.3, step=0.1),
+        ),
+    ),
     factory=MeanReversionStrategy,
-    description="Buys when price is sufficiently below the rolling mean and sells when above it.",
 )
-
+strategy_registry.register(
+    metadata=StrategyMetadata(
+        name=BreakoutGuardStrategy.name,
+        description="Trades directional breaks only when volatility and trend filters align.",
+        default_instrument="IX.D.NASDAQ.DAILY.IP",
+        position_size=0.8,
+        risk_per_trade=1.1,
+        parameters=(
+            StrategyParameterDefinition(key="breakout_window", label="Breakout Window", value=15, step=1),
+            StrategyParameterDefinition(key="atr_filter", label="ATR Filter", value=1.4, step=0.1),
+            StrategyParameterDefinition(key="stop_multiple", label="Stop Multiple", value=1.8, step=0.1),
+        ),
+    ),
+    factory=BreakoutGuardStrategy,
+)
+strategy_registry.register(
+    metadata=StrategyMetadata(
+        name=CarryDriftStrategy.name,
+        description="Follows session trend drift with a tighter mean-reentry stop discipline.",
+        default_instrument="IX.D.DAX.DAILY.IP",
+        position_size=0.6,
+        risk_per_trade=0.7,
+        parameters=(
+            StrategyParameterDefinition(key="trend_window", label="Trend Window", value=34, step=1),
+            StrategyParameterDefinition(key="reentry_buffer", label="Reentry Buffer", value=0.6, step=0.1),
+            StrategyParameterDefinition(key="take_profit", label="Take Profit", value=2.3, step=0.1),
+        ),
+    ),
+    factory=CarryDriftStrategy,
+)

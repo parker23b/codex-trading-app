@@ -32,6 +32,11 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
       ),
     [configDrafts],
   );
+  const groupedInstrumentOptions = (strategy: StrategyDefinition) =>
+    (strategy.instrument_options ?? []).reduce<Record<string, { epic: string; label: string; category: string }[]>>((groups, option) => {
+      groups[option.category] = [...(groups[option.category] ?? []), option];
+      return groups;
+    }, {});
 
   const runAction = (strategy: StrategyDefinition) => {
     startTransition(async () => {
@@ -109,10 +114,14 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
                 <span className="eyebrow">Win Rate</span>
                 <strong>{strategy.win_rate}%</strong>
               </div>
+              <div className="strategy-stat">
+                <span className="eyebrow">Last Price</span>
+                <strong>{strategy.last_price != null ? formatCurrency(strategy.last_price) : "Waiting..."}</strong>
+              </div>
             </div>
             <label className="strategy-card__instrument">
               <span className="eyebrow">Instrument Override</span>
-              <input
+              <select
                 value={instrumentOverrides[strategy.name]}
                 onChange={(event) =>
                   setInstrumentOverrides((current) => ({
@@ -120,7 +129,17 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
                     [strategy.name]: event.target.value,
                   }))
                 }
-              />
+              >
+                {Object.entries(groupedInstrumentOptions(strategy)).map(([category, options]) => (
+                  <optgroup key={category} label={category}>
+                    {options.map((option) => (
+                      <option key={option.epic} value={option.epic}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
             </label>
             <div className="strategy-card__actions">
               <button className="button" disabled={pending} onClick={() => runAction(strategy)}>

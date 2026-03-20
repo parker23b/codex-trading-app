@@ -1,4 +1,4 @@
-import { Position, StrategyDefinition, Trade } from "@/lib/types";
+import { BrokerAuthStatus, DashboardSnapshot, Position, StrategyDefinition, Trade } from "@/lib/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 const DEV_FALLBACK_ENABLED =
@@ -9,10 +9,12 @@ type BackendMode = "live" | "dev-fallback";
 
 class HttpError extends Error {
   status: number;
+  detail?: string;
 
-  constructor(status: number) {
+  constructor(status: number, detail?: string) {
     super(`Request failed with status ${status}`);
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -224,7 +226,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new HttpError(response.status);
+    let detail: string | undefined;
+    try {
+      const payload = (await response.json()) as { detail?: string };
+      detail = payload.detail;
+    } catch {
+      detail = undefined;
+    }
+    throw new HttpError(response.status, detail);
   }
 
   return response.json() as Promise<T>;
@@ -259,6 +268,41 @@ export async function getOpenPositions(): Promise<Position[]> {
     }
     throw error;
   }
+}
+
+export async function getBrokerAuthStatus(): Promise<BrokerAuthStatus> {
+  try {
+    const positions = await request<
+      Array<{ instrument: string; direction: "BUY" | "SELL"; size: number; open_price: number; opened_at: string }>
+    >("/broker/positions");
+    return {
+      state: "connected",
+      label: "IG Connected",
+      detail: positions.length ? `${positions.length} broker position${positions.length === 1 ? "" : "s"} synced` : "Authenticated with no open broker positions",
+      position_count: positions.length,
+    };
+  } catch (error) {
+    if (shouldUseFallback(error)) {
+      return {
+        state: "unavailable",
+        label: "Broker Check Offline",
+        detail: "Backend fallback mode is active",
+        position_count: 0,
+      };
+    }
+
+    const detail = error instanceof HttpError ? error.detail : undefined;
+    return {
+      state: "disconnected",
+      label: "IG Auth Failed",
+      detail: detail ?? "Broker authentication check failed",
+      position_count: 0,
+    };
+  }
+}
+
+export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
+  return request<DashboardSnapshot>("/dashboard");
 }
 
 export async function getStrategies(): Promise<StrategyDefinition[]> {

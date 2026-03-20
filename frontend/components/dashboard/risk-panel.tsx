@@ -38,7 +38,7 @@ export function RiskPanel({
       title="Risk"
       subtitle="Main portfolio risk checks for the current book."
       action={<StatusBadge label={overall.label} tone={overall.tone} />}
-      className="risk-panel"
+      className="risk-panel card--compact"
     >
       <div className="risk-stack">
         {items.map((item) => {

@@ -38,10 +38,18 @@ class TradingEngine:
         if not self.active:
             return None
 
+        logger.info(
+            "Broker price tick received",
+            extra={"strategy": self.strategy.name, "instrument": self.instrument, "price": update.price},
+        )
         self.strategy.on_price_update(update)
 
         if self.current_position is None and self.strategy.should_enter_trade():
             direction = self.strategy.entry_direction()
+            logger.info(
+                "Strategy entry decision emitted",
+                extra={"strategy": self.strategy.name, "instrument": self.instrument, "direction": direction.value},
+            )
             order = self.broker.place_order(
                 OrderRequest(
                     instrument=self.instrument,
@@ -65,6 +73,10 @@ class TradingEngine:
             return None
 
         if self.current_position is not None and self.strategy.should_exit_trade():
+            logger.info(
+                "Strategy exit decision emitted",
+                extra={"strategy": self.strategy.name, "instrument": self.instrument},
+            )
             closed_order = self.broker.close_position(self.instrument)
             pnl = self._calculate_pnl(
                 direction=OrderDirection(self.current_position.direction),
@@ -92,6 +104,16 @@ class TradingEngine:
             self.current_position = None
             return trade
 
+        logger.info(
+            "Strategy evaluated with no trade action",
+            extra={
+                "strategy": self.strategy.name,
+                "instrument": self.instrument,
+                "price": update.price,
+                "has_position": self.current_position is not None,
+            },
+        )
+
         return None
 
     @staticmethod
@@ -105,4 +127,3 @@ class TradingEngine:
         price_delta = close_price - open_price
         signed_delta = price_delta if direction is OrderDirection.BUY else -price_delta
         return signed_delta * size
-

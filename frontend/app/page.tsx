@@ -4,22 +4,24 @@ import { OpenPositionsTable } from "@/components/dashboard/open-positions-table"
 import { RecentTradesTable } from "@/components/dashboard/recent-trades-table";
 import { RiskAllocationPanel } from "@/components/dashboard/risk-allocation-panel";
 import { RiskPanel } from "@/components/dashboard/risk-panel";
+import { StrategyTapePanel } from "@/components/dashboard/strategy-tape-panel";
 import { ModeIndicator } from "@/components/ui/mode-indicator";
 import { Card } from "@/components/ui/card";
-import { getBackendMode, getOpenPositions, getTrades } from "@/lib/api";
+import { getBackendMode, getBrokerAuthStatus, getDashboardSnapshot, getOpenPositions, getTrades } from "@/lib/api";
 
 export default async function DashboardPage() {
-  const [positions, trades, backendMode] = await Promise.all([
+  const [positions, trades, backendMode, brokerAuth, dashboard] = await Promise.all([
     getOpenPositions(),
     getTrades(),
     getBackendMode(),
+    getBrokerAuthStatus(),
+    getDashboardSnapshot(),
   ]);
 
   const sortedTrades = trades
     .slice()
     .sort((left, right) => new Date(right.close_time).getTime() - new Date(left.close_time).getTime());
 
-  const closedPnl = sortedTrades.reduce((sum, trade) => sum + trade.pnl, 0);
   const longExposure = positions
     .filter((position) => position.direction === "BUY")
     .reduce((sum, position) => sum + position.open_price * position.size, 0);
@@ -38,16 +40,17 @@ export default async function DashboardPage() {
   const averageLoss =
     Math.abs(trailingTrades.filter((trade) => trade.pnl < 0).reduce((sum, trade) => sum + trade.pnl, 0)) /
       Math.max(trailingTrades.filter((trade) => trade.pnl < 0).length, 1);
-  const riskRewardRatio = averageLoss === 0 ? averageWin : averageWin / averageLoss;
-  const accountValue = 100000 + closedPnl;
-  const dailyPnl = latestSessionKey
-    ? trailingTrades
-        .filter((trade) => trade.close_time.slice(0, 10) === latestSessionKey)
-        .reduce((sum, trade) => sum + trade.pnl, 0)
+  const riskRewardRatio = dashboard.riskReward || (averageLoss === 0 ? averageWin : averageWin / averageLoss);
+  const accountValue = dashboard.accountValue;
+  const dailyPnl = dashboard.dailyPnl;
+  const dailyPnlPercent = dashboard.dailyPnlPercent;
+  const accountChangePercent = dashboard.accountValuePercent;
+  const openRiskPercent = dashboard.openRisk;
+  const grossExposurePercent = accountValue > 0 ? (openExposure / accountValue) * 100 : 0;
+  const netExposurePercent = accountValue > 0 ? ((longExposure - shortExposure) / accountValue) * 100 : 0;
+  const averagePositionRiskPercent = positions.length
+    ? positions.reduce((sum, position) => sum + (position.risk_percent ?? 0), 0) / positions.length
     : 0;
-  const dailyPnlPercent = (dailyPnl / 100000) * 100;
-  const accountChangePercent = (closedPnl / 100000) * 100;
-  const openRiskPercent = positions.reduce((sum, position) => sum + (position.risk_percent ?? 0), 0);
   const largestPosition = positions.length
     ? Math.max(...positions.map((position) => ((position.open_price * position.size) / accountValue) * 100))
     : 0;
@@ -74,32 +77,74 @@ export default async function DashboardPage() {
   const mode = positions[0]?.account_type ?? trades[0]?.account_type ?? "DEMO";
   const riskConcentration = exposureByInstrument.length ? Math.max(...exposureByInstrument.map((item) => item.allocation)) : 0;
   const drawdownPercent = equityCurve.length ? Math.max(...equityCurve.map((point) => point.drawdown)) : 0;
+  const longLineCount = positions.filter((position) => position.direction === "BUY").length;
+  const shortLineCount = positions.filter((position) => position.direction === "SELL").length;
+  const activeStrategyCount = (dashboard.runningStrategies ?? []).length;
 
   return (
     <main className="dashboard-layout">
       <section className="top-command-bar">
-        <ModeIndicator mode={mode} />
-        <KpiBar
-          accountValue={accountValue}
-          accountChangePercent={accountChangePercent}
-          dailyPnl={dailyPnl}
-          dailyPnlPercent={dailyPnlPercent}
-          openRiskPercent={openRiskPercent}
-          winRate={winRate}
-          riskRewardRatio={riskRewardRatio}
-          sampleSize={trailingTrades.length}
-          sessionLabel={latestSessionKey ? new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(new Date(latestSessionKey)) : "Latest session"}
-        />
+        <div className="top-command-bar__mode">
+          <ModeIndicator mode={mode} brokerAuth={brokerAuth} />
+        </div>
+        <div className="top-command-bar__allocation">
+          <RiskAllocationPanel
+            longExposure={longExposure}
+            shortExposure={shortExposure}
+            allocations={exposureByInstrument}
+            grossExposurePercent={grossExposurePercent}
+            netExposurePercent={netExposurePercent}
+            positionCount={positions.length}
+          />
+        </div>
+        <div className="top-command-bar__snapshot">
+          <Card title="Book Snapshot" subtitle="Quick read on current book quality." className="card--compact">
+            <div className="summary-grid">
+              <div className="summary-grid__item">
+                <span className="eyebrow">Active Strategies</span>
+                <strong>{activeStrategyCount}</strong>
+              </div>
+              <div className="summary-grid__item">
+                <span className="eyebrow">Avg Line Risk</span>
+                <strong>{averagePositionRiskPercent.toFixed(2)}%</strong>
+              </div>
+              <div className="summary-grid__item">
+                <span className="eyebrow">Book Shape</span>
+                <strong>{longLineCount}L / {shortLineCount}S</strong>
+              </div>
+            </div>
+            <div className="status-note status-note--inline">
+              {openRiskPercent < 2
+                ? "Risk is contained relative to current equity."
+                : openRiskPercent < 4
+                  ? "Risk is buildable, but new entries should be selective."
+                  : "Risk is elevated. Prioritise netting, trims, or tighter stops before adding."}
+            </div>
+          </Card>
+        </div>
+        <div className="top-command-bar__metrics">
+          <KpiBar
+            accountValue={accountValue}
+            accountChangePercent={accountChangePercent}
+            dailyPnl={dailyPnl}
+            dailyPnlPercent={dailyPnlPercent}
+            openRiskPercent={openRiskPercent}
+            winRate={winRate}
+            riskRewardRatio={riskRewardRatio}
+            sampleSize={trailingTrades.length}
+            sessionLabel={latestSessionKey ? new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(new Date(latestSessionKey)) : "Latest session"}
+          />
+        </div>
       </section>
-      <section className="command-grid">
-        <div className="command-grid__main">
+      <section className="hero-grid">
+        <div className="hero-grid__main">
           <EquityPanel
             points={equityCurve.length ? equityCurve : [{ label: "T1", value: 100000, drawdown: 0 }]}
             latestValue={accountValue}
             delta={dailyPnl}
           />
         </div>
-        <div className="command-grid__side">
+        <div className="hero-grid__side">
           <RiskPanel
             capitalAtRisk={openRiskPercent}
             largestPosition={largestPosition}
@@ -108,26 +153,20 @@ export default async function DashboardPage() {
           />
         </div>
       </section>
-      <section className="command-grid">
-        <div className="command-grid__main">
-          <Card title="Open Positions" subtitle="Current exposure and controls.">
-            <div className="status-note">Demo actions only. Close and override changes stay in the UI and do not send orders.</div>
-            <OpenPositionsTable positions={positions} />
-            {backendMode === "dev-fallback" ? (
-              <div className="status-note">Displaying sample positions because the backend is offline.</div>
-            ) : null}
-          </Card>
-        </div>
-        <div className="command-grid__side">
-          <RiskAllocationPanel
-            longExposure={longExposure}
-            shortExposure={shortExposure}
-            allocations={exposureByInstrument}
-          />
-        </div>
+      <section className="page-grid">
+        <Card title="Open Positions" subtitle="Current exposure and controls." className="card--table card--full-width">
+          <div className="status-note status-note--inline">Demo actions only. Close and override changes stay in the UI and do not send orders.</div>
+          <OpenPositionsTable positions={positions} />
+          {backendMode === "dev-fallback" ? (
+            <div className="status-note">Displaying sample positions because the backend is offline.</div>
+          ) : null}
+        </Card>
       </section>
       <section className="page-grid">
-        <Card title="Recent Trades" subtitle="Latest closed trades.">
+        <StrategyTapePanel rows={dashboard.runningStrategies ?? []} />
+      </section>
+      <section className="page-grid">
+        <Card title="Recent Trades" subtitle="Latest closed trades." className="card--table">
           <RecentTradesTable trades={sortedTrades.slice(0, 10)} />
           {backendMode === "dev-fallback" ? (
             <div className="status-note">Displaying sample trades because the backend is offline.</div>

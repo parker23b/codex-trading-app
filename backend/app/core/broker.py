@@ -44,6 +44,16 @@ class BrokerOrderResult:
     executed_at: datetime
 
 
+@dataclass(slots=True)
+class BrokerAccountSummary:
+    account_id: str
+    balance: float
+    available: float
+    profit_loss: float
+    equity: float
+    account_type: AccountType
+
+
 class Broker(ABC):
     """Execution contract implemented by concrete broker adapters."""
 
@@ -64,7 +74,14 @@ class Broker(ABC):
     def get_positions(self) -> list[BrokerPosition]:
         raise NotImplementedError
 
+    @abstractmethod
+    def get_latest_price(self, instrument: str) -> float:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_account_summary(self) -> BrokerAccountSummary:
+        raise NotImplementedError
+
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
-

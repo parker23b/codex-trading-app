@@ -21,6 +21,9 @@ class Trade(SQLModel, table=True):
     open_time: datetime
     close_time: datetime
     pnl: float = 0.0
+    r_multiple: float | None = None
+    outcome: str | None = None
+    reason: str | None = None
     account_type: str
     created_at: datetime = Field(default_factory=utc_now, nullable=False)
 
@@ -36,7 +39,11 @@ class Position(SQLModel, table=True):
     open_time: datetime
     close_time: datetime | None = None
     pnl: float | None = None
+    current_price: float | None = None
+    unrealized_pnl: float | None = None
+    risk_percent: float | None = None
+    reason: str | None = None
+    manual_override: bool = False
     account_type: str
     is_open: bool = True
     created_at: datetime = Field(default_factory=utc_now, nullable=False)
-

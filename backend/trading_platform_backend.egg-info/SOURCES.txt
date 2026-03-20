@@ -4,7 +4,10 @@ app/main.py
 app/api/__init__.py
 app/api/router.py
 app/api/routes/__init__.py
+app/api/routes/charts.py
+app/api/routes/dashboard.py
 app/api/routes/health.py
+app/api/routes/positions.py
 app/api/routes/strategies.py
 app/api/routes/trades.py
 app/core/__init__.py
@@ -22,10 +25,15 @@ app/db/session.py
 app/models/__init__.py
 app/models/trade.py
 app/services/__init__.py
+app/services/chart_service.py
+app/services/dashboard_service.py
+app/services/simulation_service.py
 app/services/strategy_service.py
 app/services/trade_service.py
 app/strategies/__init__.py
 app/strategies/base.py
+app/strategies/breakout_guard.py
+app/strategies/carry_drift.py
 app/strategies/mean_reversion.py
 app/strategies/registry.py
 trading_platform_backend.egg-info/PKG-INFO

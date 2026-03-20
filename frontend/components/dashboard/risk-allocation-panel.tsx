@@ -10,17 +10,38 @@ type RiskAllocationPanelProps = {
   longExposure: number;
   shortExposure: number;
   allocations: InstrumentAllocation[];
+  grossExposurePercent: number;
+  netExposurePercent: number;
+  positionCount: number;
 };
 
 export function RiskAllocationPanel({
   longExposure,
   shortExposure,
   allocations,
+  grossExposurePercent,
+  netExposurePercent,
+  positionCount,
 }: RiskAllocationPanelProps) {
   const totalDirectional = Math.max(longExposure + shortExposure, 1);
+  const netBiasLabel = netExposurePercent > 0.1 ? "Net Long" : netExposurePercent < -0.1 ? "Net Short" : "Balanced";
 
   return (
-    <Card title="Allocation" subtitle="Directional split and position sizing.">
+    <Card title="Allocation" subtitle="Directional split and position sizing." className="card--compact allocation-card">
+      <div className="allocation-summary">
+        <div className="allocation-summary__item">
+          <span className="eyebrow">Gross Exposure</span>
+          <strong>{formatPercent(grossExposurePercent)}</strong>
+        </div>
+        <div className="allocation-summary__item">
+          <span className="eyebrow">Net Bias</span>
+          <strong>{netBiasLabel}</strong>
+        </div>
+        <div className="allocation-summary__item">
+          <span className="eyebrow">Open Lines</span>
+          <strong>{positionCount}</strong>
+        </div>
+      </div>
       <div className="allocation-split">
         <div className="allocation-split__row">
           <div className="allocation-split__meta">

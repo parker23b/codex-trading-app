@@ -47,10 +47,35 @@ export type StrategyDefinition = {
   instrument: string;
   status: "RUNNING" | "STOPPED";
   current_pnl: number;
+  last_price?: number | null;
   trade_count: number;
   win_rate: number;
   account_type: "DEMO" | "LIVE";
   position_size: number;
   risk_per_trade: number;
+  instrument_options?: { epic: string; label: string; category: string }[];
   parameters: StrategyParameter[];
+};
+
+export type BrokerAuthStatus = {
+  state: "connected" | "disconnected" | "unavailable";
+  label: string;
+  detail: string;
+  position_count: number;
+};
+
+export type DashboardSnapshot = {
+  accountValue: number;
+  accountValuePercent: number;
+  dailyPnl: number;
+  dailyPnlPercent: number;
+  openRisk: number;
+  winRate: number;
+  riskReward: number;
+  runningStrategies?: {
+    name: string;
+    instrument: string;
+    instrumentLabel: string;
+    lastPrice?: number | null;
+  }[];
 };
