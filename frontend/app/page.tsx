@@ -87,16 +87,6 @@ export default async function DashboardPage() {
         <div className="top-command-bar__mode">
           <ModeIndicator mode={mode} brokerAuth={brokerAuth} />
         </div>
-        <div className="top-command-bar__allocation">
-          <RiskAllocationPanel
-            longExposure={longExposure}
-            shortExposure={shortExposure}
-            allocations={exposureByInstrument}
-            grossExposurePercent={grossExposurePercent}
-            netExposurePercent={netExposurePercent}
-            positionCount={positions.length}
-          />
-        </div>
         <div className="top-command-bar__snapshot">
           <Card title="Book Snapshot" subtitle="Quick read on current book quality." className="card--compact">
             <div className="summary-grid">
@@ -109,8 +99,8 @@ export default async function DashboardPage() {
                 <strong>{averagePositionRiskPercent.toFixed(2)}%</strong>
               </div>
               <div className="summary-grid__item">
-                <span className="eyebrow">Book Shape</span>
-                <strong>{longLineCount}L / {shortLineCount}S</strong>
+                <span className="eyebrow">Long / Short</span>
+                <strong>{longLineCount} long / {shortLineCount} short</strong>
               </div>
             </div>
             <div className="status-note status-note--inline">
@@ -154,6 +144,19 @@ export default async function DashboardPage() {
         </div>
       </section>
       <section className="page-grid">
+        <div className="insight-grid">
+          <RiskAllocationPanel
+            longExposure={longExposure}
+            shortExposure={shortExposure}
+            allocations={exposureByInstrument}
+            grossExposurePercent={grossExposurePercent}
+            netExposurePercent={netExposurePercent}
+            positionCount={positions.length}
+          />
+          <StrategyTapePanel rows={dashboard.runningStrategies ?? []} />
+        </div>
+      </section>
+      <section className="page-grid">
         <Card title="Open Positions" subtitle="Current exposure and controls." className="card--table card--full-width">
           <div className="status-note status-note--inline">Demo actions only. Close and override changes stay in the UI and do not send orders.</div>
           <OpenPositionsTable positions={positions} />
@@ -161,9 +164,6 @@ export default async function DashboardPage() {
             <div className="status-note">Displaying sample positions because the backend is offline.</div>
           ) : null}
         </Card>
-      </section>
-      <section className="page-grid">
-        <StrategyTapePanel rows={dashboard.runningStrategies ?? []} />
       </section>
       <section className="page-grid">
         <Card title="Recent Trades" subtitle="Latest closed trades." className="card--table">

@@ -288,21 +288,16 @@ p {
 
 .top-command-bar {
   display: grid;
-  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) minmax(240px, 300px);
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
   grid-template-areas:
-    "mode allocation snapshot"
-    "metrics metrics metrics";
+    "mode snapshot"
+    "metrics metrics";
   gap: 24px;
   align-items: stretch;
 }
 
 .top-command-bar__mode {
   grid-area: mode;
-  min-width: 0;
-}
-
-.top-command-bar__allocation {
-  grid-area: allocation;
   min-width: 0;
 }
 
@@ -375,7 +370,7 @@ p {
 
 .eyebrow {
   color: var(--text-secondary);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.09em;
 }
@@ -395,7 +390,6 @@ p {
 }
 
 .top-command-bar__mode > *,
-.top-command-bar__allocation > *,
 .top-command-bar__snapshot > * {
   height: 100%;
 }
@@ -434,6 +428,18 @@ p {
 .strategy-tape {
   display: grid;
   gap: 12px;
+}
+
+.insight-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.95fr) minmax(0, 1.65fr);
+  gap: 24px;
+  align-items: stretch;
+}
+
+.insight-grid > * {
+  min-width: 0;
+  height: 100%;
 }
 
 .strategy-tape__row {
@@ -1088,6 +1094,7 @@ p {
 @media (max-width: 960px) {
   .top-command-bar,
   .hero-grid,
+  .insight-grid,
   .kpi-bar,
   .strategy-card__meta,
   .allocation-summary {
@@ -1097,7 +1104,6 @@ p {
   .top-command-bar {
     grid-template-areas:
       "mode"
-      "allocation"
       "snapshot"
       "metrics";
   }

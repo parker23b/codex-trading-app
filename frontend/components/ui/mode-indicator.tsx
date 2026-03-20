@@ -9,13 +9,15 @@ type ModeIndicatorProps = {
 export function ModeIndicator({ mode, brokerAuth }: ModeIndicatorProps) {
   const brokerTone =
     brokerAuth?.state === "connected" ? "live" : brokerAuth?.state === "disconnected" ? "negative" : "neutral";
+  const modeDetail =
+    mode === "LIVE" ? "Orders are pointed at the live environment." : "Frontend is configured for simulated behavior.";
 
   return (
     <div className="mode-indicator">
       <div>
         <div className="eyebrow">Execution Mode</div>
         <div className="mode-indicator__value">{mode}</div>
-        <div className="muted">Frontend is configured for simulated behavior.</div>
+        <div className="muted">{modeDetail}</div>
         {brokerAuth ? (
           <div className="mode-indicator__substatus">
             <div className="eyebrow">Broker Auth</div>
