@@ -10,9 +10,9 @@ export function ModeIndicator({ mode }: ModeIndicatorProps) {
       <div>
         <div className="eyebrow">Execution Mode</div>
         <div className="mode-indicator__value">{mode}</div>
+        <div className="muted">Frontend is configured for simulated behavior.</div>
       </div>
-      <StatusBadge label={mode} tone={mode === "DEMO" ? "positive" : "negative"} />
+      <StatusBadge label={mode === "DEMO" ? "Simulated" : "Live Account"} tone={mode === "DEMO" ? "warning" : "neutral"} />
     </div>
   );
 }
-

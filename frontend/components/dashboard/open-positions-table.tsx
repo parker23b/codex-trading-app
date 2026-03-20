@@ -64,7 +64,7 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
 
   const handleClose = (id: number, instrument: string) => {
     setRows((current) => current.map((row) => (row.id === id ? { ...row, closed: true } : row)));
-    setMessage(`Close request queued for ${formatInstrumentLabel(instrument)}.`);
+    setMessage(`Simulated close queued for ${formatInstrumentLabel(instrument)}.`);
   };
 
   const handleOverrideToggle = (id: number) => {
@@ -84,10 +84,10 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
           <tr>
             <th>Instrument</th>
             <th>Strategy</th>
-            <th>Time In Trade</th>
+            <th>Duration</th>
             <th>PnL</th>
             <th>Risk</th>
-            <th>Manual</th>
+            <th>Override</th>
             <th>Action</th>
           </tr>
         </thead>
@@ -97,7 +97,7 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
               <td>
                 <div className="cell-stack">
                   <strong>{formatInstrumentLabel(position.instrument)}</strong>
-                  <span className="muted">{position.direction} {position.size} @ {formatCurrency(position.open_price)}</span>
+                  <span className="muted">{position.direction} {position.size} at {formatCurrency(position.open_price)}</span>
                 </div>
               </td>
               <td>
@@ -129,12 +129,12 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
                     checked={Boolean(position.manual_override)}
                     onChange={() => handleOverrideToggle(position.id)}
                   />
-                  <span>{position.manual_override ? "On" : "Off"}</span>
+                  <span>{position.manual_override ? "Sim On" : "Sim Off"}</span>
                 </label>
               </td>
               <td>
                 <button className="button secondary table-action" onClick={() => handleClose(position.id, position.instrument)}>
-                  Close
+                  Sim Close
                 </button>
               </td>
             </tr>

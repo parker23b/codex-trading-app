@@ -15,6 +15,8 @@ type KpiBarProps = {
   openRiskPercent: number;
   winRate: number;
   riskRewardRatio: number;
+  sampleSize: number;
+  sessionLabel: string;
 };
 
 export function KpiBar({
@@ -25,18 +27,20 @@ export function KpiBar({
   openRiskPercent,
   winRate,
   riskRewardRatio,
+  sampleSize,
+  sessionLabel,
 }: KpiBarProps) {
   const metrics: DecisionMetric[] = [
     {
       label: "Account Value",
       value: formatCurrency(accountValue),
-      context: `${formatSignedPercent(accountChangePercent)} today`,
+      context: `${formatSignedPercent(accountChangePercent)} total`,
       tone: accountChangePercent >= 0 ? "positive" : "negative",
     },
     {
-      label: "Daily PnL",
+      label: "Session PnL",
       value: formatSignedCurrency(dailyPnl),
-      context: `${formatSignedPercent(dailyPnlPercent)} session move`,
+      context: `${formatSignedPercent(dailyPnlPercent)} on ${sessionLabel}`,
       tone: dailyPnl >= 0 ? "positive" : "negative",
     },
     {
@@ -48,13 +52,13 @@ export function KpiBar({
     {
       label: "Win Rate",
       value: `${Math.round(winRate)}%`,
-      context: "Last 30 trades",
+      context: `Last ${sampleSize} trades`,
       tone: winRate >= 55 ? "positive" : winRate >= 45 ? "warning" : "negative",
     },
     {
       label: "Risk / Reward",
       value: `${riskRewardRatio.toFixed(2)}R`,
-      context: riskRewardRatio >= 1.5 ? "Healthy expectancy" : "Needs review",
+      context: `Last ${sampleSize} trades`,
       tone: riskRewardRatio >= 1.5 ? "positive" : "warning",
     },
   ];
@@ -71,4 +75,3 @@ export function KpiBar({
     </section>
   );
 }
-

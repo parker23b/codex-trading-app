@@ -12,7 +12,7 @@ export function SegmentedControl<T extends string>({
   onChange,
 }: SegmentedControlProps<T>) {
   return (
-    <div className="segmented-control" role="tablist" aria-label="Time filter">
+    <div className="segmented-control" role="tablist" aria-label="Recent trade window">
       {options.map((option) => (
         <button
           type="button"
@@ -26,4 +26,3 @@ export function SegmentedControl<T extends string>({
     </div>
   );
 }
-

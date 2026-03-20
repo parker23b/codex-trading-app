@@ -15,7 +15,11 @@ export default async function DashboardPage() {
     getBackendMode(),
   ]);
 
-  const closedPnl = trades.reduce((sum, trade) => sum + trade.pnl, 0);
+  const sortedTrades = trades
+    .slice()
+    .sort((left, right) => new Date(right.close_time).getTime() - new Date(left.close_time).getTime());
+
+  const closedPnl = sortedTrades.reduce((sum, trade) => sum + trade.pnl, 0);
   const longExposure = positions
     .filter((position) => position.direction === "BUY")
     .reduce((sum, position) => sum + position.open_price * position.size, 0);
@@ -23,7 +27,8 @@ export default async function DashboardPage() {
     .filter((position) => position.direction === "SELL")
     .reduce((sum, position) => sum + position.open_price * position.size, 0);
   const openExposure = longExposure + shortExposure;
-  const trailingTrades = trades.slice(0, 30);
+  const trailingTrades = sortedTrades.slice(0, 30);
+  const latestSessionKey = trailingTrades[0]?.close_time.slice(0, 10) ?? null;
   const winRate = trailingTrades.length
     ? (trailingTrades.filter((trade) => trade.pnl > 0).length / trailingTrades.length) * 100
     : 0;
@@ -35,7 +40,11 @@ export default async function DashboardPage() {
       Math.max(trailingTrades.filter((trade) => trade.pnl < 0).length, 1);
   const riskRewardRatio = averageLoss === 0 ? averageWin : averageWin / averageLoss;
   const accountValue = 100000 + closedPnl;
-  const dailyPnl = trades.slice(0, 3).reduce((sum, trade) => sum + trade.pnl, 0);
+  const dailyPnl = latestSessionKey
+    ? trailingTrades
+        .filter((trade) => trade.close_time.slice(0, 10) === latestSessionKey)
+        .reduce((sum, trade) => sum + trade.pnl, 0)
+    : 0;
   const dailyPnlPercent = (dailyPnl / 100000) * 100;
   const accountChangePercent = (closedPnl / 100000) * 100;
   const openRiskPercent = positions.reduce((sum, position) => sum + (position.risk_percent ?? 0), 0);
@@ -51,7 +60,7 @@ export default async function DashboardPage() {
       const nextValue = Number((previous + trade.pnl).toFixed(2));
       const peak = Math.max(...series.map((point) => point.value), 100000, nextValue);
       series.push({
-        label: `T${index + 1}`,
+        label: new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(new Date(trade.close_time)),
         value: nextValue,
         drawdown: Number((((peak - nextValue) / peak) * 100).toFixed(2)),
       });
@@ -68,7 +77,6 @@ export default async function DashboardPage() {
 
   return (
     <main className="dashboard-layout">
-      {/* The top bar answers "What mode am I in, and is performance or risk changing right now?" */}
       <section className="top-command-bar">
         <ModeIndicator mode={mode} />
         <KpiBar
@@ -79,12 +87,17 @@ export default async function DashboardPage() {
           openRiskPercent={openRiskPercent}
           winRate={winRate}
           riskRewardRatio={riskRewardRatio}
+          sampleSize={trailingTrades.length}
+          sessionLabel={latestSessionKey ? new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(new Date(latestSessionKey)) : "Latest session"}
         />
       </section>
       <section className="command-grid">
         <div className="command-grid__main">
-          {/* Performance lives separate from live positions so review and execution stay mentally distinct. */}
-          <EquityPanel points={equityCurve.length ? equityCurve : [{ label: "T1", value: 100000, drawdown: 0 }]} latestValue={accountValue} delta={dailyPnl} />
+          <EquityPanel
+            points={equityCurve.length ? equityCurve : [{ label: "T1", value: 100000, drawdown: 0 }]}
+            latestValue={accountValue}
+            delta={dailyPnl}
+          />
         </div>
         <div className="command-grid__side">
           <RiskPanel
@@ -97,10 +110,8 @@ export default async function DashboardPage() {
       </section>
       <section className="command-grid">
         <div className="command-grid__main">
-          <Card
-            title="Open Positions"
-            subtitle="Live state and direct intervention live together here so you can act without leaving the book."
-          >
+          <Card title="Open Positions" subtitle="Current exposure and controls.">
+            <div className="status-note">Demo actions only. Close and override changes stay in the UI and do not send orders.</div>
             <OpenPositionsTable positions={positions} />
             {backendMode === "dev-fallback" ? (
               <div className="status-note">Displaying sample positions because the backend is offline.</div>
@@ -116,8 +127,8 @@ export default async function DashboardPage() {
         </div>
       </section>
       <section className="page-grid">
-        <Card title="Recent Trades" subtitle="Historical outcomes are separated from live state so review doesn’t interfere with execution.">
-          <RecentTradesTable trades={trades.slice(0, 10)} />
+        <Card title="Recent Trades" subtitle="Latest closed trades.">
+          <RecentTradesTable trades={sortedTrades.slice(0, 10)} />
           {backendMode === "dev-fallback" ? (
             <div className="status-note">Displaying sample trades because the backend is offline.</div>
           ) : null}

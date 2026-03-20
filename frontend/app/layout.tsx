@@ -61,7 +61,7 @@ export default async function RootLayout({
               </svg>
               <div>
                 <h1>Investmate</h1>
-                <p className="muted">Smart investing. Made simple.</p>
+                <p className="muted">Clear trading overview.</p>
               </div>
             </div>
             <nav>

@@ -6,7 +6,7 @@ import { Card } from "@/components/ui/card";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { formatCurrency, formatSignedCurrency } from "@/lib/format";
 
-type TimeFilter = "1D" | "1W" | "1M" | "ALL";
+type TimeFilter = "6 Trades" | "10 Trades" | "16 Trades" | "All";
 
 type EquityPoint = {
   label: string;
@@ -36,16 +36,16 @@ function buildLine(points: EquityPoint[], width: number, height: number, padding
 }
 
 export function EquityPanel({ points, latestValue, delta }: EquityPanelProps) {
-  const [filter, setFilter] = useState<TimeFilter>("1W");
+  const [filter, setFilter] = useState<TimeFilter>("10 Trades");
 
   const filteredPoints = useMemo(() => {
-    if (filter === "ALL") {
+    if (filter === "All") {
       return points;
     }
-    const counts: Record<Exclude<TimeFilter, "ALL">, number> = {
-      "1D": 6,
-      "1W": 10,
-      "1M": 16,
+    const counts: Record<Exclude<TimeFilter, "All">, number> = {
+      "6 Trades": 6,
+      "10 Trades": 10,
+      "16 Trades": 16,
     };
     return points.slice(-counts[filter]);
   }, [filter, points]);
@@ -58,9 +58,9 @@ export function EquityPanel({ points, latestValue, delta }: EquityPanelProps) {
 
   return (
     <Card
-      title="Performance & Drawdown"
-      subtitle="Answering the first question quickly: am I making money, and what did I endure to make it?"
-      action={<SegmentedControl options={["1D", "1W", "1M", "ALL"]} value={filter} onChange={setFilter} />}
+      title="Performance"
+      subtitle="Recent equity and drawdown by closed trade."
+      action={<SegmentedControl options={["6 Trades", "10 Trades", "16 Trades", "All"]} value={filter} onChange={setFilter} />}
       className="equity-panel"
     >
       <div className="equity-panel__summary">
@@ -90,4 +90,3 @@ export function EquityPanel({ points, latestValue, delta }: EquityPanelProps) {
     </Card>
   );
 }
-

@@ -20,14 +20,11 @@ export function RiskAllocationPanel({
   const totalDirectional = Math.max(longExposure + shortExposure, 1);
 
   return (
-    <Card
-      title="Risk Allocation"
-      subtitle="Insight over inventory: where is the book leaning, and how concentrated is that risk?"
-    >
+    <Card title="Allocation" subtitle="Directional split and position sizing.">
       <div className="allocation-split">
         <div className="allocation-split__row">
           <div className="allocation-split__meta">
-            <span>Long vs Short</span>
+            <span>Gross Long vs Short</span>
             <span>{formatPercent((longExposure / totalDirectional) * 100)} / {formatPercent((shortExposure / totalDirectional) * 100)}</span>
           </div>
           <div className="allocation-split__track">
@@ -36,6 +33,7 @@ export function RiskAllocationPanel({
           </div>
         </div>
       </div>
+      <div className="status-note">Allocation uses gross exposure share, so a balanced book can still be large overall.</div>
       <div className="bar-chart">
         {allocations.map((allocation) => (
           <div className="bar-row" key={allocation.instrument}>
@@ -52,4 +50,3 @@ export function RiskAllocationPanel({
     </Card>
   );
 }
-

@@ -25,7 +25,7 @@ export function RiskPanel({
   concentration,
   drawdown,
 }: RiskPanelProps) {
-  const overall = getRiskTone(Math.max(capitalAtRisk, concentration, drawdown), 4, 7);
+  const overall = getRiskTone(Math.max(capitalAtRisk, largestPosition, concentration, drawdown), 4, 7);
   const items = [
     { label: "Capital At Risk", value: capitalAtRisk, thresholds: [2, 4] as const },
     { label: "Largest Position", value: largestPosition, thresholds: [15, 25] as const },
@@ -35,8 +35,8 @@ export function RiskPanel({
 
   return (
     <Card
-      title="Risk Panel"
-      subtitle="This stays visible so you can judge whether to press, protect, or reduce risk."
+      title="Risk"
+      subtitle="Main portfolio risk checks for the current book."
       action={<StatusBadge label={overall.label} tone={overall.tone} />}
       className="risk-panel"
     >
@@ -57,4 +57,3 @@ export function RiskPanel({
     </Card>
   );
 }
-
