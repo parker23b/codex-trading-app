@@ -79,3 +79,44 @@ export type DashboardSnapshot = {
     lastPrice?: number | null;
   }[];
 };
+
+export type MarketCategory = "forex" | "indices" | "commodities" | "stocks" | "crypto";
+
+export type MarketStatus = "OPEN" | "CLOSED" | "LIMITED";
+
+export type ActivityLevel = "LOW" | "MEDIUM" | "HIGH";
+
+export type MarketInstrument = {
+  id: string;
+  category: MarketCategory;
+  name: string;
+  symbol: string;
+  status: MarketStatus;
+  tradable: boolean;
+  active: boolean;
+  activityLevel: ActivityLevel;
+  strategyCompatibility: string[];
+  price: number;
+  changePercent: number;
+  sessionNote?: string;
+};
+
+export type MarketSummary = {
+  category: MarketCategory;
+  label: string;
+  description: string;
+  status: MarketStatus;
+  headline: string;
+  detail: string;
+  nextTransitionAt: string;
+  nextTransitionLabel: string;
+  tradableCount: number;
+  activeCount: number;
+  totalCount: number;
+};
+
+export type MarketOverviewResponse = {
+  generatedAt: string;
+  summaries: MarketSummary[];
+  instruments: Record<MarketCategory, MarketInstrument[]>;
+};

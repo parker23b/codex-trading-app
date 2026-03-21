@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import Link from "next/link";
 
+import { AppNav } from "@/components/app-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { getBackendMode } from "@/lib/api";
 
@@ -91,14 +91,7 @@ export default async function RootLayout({
                 <p className="muted">Smart investing. Made simple.</p>
               </div>
             </div>
-            <nav>
-              <Link href="/" className="nav-link">
-                Dashboard
-              </Link>
-              <Link href="/strategies" className="nav-link">
-                Strategies
-              </Link>
-            </nav>
+            <AppNav />
           </header>
           {backendMode === "dev-fallback" ? (
             <div className="dev-banner">
