@@ -140,35 +140,238 @@ Recommended progression:
 
 ## Environment Variables
 
-### Backend
+The backend loads variables from `backend/.env`. The frontend loads variables from `frontend/.env.local`.
 
-Documented in [backend/.env.example](/Users/benparker/Documents/repos/codex-trading-app/backend/.env.example).
+Reference files:
 
-Important settings:
+- [backend/.env.example](/Users/benparker/Documents/repos/codex-trading-app/backend/.env.example)
+- [frontend/.env.example](/Users/benparker/Documents/repos/codex-trading-app/frontend/.env.example)
+
+### Backend Example
+
+```env
+APP_NAME=Algo Trading Platform API
+APP_ENV=development
+APP_HOST=0.0.0.0
+APP_PORT=8000
+LOG_LEVEL=INFO
+DATABASE_URL=sqlite:///./trading_platform.db
+BROKER_PROVIDER=IG
+BROKER_MODE=DEMO
+CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+SIMULATION_MODE=true
+SIMULATION_SEED=20260320
+STARTING_ACCOUNT_VALUE=100000
+DASHBOARD_RECENT_TRADE_WINDOW=30
+MARKET_DATA_POLL_INTERVAL_SECONDS=2
+IG_API_KEY=
+IG_USERNAME=
+IG_PASSWORD=
+IG_ACCOUNT_ID=
+IG_API_BASE_URL=https://demo-api.ig.com/gateway/deal
+IG_REQUEST_TIMEOUT_SECONDS=10
+IG_TRADING_ENABLED=false
+IG_MARKET_CACHE_TTL_SECONDS=30
+IG_MARKET_CACHE_STALE_TTL_SECONDS=300
+IG_VERIFY_SSL=true
+IG_CA_BUNDLE_PATH=
+```
+
+### Backend Variable Reference
+
+- `APP_NAME`
+  Example: `Algo Trading Platform API`
+  Meaning: Human-readable app name used by FastAPI metadata and logs.
+  Change it when: You want the API title or deployment branding to differ.
+
+- `APP_ENV`
+  Example: `development`
+  Meaning: General environment label for the app. It is not heavily branched on yet, but it is useful for deployment conventions and logging.
+  Common values: `development`, `staging`, `production`.
+
+- `APP_HOST`
+  Example: `0.0.0.0`
+  Meaning: Intended bind host for the backend process.
+  Change it when: Running the app behind a specific host binding. Note that `uvicorn app.main:app --reload` still needs matching CLI flags if you want to bind somewhere else.
+
+- `APP_PORT`
+  Example: `8000`
+  Meaning: Intended backend port.
+  Change it when: You want the API on a different port. As with `APP_HOST`, your process launcher must actually use that port.
+
+- `LOG_LEVEL`
+  Example: `INFO`
+  Meaning: Root log verbosity used by [backend/app/core/logging.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/logging.py).
+  Common values: `DEBUG`, `INFO`, `WARNING`, `ERROR`.
 
 - `DATABASE_URL`
-  Defaults to SQLite for zero-config local boot.
-- `SIMULATION_MODE`
-  Switches between synthetic market flow and broker-backed polling.
-- `SIMULATION_SEED`
-  Makes simulated behavior reproducible.
-- `STARTING_ACCOUNT_VALUE`
-  Baseline used by dashboard calculations.
-- `MARKET_DATA_POLL_INTERVAL_SECONDS`
-  Poll interval for live broker price updates.
+  Example: `sqlite:///./trading_platform.db`
+  Meaning: SQLModel/SQLAlchemy connection string.
+  Local default: SQLite file inside `backend/`.
+  Production-style example: `postgresql+psycopg://user:password@localhost:5432/trading_platform`
+  Change it when: Moving from local development to a real database.
+
+- `BROKER_PROVIDER`
+  Example: `IG`
+  Meaning: Broker implementation selected by the broker factory.
+  Allowed values today: `IG`
+  Change it when: Only if a new broker adapter is added.
+
 - `BROKER_MODE`
-  `DEMO` or `LIVE`.
-- `IG_*`
-  IG credentials, endpoint, SSL, timeout, and trading toggle.
+  Example: `DEMO`
+  Meaning: Tells the broker adapter whether it should behave as demo or live account infrastructure.
+  Allowed values: `DEMO`, `LIVE`
+  Change it when: Switching from paper/demo usage to a real account environment.
 
-### Frontend
+- `CORS_ORIGINS`
+  Example: `http://localhost:3000,http://127.0.0.1:3000`
+  Meaning: Comma-separated list of browser origins allowed to call the backend.
+  Change it when: Adding deployed frontend URLs or alternate local ports.
 
-Documented in [frontend/.env.example](/Users/benparker/Documents/repos/codex-trading-app/frontend/.env.example).
+- `SIMULATION_MODE`
+  Example: `true`
+  Meaning: Enables synthetic market generation instead of live broker polling.
+  `true`: backend bootstraps demo state, seeded strategies, and simulated prices.
+  `false`: backend uses broker-backed market data and reconciliation.
+  Important: Cannot be `true` while `IG_TRADING_ENABLED=true`.
+
+- `SIMULATION_SEED`
+  Example: `20260320`
+  Meaning: Seed for the pseudo-random simulator.
+  Change it when: You want different but still repeatable simulation behavior.
+
+- `STARTING_ACCOUNT_VALUE`
+  Example: `100000`
+  Meaning: Baseline account value used by dashboard calculations in simulation mode and as a reference for account change percentages.
+  Change it when: You want the demo account to represent a different starting capital base.
+
+- `DASHBOARD_RECENT_TRADE_WINDOW`
+  Example: `30`
+  Meaning: Number of recent trades used for dashboard metrics such as win rate and risk/reward.
+  Change it when: You want a shorter or longer rolling performance window.
+
+- `MARKET_DATA_POLL_INTERVAL_SECONDS`
+  Example: `2`
+  Meaning: Interval for live broker price polling when simulation mode is off.
+  Change it when: Tuning responsiveness versus broker/API load.
+  Constraint: Must be greater than `0`.
+
+- `IG_API_KEY`
+  Example: `abc123demoapikey`
+  Meaning: IG REST API key used during authentication.
+  Change it when: Rotating credentials or switching accounts/environments.
+  Note: Leave blank in pure simulation mode.
+
+- `IG_USERNAME`
+  Example: `demo.user@example.com`
+  Meaning: IG account username used for session creation.
+  Change it when: Using a different IG account.
+
+- `IG_PASSWORD`
+  Example: `super-secret-password`
+  Meaning: IG account password used for session creation.
+  Change it when: Rotating or replacing IG credentials.
+  Note: Treat this as a secret and do not commit real values.
+
+- `IG_ACCOUNT_ID`
+  Example: `ABC123`
+  Meaning: IG account identifier selected after login.
+  Change it when: Switching between demo/live or between different IG sub-accounts.
+
+- `IG_API_BASE_URL`
+  Example: `https://demo-api.ig.com/gateway/deal`
+  Meaning: Base URL for IG REST calls.
+  Demo example: `https://demo-api.ig.com/gateway/deal`
+  Live example: IG live dealing endpoint for your live environment.
+  Change it when: Switching between demo and live APIs or when IG changes endpoints.
+
+- `IG_REQUEST_TIMEOUT_SECONDS`
+  Example: `10`
+  Meaning: Timeout used for IG HTTP requests.
+  Change it when: Your network is slow or you want faster failure on upstream issues.
+
+- `IG_TRADING_ENABLED`
+  Example: `false`
+  Meaning: Safety switch for real order placement and close requests.
+  `false`: order actions are simulated locally in the IG adapter.
+  `true`: the adapter is allowed to hit live IG dealing endpoints.
+  Recommended default: keep this `false` until you have verified auth, positions, and market reads.
+
+- `IG_MARKET_CACHE_TTL_SECONDS`
+  Example: `30`
+  Meaning: Fresh-cache lifetime for IG market detail responses.
+  Change it when: You want fewer upstream calls or fresher market snapshots.
+  Constraint: Must be greater than `0`.
+
+- `IG_MARKET_CACHE_STALE_TTL_SECONDS`
+  Example: `300`
+  Meaning: Maximum age for stale IG market data that can still be reused after an upstream failure.
+  Change it when: You want a shorter stale window for stricter freshness, or a longer one for resilience.
+  Constraint: Must be greater than `0`.
+
+- `IG_VERIFY_SSL`
+  Example: `true`
+  Meaning: Controls SSL certificate verification for IG HTTPS requests.
+  Recommended value: `true`
+  Change it when: Only for local troubleshooting if your Python trust store is broken.
+
+- `IG_CA_BUNDLE_PATH`
+  Example: `/etc/ssl/certs/ca-certificates.crt`
+  Meaning: Optional path to a custom CA bundle for IG HTTPS verification.
+  Change it when: Your environment requires a non-default trust store.
+
+### Frontend Example
+
+```env
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+NEXT_PUBLIC_ENABLE_DEV_FALLBACK=true
+```
+
+### Frontend Variable Reference
 
 - `NEXT_PUBLIC_API_BASE_URL`
-  Backend base URL, defaults to `http://localhost:8000`.
+  Example: `http://localhost:8000`
+  Meaning: Base URL used by [frontend/lib/api.ts](/Users/benparker/Documents/repos/codex-trading-app/frontend/lib/api.ts) for all backend requests.
+  Change it when: The backend runs on another host, port, or deployed domain.
+
 - `NEXT_PUBLIC_ENABLE_DEV_FALLBACK`
-  Enables frontend mock fallback when the backend is unreachable in development.
+  Example: `true`
+  Meaning: Enables development-only fallback data when the backend cannot be reached.
+  `true`: dashboard, strategies, and markets can render with mock data in development.
+  `false`: frontend fails fast instead of falling back.
+  Change it when: You want to force the UI to use the real backend during local development.
+
+### Recommended Config Sets
+
+Local simulation:
+
+```env
+DATABASE_URL=sqlite:///./trading_platform.db
+SIMULATION_MODE=true
+BROKER_MODE=DEMO
+IG_TRADING_ENABLED=false
+```
+
+Local IG demo connectivity without real dealing:
+
+```env
+SIMULATION_MODE=false
+BROKER_MODE=DEMO
+IG_API_KEY=your-demo-api-key
+IG_USERNAME=your-demo-username
+IG_PASSWORD=your-demo-password
+IG_ACCOUNT_ID=your-demo-account-id
+IG_API_BASE_URL=https://demo-api.ig.com/gateway/deal
+IG_TRADING_ENABLED=false
+IG_VERIFY_SSL=true
+```
+
+Frontend strict real-backend mode:
+
+```env
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+NEXT_PUBLIC_ENABLE_DEV_FALLBACK=false
+```
 
 ## Codebase Tour
 
