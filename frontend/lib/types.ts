@@ -120,3 +120,9 @@ export type MarketOverviewResponse = {
   summaries: MarketSummary[];
   instruments: Record<MarketCategory, MarketInstrument[]>;
 };
+
+export type MarketCategoryOverviewResponse = {
+  generatedAt: string;
+  summary: MarketSummary;
+  instruments: MarketInstrument[];
+};

@@ -17,6 +17,14 @@ export function InstrumentsTable({ instruments, starredIds, onToggleStar }: Inst
   return (
     <div className="table-shell">
       <table className="table analysis-table markets-table">
+        <colgroup>
+          <col className="markets-table__col markets-table__col--instrument" />
+          <col className="markets-table__col markets-table__col--status" />
+          <col className="markets-table__col markets-table__col--tradable" />
+          <col className="markets-table__col markets-table__col--activity" />
+          <col className="markets-table__col markets-table__col--strategy" />
+          <col className="markets-table__col markets-table__col--price" />
+        </colgroup>
         <thead>
           <tr>
             <th>Instrument</th>

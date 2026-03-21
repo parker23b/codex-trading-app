@@ -1,23 +1,31 @@
 "use client";
 
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { MarketCategory, MarketSummary } from "@/lib/types";
+import { MarketCategory } from "@/lib/types";
 
 type MarketSelectorProps = {
-  summaries: MarketSummary[];
+  categories: MarketCategory[];
   selectedCategory: MarketCategory;
   onSelect: (category: MarketCategory) => void;
 };
 
-export function MarketSelector({ summaries, selectedCategory, onSelect }: MarketSelectorProps) {
+const marketLabels: Record<MarketCategory, string> = {
+  forex: "Forex",
+  indices: "Indices",
+  commodities: "Commodities",
+  stocks: "Stocks",
+  crypto: "Crypto",
+};
+
+export function MarketSelector({ categories, selectedCategory, onSelect }: MarketSelectorProps) {
   return (
     <div className="market-selector">
       <SegmentedControl
-        options={summaries.map((summary) => summary.category)}
+        options={categories}
         value={selectedCategory}
         onChange={onSelect}
         ariaLabel="Market category"
-        renderLabel={(category) => summaries.find((summary) => summary.category === category)?.label ?? category}
+        renderLabel={(category) => marketLabels[category]}
       />
     </div>
   );

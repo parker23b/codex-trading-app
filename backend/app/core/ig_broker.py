@@ -15,12 +15,14 @@ from app.core.broker import (
     AccountType,
     Broker,
     BrokerAccountSummary,
+    BrokerMarketDetails,
     BrokerOrderResult,
     BrokerPosition,
     OrderDirection,
     OrderRequest,
     now_utc,
 )
+from app.core.config import get_settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -32,6 +34,12 @@ class IGSession:
     security_token: str
     current_account_id: str | None
     lightstreamer_endpoint: str | None
+
+
+@dataclass(slots=True)
+class CachedMarketDetails:
+    details: BrokerMarketDetails
+    fetched_at: float
 
 
 class IGBrokerError(RuntimeError):
@@ -71,9 +79,12 @@ class IGBroker(Broker):
         self._trading_enabled = trading_enabled
         self._verify_ssl = verify_ssl
         self._ca_bundle_path = ca_bundle_path
+        self._market_cache_ttl_seconds = get_settings().ig_market_cache_ttl_seconds
+        self._market_cache_stale_ttl_seconds = get_settings().ig_market_cache_stale_ttl_seconds
         self._positions: dict[str, BrokerPosition] = {}
         self._deal_references_by_instrument: dict[str, str] = {}
         self._last_prices: dict[str, float] = {}
+        self._market_details_cache: dict[str, CachedMarketDetails] = {}
         self._account_currency: str | None = None
         self._session: IGSession | None = None
 
@@ -209,23 +220,16 @@ class IGBroker(Broker):
         return positions
 
     def get_latest_price(self, instrument: str) -> float:
-        self._ensure_authenticated()
-        payload = self._request("GET", f"/markets/{instrument}", version="4")
-        snapshot = payload.get("snapshot", {})
-        bid = self._coerce_float(snapshot.get("bid"))
-        offer = self._coerce_float(snapshot.get("offer"))
-        high = self._coerce_float(snapshot.get("high"))
-        low = self._coerce_float(snapshot.get("low"))
-
+        details = self.get_market_details(instrument)
         price: float | None = None
-        if bid is not None and offer is not None:
-            price = round((bid + offer) / 2, 5)
-        elif bid is not None:
-            price = bid
-        elif offer is not None:
-            price = offer
-        elif high is not None and low is not None:
-            price = round((high + low) / 2, 5)
+        if details.bid is not None and details.offer is not None:
+            price = round((details.bid + details.offer) / 2, 5)
+        elif details.bid is not None:
+            price = details.bid
+        elif details.offer is not None:
+            price = details.offer
+        elif details.high is not None and details.low is not None:
+            price = round((details.high + details.low) / 2, 5)
         elif instrument in self._last_prices:
             price = self._last_prices[instrument]
         elif instrument in self._positions:
@@ -236,6 +240,49 @@ class IGBroker(Broker):
 
         self._last_prices[instrument] = price
         return price
+
+    def get_market_details(self, instrument: str) -> BrokerMarketDetails:
+        cached = self._market_details_cache.get(instrument)
+        if cached is not None and self._is_cache_fresh(cached):
+            return cached.details
+
+        self._ensure_authenticated()
+        try:
+            payload = self._request("GET", f"/markets/{instrument}", version="4")
+        except IGBrokerError as exc:
+            if cached is not None and self._is_cache_still_usable(cached) and self._should_fallback_to_stale_market_details(exc):
+                logger.warning(
+                    "Using stale IG market cache after upstream error",
+                    extra={"instrument": instrument, "error": str(exc)},
+                )
+                return cached.details
+            raise
+        instrument_data = payload.get("instrument", {})
+        snapshot = payload.get("snapshot", {})
+        dealing_rules = payload.get("dealingRules", {})
+        bid = self._coerce_float(snapshot.get("bid"))
+        offer = self._coerce_float(snapshot.get("offer"))
+        high = self._coerce_float(snapshot.get("high"))
+        low = self._coerce_float(snapshot.get("low"))
+        market_status = snapshot.get("marketStatus")
+        market_order_preference = str(dealing_rules.get("marketOrderPreference") or "").upper()
+        tradable = market_status in {"TRADEABLE", "TRADEABLE_ONLINE"} and market_order_preference != "NOT_AVAILABLE"
+
+        details = BrokerMarketDetails(
+            instrument=instrument,
+            name=instrument_data.get("name") or instrument,
+            bid=bid,
+            offer=offer,
+            high=high,
+            low=low,
+            percentage_change=self._coerce_float(snapshot.get("percentageChange")),
+            net_change=self._coerce_float(snapshot.get("netChange")),
+            market_status=market_status,
+            update_time=snapshot.get("updateTime"),
+            tradable=tradable,
+        )
+        self._market_details_cache[instrument] = CachedMarketDetails(details=details, fetched_at=time.monotonic())
+        return details
 
     def get_account_summary(self) -> BrokerAccountSummary:
         self._ensure_authenticated()
@@ -530,3 +577,18 @@ class IGBroker(Broker):
         if account_type is AccountType.DEMO:
             return "https://demo-api.ig.com/gateway/deal"
         return "https://api.ig.com/gateway/deal"
+
+    def _is_cache_fresh(self, cached: CachedMarketDetails) -> bool:
+        return (time.monotonic() - cached.fetched_at) <= self._market_cache_ttl_seconds
+
+    def _is_cache_still_usable(self, cached: CachedMarketDetails) -> bool:
+        return (time.monotonic() - cached.fetched_at) <= self._market_cache_stale_ttl_seconds
+
+    @staticmethod
+    def _should_fallback_to_stale_market_details(error: IGBrokerError) -> bool:
+        message = str(error)
+        return (
+            "error.public-api.exceeded-api-key-allowance" in message
+            or "Unable to reach IG API" in message
+            or "status 5" in message
+        )

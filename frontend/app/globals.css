@@ -546,17 +546,20 @@ p {
   padding-bottom: 10px;
 }
 
-.table tbody tr {
+.table tbody td {
   background: color-mix(in srgb, var(--background) 88%, white 12%);
-  box-shadow: inset 0 0 0 1px var(--glassBorder);
+  border-top: 1px solid var(--glassBorder);
+  border-bottom: 1px solid var(--glassBorder);
 }
 
 .table tbody td:first-child {
+  border-left: 1px solid var(--glassBorder);
   border-top-left-radius: 12px;
   border-bottom-left-radius: 12px;
 }
 
 .table tbody td:last-child {
+  border-right: 1px solid var(--glassBorder);
   border-top-right-radius: 12px;
   border-bottom-right-radius: 12px;
 }
@@ -567,12 +570,51 @@ p {
 }
 
 .markets-table {
-  min-width: 920px;
+  width: 100%;
+  min-width: 940px;
+}
+
+.markets-table th,
+.markets-table td {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.markets-table th {
+  white-space: nowrap;
+}
+
+.markets-table__col--instrument {
+  width: 20%;
+}
+
+.markets-table__col--status,
+.markets-table__col--tradable,
+.markets-table__col--activity {
+  width: 10%;
+}
+
+.markets-table__col--strategy {
+  width: 38%;
+}
+
+.markets-table__col--price {
+  width: 12%;
+}
+
+.markets-table td:last-child,
+.markets-table th:last-child {
+  white-space: nowrap;
 }
 
 .analysis-table td:last-child {
   min-width: 280px;
   max-width: 42ch;
+}
+
+.markets-table.analysis-table td:last-child {
+  min-width: 0;
+  max-width: none;
 }
 
 .cell-stack {
@@ -1062,6 +1104,16 @@ p {
   display: flex;
   align-items: flex-start;
   gap: 10px;
+  min-width: 0;
+}
+
+.instrument-cell .cell-stack {
+  min-width: 0;
+}
+
+.instrument-cell strong,
+.instrument-cell .muted {
+  white-space: nowrap;
 }
 
 .star-button {

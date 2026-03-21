@@ -54,6 +54,21 @@ class BrokerAccountSummary:
     account_type: AccountType
 
 
+@dataclass(slots=True)
+class BrokerMarketDetails:
+    instrument: str
+    name: str
+    bid: float | None
+    offer: float | None
+    high: float | None
+    low: float | None
+    percentage_change: float | None
+    net_change: float | None
+    market_status: str | None
+    update_time: str | None
+    tradable: bool
+
+
 class Broker(ABC):
     """Execution contract implemented by concrete broker adapters."""
 
@@ -80,6 +95,10 @@ class Broker(ABC):
 
     @abstractmethod
     def get_account_summary(self) -> BrokerAccountSummary:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_market_details(self, instrument: str) -> BrokerMarketDetails:
         raise NotImplementedError
 
 

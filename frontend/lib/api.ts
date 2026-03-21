@@ -2,6 +2,7 @@ import {
   BrokerAuthStatus,
   DashboardSnapshot,
   MarketCategory,
+  MarketCategoryOverviewResponse,
   MarketInstrument,
   MarketOverviewResponse,
   MarketStatus,
@@ -15,6 +16,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8
 const DEV_FALLBACK_ENABLED =
   process.env.NODE_ENV !== "production" && process.env.NEXT_PUBLIC_ENABLE_DEV_FALLBACK !== "false";
 const REQUEST_TIMEOUT_MS = 1500;
+const MARKET_REQUEST_TIMEOUT_MS = 12000;
 
 type BackendMode = "live" | "dev-fallback";
 
@@ -734,10 +736,10 @@ function buildMarketOverview(now = new Date()): MarketOverviewResponse {
   };
 }
 
-async function fetchWithTimeout(input: string, init?: RequestInit): Promise<Response> {
+async function fetchWithTimeout(input: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
   return fetch(input, {
     ...init,
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   });
 }
 
@@ -754,7 +756,7 @@ async function isBackendReachable(): Promise<boolean> {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const response = await fetchWithTimeout(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
@@ -762,7 +764,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.headers ?? {}),
     },
     cache: "no-store",
-  });
+  }, init?.timeoutMs);
 
   if (!response.ok) {
     let detail: string | undefined;
@@ -855,12 +857,19 @@ export async function getStrategies(): Promise<StrategyDefinition[]> {
   }
 }
 
-export async function getMarketOverview(): Promise<MarketOverviewResponse> {
+export async function getMarketOverview(category: MarketCategory = "forex"): Promise<MarketCategoryOverviewResponse> {
   try {
-    return await request<MarketOverviewResponse>("/markets/overview");
+    return await request<MarketCategoryOverviewResponse>(`/markets/overview?category=${category}`, {
+      timeoutMs: MARKET_REQUEST_TIMEOUT_MS,
+    });
   } catch (error) {
     if (shouldUseFallback(error)) {
-      return buildMarketOverview();
+      const overview = buildMarketOverview();
+      return {
+        generatedAt: overview.generatedAt,
+        summary: overview.summaries.find((summary) => summary.category === category) ?? overview.summaries[0],
+        instruments: overview.instruments[category] ?? [],
+      };
     }
     throw error;
   }

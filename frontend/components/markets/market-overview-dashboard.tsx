@@ -1,18 +1,34 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { InstrumentsTable } from "@/components/markets/instruments-table";
 import { MarketSelector } from "@/components/markets/market-selector";
 import { MarketStatusCard } from "@/components/markets/market-status-card";
 import { Card } from "@/components/ui/card";
-import { MarketCategory, MarketOverviewResponse } from "@/lib/types";
+import { getMarketOverview } from "@/lib/api";
+import { MarketCategory, MarketCategoryOverviewResponse, MarketSummary } from "@/lib/types";
 
 type MarketOverviewDashboardProps = {
-  overview: MarketOverviewResponse;
+  initialOverview: MarketCategoryOverviewResponse;
 };
 
 const WATCHLIST_STORAGE_KEY = "trading-platform-market-watchlist";
+const MARKET_CATEGORIES: MarketCategory[] = ["forex", "indices", "commodities", "stocks", "crypto"];
+const MARKET_LABELS: Record<MarketCategory, string> = {
+  forex: "Forex",
+  indices: "Indices",
+  commodities: "Commodities",
+  stocks: "Stocks",
+  crypto: "Crypto",
+};
+const MARKET_DESCRIPTIONS: Record<MarketCategory, string> = {
+  forex: "Global currency pairs with session-aware strategy routing.",
+  indices: "Major benchmark contracts where directional and mean-reversion systems run.",
+  commodities: "Metals and energy products with tighter session maintenance windows.",
+  stocks: "Cash equities focused on the primary U.S. session.",
+  crypto: "Always-on digital assets with hourly risk throttles.",
+};
 
 function formatCountdown(targetIso: string) {
   const deltaMs = Math.max(0, new Date(targetIso).getTime() - Date.now());
@@ -22,13 +38,18 @@ function formatCountdown(targetIso: string) {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
-export function MarketOverviewDashboard({ overview }: MarketOverviewDashboardProps) {
-  const [selectedCategory, setSelectedCategory] = useState<MarketCategory>(overview.summaries[0]?.category ?? "forex");
+export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashboardProps) {
+  const [selectedCategory, setSelectedCategory] = useState<MarketCategory>("forex");
   const [search, setSearch] = useState("");
   const [showTradableOnly, setShowTradableOnly] = useState(false);
   const [showActiveOnly, setShowActiveOnly] = useState(false);
   const [starredIds, setStarredIds] = useState<string[]>([]);
   const [now, setNow] = useState(() => Date.now());
+  const [isPending, startTransition] = useTransition();
+  const [loadedMarkets, setLoadedMarkets] = useState<Partial<Record<MarketCategory, MarketCategoryOverviewResponse>>>({
+    forex: initialOverview,
+  });
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     const stored = window.localStorage.getItem(WATCHLIST_STORAGE_KEY);
@@ -51,11 +72,30 @@ export function MarketOverviewDashboard({ overview }: MarketOverviewDashboardPro
     return () => window.clearInterval(timer);
   }, []);
 
-  const selectedSummary = overview.summaries.find((summary) => summary.category === selectedCategory) ?? overview.summaries[0];
+  useEffect(() => {
+    if (loadedMarkets[selectedCategory]) {
+      return;
+    }
+
+    startTransition(() => {
+      getMarketOverview(selectedCategory)
+        .then((overview) => {
+          setLoadedMarkets((current) => ({ ...current, [selectedCategory]: overview }));
+          setLoadError(null);
+        })
+        .catch((error: unknown) => {
+          setLoadError(error instanceof Error ? error.message : "Failed to load market data.");
+        });
+    });
+  }, [loadedMarkets, selectedCategory]);
+
+  const selectedMarket = loadedMarkets[selectedCategory];
+  const selectedSummary = selectedMarket?.summary ?? buildPlaceholderSummary(selectedCategory);
+  const summaries = MARKET_CATEGORIES.map((category) => loadedMarkets[category]?.summary ?? buildPlaceholderSummary(category));
 
   const filteredInstruments = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
-    const rows = overview.instruments[selectedCategory] ?? [];
+    const rows = selectedMarket?.instruments ?? [];
 
     return rows
       .filter((instrument) => {
@@ -87,7 +127,7 @@ export function MarketOverviewDashboard({ overview }: MarketOverviewDashboardPro
         }
         return left.name.localeCompare(right.name);
       });
-  }, [overview.instruments, search, selectedCategory, showActiveOnly, showTradableOnly, starredIds]);
+  }, [search, selectedMarket?.instruments, showActiveOnly, showTradableOnly, starredIds]);
 
   const handleToggleStar = (instrumentId: string) => {
     setStarredIds((current) =>
@@ -105,11 +145,11 @@ export function MarketOverviewDashboard({ overview }: MarketOverviewDashboardPro
         <Card
           title="Market Readiness"
           subtitle="Use the market selector to see where strategies can operate right now, then narrow the instrument table to tradable, active names."
-          action={<MarketSelector summaries={overview.summaries} selectedCategory={selectedCategory} onSelect={setSelectedCategory} />}
+          action={<MarketSelector categories={MARKET_CATEGORIES} selectedCategory={selectedCategory} onSelect={setSelectedCategory} />}
         >
           {/* The strip gives an at-a-glance scan across categories before the operator commits to one table view. */}
           <div className="markets-summary-strip">
-            {overview.summaries.map((summary) => (
+            {summaries.map((summary) => (
               <button
                 type="button"
                 key={summary.category}
@@ -117,7 +157,7 @@ export function MarketOverviewDashboard({ overview }: MarketOverviewDashboardPro
                 onClick={() => setSelectedCategory(summary.category)}
               >
                 <span>{summary.label}</span>
-                <strong>{summary.tradableCount} tradable</strong>
+                <strong>{loadedMarkets[summary.category] ? `${summary.tradableCount} tradable` : "Load on demand"}</strong>
               </button>
             ))}
           </div>
@@ -164,6 +204,8 @@ export function MarketOverviewDashboard({ overview }: MarketOverviewDashboardPro
                 <div className="status-note status-note--inline">
                   Watchlist stars stay in local browser state so the operator can pin priority instruments without backend writes.
                 </div>
+                {isPending && !selectedMarket ? <div className="status-note status-note--inline">Loading {selectedSummary.label} market data…</div> : null}
+                {loadError && !selectedMarket ? <div className="status-note status-note--inline">{loadError}</div> : null}
               </div>
             </Card>
           </div>
@@ -176,13 +218,33 @@ export function MarketOverviewDashboard({ overview }: MarketOverviewDashboardPro
           subtitle="Starred instruments stay at the top so the page behaves like a market-readiness dashboard instead of a static reference table."
           className="card--table"
         >
-          <InstrumentsTable instruments={filteredInstruments} starredIds={starredIds} onToggleStar={handleToggleStar} />
+          {selectedMarket ? (
+            <InstrumentsTable instruments={filteredInstruments} starredIds={starredIds} onToggleStar={handleToggleStar} />
+          ) : (
+            <div className="empty-state">Loading {selectedSummary.label.toLowerCase()} instruments…</div>
+          )}
           <div className="status-note">
-            Snapshot refreshed from {new Date(overview.generatedAt).toLocaleString("en-GB")} and countdown updated at{" "}
+            Snapshot refreshed from {new Date((selectedMarket ?? initialOverview).generatedAt).toLocaleString("en-GB")} and countdown updated at{" "}
             {new Date(now).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}.
           </div>
         </Card>
       </section>
     </main>
   );
+}
+
+function buildPlaceholderSummary(category: MarketCategory): MarketSummary {
+  return {
+    category,
+    label: MARKET_LABELS[category],
+    description: MARKET_DESCRIPTIONS[category],
+    status: "LIMITED",
+    headline: "Load on demand",
+    detail: "This market will be fetched when selected.",
+    nextTransitionAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    nextTransitionLabel: "Opens",
+    tradableCount: 0,
+    activeCount: 0,
+    totalCount: 0,
+  };
 }

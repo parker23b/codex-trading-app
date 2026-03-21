@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     ig_api_base_url: str | None = None
     ig_request_timeout_seconds: float = 10.0
     ig_trading_enabled: bool = False
+    ig_market_cache_ttl_seconds: float = 30.0
+    ig_market_cache_stale_ttl_seconds: float = 300.0
     ig_verify_ssl: bool = True
     ig_ca_bundle_path: str | None = None
 
@@ -60,6 +62,13 @@ class Settings(BaseSettings):
     def validate_market_data_poll_interval_seconds(cls, value: float) -> float:
         if value <= 0:
             raise ValueError("MARKET_DATA_POLL_INTERVAL_SECONDS must be greater than 0.")
+        return value
+
+    @field_validator("ig_market_cache_ttl_seconds", "ig_market_cache_stale_ttl_seconds")
+    @classmethod
+    def validate_positive_ig_market_cache_ttls(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("IG market cache TTL settings must be greater than 0.")
         return value
 
 

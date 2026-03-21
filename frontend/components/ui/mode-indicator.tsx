@@ -8,9 +8,15 @@ type ModeIndicatorProps = {
 
 export function ModeIndicator({ mode, brokerAuth }: ModeIndicatorProps) {
   const brokerTone =
-    brokerAuth?.state === "connected" ? "live" : brokerAuth?.state === "disconnected" ? "negative" : "neutral";
+    brokerAuth?.state === "connected"
+      ? "live"
+      : brokerAuth?.state === "disconnected"
+        ? "negative"
+        : "neutral";
   const modeDetail =
-    mode === "LIVE" ? "Orders are pointed at the live environment." : "Frontend is configured for simulated behavior.";
+    mode === "LIVE"
+      ? "Orders are pointed at the live environment."
+      : "Frontend is configured for simulated behavior.";
 
   return (
     <div className="mode-indicator">
@@ -26,8 +32,13 @@ export function ModeIndicator({ mode, brokerAuth }: ModeIndicatorProps) {
         ) : null}
       </div>
       <div className="mode-indicator__badges">
-        <StatusBadge label={mode === "DEMO" ? "Simulated" : "Live Account"} tone={mode === "DEMO" ? "warning" : "neutral"} />
-        {brokerAuth ? <StatusBadge label={brokerAuth.label} tone={brokerTone} /> : null}
+        <StatusBadge
+          label={mode === "DEMO" ? "Demo Account" : "Live Account"}
+          tone={mode === "DEMO" ? "warning" : "neutral"}
+        />
+        {brokerAuth ? (
+          <StatusBadge label={brokerAuth.label} tone={brokerTone} />
+        ) : null}
       </div>
     </div>
   );
