@@ -1,37 +1,49 @@
 import asyncio
 import contextlib
+import secrets
 from contextlib import asynccontextmanager
 from time import perf_counter
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import Session
+from fastapi.responses import JSONResponse
 
 from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.db.init_db import initialize_database
-from app.db.session import engine
 from app.services.market_data_service import MarketDataService
-from app.services.simulation_service import simulation_service
 
 settings = get_settings()
 configure_logging(settings.log_level)
 logger = get_logger(__name__)
 
 
+def _requires_auth(path: str) -> bool:
+    if path.startswith("/strategy/"):
+        return True
+    if path.startswith("/broker"):
+        return True
+    if path.startswith("/strategies/") and (path.endswith("/start") or path.endswith("/stop")):
+        return True
+    return False
+
+
+def _extract_bearer_token(request: Request) -> str | None:
+    authorization = request.headers.get("Authorization")
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    return token.strip()
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     logger.info("Starting application")
-    if settings.ig_trading_enabled and settings.simulation_mode:
-        raise RuntimeError("IG_TRADING_ENABLED cannot be true while SIMULATION_MODE is enabled.")
-
     initialize_database()
-    market_data_task: asyncio.Task[None] | None = None
-    with Session(engine) as session:
-        simulation_service.bootstrap(session)
-    if not settings.simulation_mode:
-        market_data_task = asyncio.create_task(MarketDataService().run())
+    market_data_task: asyncio.Task[None] | None = asyncio.create_task(MarketDataService().run())
     yield
     if market_data_task is not None:
         market_data_task.cancel()
@@ -67,6 +79,19 @@ async def log_requests(request: Request, call_next):
         },
     )
     return response
+
+
+@app.middleware("http")
+async def enforce_auth(request: Request, call_next):
+    if not _requires_auth(request.url.path):
+        return await call_next(request)
+
+    configured_token = settings.api_auth_token
+    presented_token = _extract_bearer_token(request)
+    if not configured_token or not presented_token or not secrets.compare_digest(configured_token, presented_token):
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+    return await call_next(request)
 
 
 app.include_router(api_router)

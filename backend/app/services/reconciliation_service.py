@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from app.core.broker_factory import get_broker
 from app.core.logging import get_logger
 from app.core.runtime import runtime_manager
-from app.models.trade import Position
+from app.models.trade import Position, Trade
 from app.services.trade_service import TradeService
 
 logger = get_logger(__name__)
@@ -50,7 +52,35 @@ class ReconciliationService:
         for instrument, local_position in local_by_instrument.items():
             if instrument in remote_by_instrument:
                 continue
+            close_time = datetime.now(UTC)
+            close_price = local_position.current_price or local_position.open_price
+            pnl = self._calculate_reconciled_pnl(
+                direction=local_position.direction,
+                open_price=local_position.open_price,
+                close_price=close_price,
+                size=local_position.size,
+            )
+            trade = Trade(
+                strategy_name=local_position.strategy_name,
+                instrument=local_position.instrument,
+                direction=local_position.direction,
+                size=local_position.size,
+                open_price=local_position.open_price,
+                close_price=close_price,
+                open_time=local_position.open_time,
+                close_time=close_time,
+                pnl=pnl,
+                account_type=local_position.account_type,
+                outcome="win" if pnl > 0 else "loss",
+                reason="Position closed during reconciliation because it no longer exists at broker.",
+            )
+            self.trade_service.record_trade(trade)
             local_position.is_open = False
+            local_position.close_price = close_price
+            local_position.close_time = close_time
+            local_position.pnl = pnl
+            local_position.current_price = close_price
+            local_position.unrealized_pnl = 0.0
             self.trade_service.close_position(local_position)
             runtime_engine = runtime_manager.engines.get(instrument)
             if runtime_engine is not None:
@@ -61,3 +91,8 @@ class ReconciliationService:
             extra={"remote_positions": len(remote_positions), "local_positions": len(local_positions)},
         )
         return self.trade_service.list_positions()
+
+    @staticmethod
+    def _calculate_reconciled_pnl(*, direction: str, open_price: float, close_price: float, size: float) -> float:
+        multiplier = 1 if direction == "BUY" else -1
+        return (close_price - open_price) * size * multiplier

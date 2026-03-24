@@ -95,8 +95,7 @@ export default async function RootLayout({
           </header>
           {backendMode === "dev-fallback" ? (
             <div className="dev-banner">
-              Backend is not reachable, so the frontend is running in
-              development fallback mode with mock data.
+              Demo mode: backend is offline, so sample frontend data is being shown.
             </div>
           ) : null}
           {children}

@@ -15,11 +15,10 @@ class Settings(BaseSettings):
     broker_provider: str = "IG"
     broker_mode: str = "DEMO"
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000", "http://127.0.0.1:3000"]
-    simulation_mode: bool = True
-    simulation_seed: int = 20260320
     starting_account_value: float = 100_000.0
     dashboard_recent_trade_window: int = 30
     market_data_poll_interval_seconds: float = 2.0
+    api_auth_token: str | None = None
     ig_api_key: str | None = None
     ig_username: str | None = None
     ig_password: str | None = None
