@@ -81,7 +81,7 @@ class TradingEngine:
             pnl = self._calculate_pnl(
                 direction=OrderDirection(self.current_position.direction),
                 open_price=self.current_position.open_price,
-                close_price=update.price,
+                close_price=closed_order.price,
                 size=self.current_position.size,
             )
             trade = Trade(
@@ -90,14 +90,14 @@ class TradingEngine:
                 direction=self.current_position.direction,
                 size=self.current_position.size,
                 open_price=self.current_position.open_price,
-                close_price=update.price,
+                close_price=closed_order.price,
                 open_time=self.current_position.open_time,
                 close_time=closed_order.executed_at,
                 pnl=pnl,
                 account_type=self.current_position.account_type,
             )
             self.current_position.is_open = False
-            self.current_position.close_price = update.price
+            self.current_position.close_price = closed_order.price
             self.current_position.close_time = closed_order.executed_at
             self.current_position.pnl = pnl
             logger.info("Closed position", extra={"instrument": self.instrument, "pnl": pnl})

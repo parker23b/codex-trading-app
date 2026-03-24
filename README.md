@@ -4,7 +4,7 @@ Monorepo for a personal algorithmic trading platform with:
 
 - a FastAPI backend for strategy runtime, broker access, market snapshots, and portfolio data
 - a Next.js frontend for dashboard, market readiness, and strategy controls
-- a simulation mode that makes the product usable without live broker credentials
+- frontend-only demo fallback data when the backend is unavailable
 
 The codebase is structured so strategy logic stays isolated from HTTP, persistence, and broker-specific code. That separation is the main architectural idea in this repo.
 
@@ -19,12 +19,10 @@ Today the product exposes three main operator workflows:
 3. Strategies
    Start and stop registered strategies, review current PnL and win rate, and inspect editable strategy settings in the UI.
 
-There are two distinct operating modes:
+There are two practical frontend states:
 
-- `SIMULATION_MODE=true`
-  The backend generates synthetic prices, starts default runtimes, and persists trades and positions locally.
-- `SIMULATION_MODE=false`
-  The backend authenticates against IG, polls market data for running strategies, and reconciles local state against broker-truth positions.
+- Backend connected: pages render backend-backed data.
+- Backend unavailable: frontend enters demo mode and renders local sample data for UI development and demos.
 
 ## Repository Layout
 
@@ -89,7 +87,7 @@ Default backend behavior:
 - uses SQLite at `backend/trading_platform.db`
 - creates tables automatically on startup
 - runs in simulation mode
-- boots with seeded strategy runtimes and synthetic market movement
+- starts with no seeded runtime activity
 
 Backend URL: [http://localhost:8000](http://localhost:8000)
 
@@ -159,11 +157,10 @@ DATABASE_URL=sqlite:///./trading_platform.db
 BROKER_PROVIDER=IG
 BROKER_MODE=DEMO
 CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
-SIMULATION_MODE=true
-SIMULATION_SEED=20260320
 STARTING_ACCOUNT_VALUE=100000
 DASHBOARD_RECENT_TRADE_WINDOW=30
 MARKET_DATA_POLL_INTERVAL_SECONDS=2
+API_AUTH_TOKEN=
 IG_API_KEY=
 IG_USERNAME=
 IG_PASSWORD=
@@ -228,18 +225,6 @@ IG_CA_BUNDLE_PATH=
   Meaning: Comma-separated list of browser origins allowed to call the backend.
   Change it when: Adding deployed frontend URLs or alternate local ports.
 
-- `SIMULATION_MODE`
-  Example: `true`
-  Meaning: Enables synthetic market generation instead of live broker polling.
-  `true`: backend bootstraps demo state, seeded strategies, and simulated prices.
-  `false`: backend uses broker-backed market data and reconciliation.
-  Important: Cannot be `true` while `IG_TRADING_ENABLED=true`.
-
-- `SIMULATION_SEED`
-  Example: `20260320`
-  Meaning: Seed for the pseudo-random simulator.
-  Change it when: You want different but still repeatable simulation behavior.
-
 - `STARTING_ACCOUNT_VALUE`
   Example: `100000`
   Meaning: Baseline account value used by dashboard calculations in simulation mode and as a reference for account change percentages.
@@ -255,6 +240,12 @@ IG_CA_BUNDLE_PATH=
   Meaning: Interval for live broker price polling when simulation mode is off.
   Change it when: Tuning responsiveness versus broker/API load.
   Constraint: Must be greater than `0`.
+
+- `API_AUTH_TOKEN`
+  Example: `dev-investmate-token-9f4c3a2b`
+  Meaning: Bearer token required for protected control and broker endpoints (`/strategy/*`, `/strategies/*/{start|stop}`, `/broker/*`).
+  Change it when: Rotating API access credentials between environments.
+  Note: If unset, protected routes reject requests with `401 Unauthorized`.
 
 - `IG_API_KEY`
   Example: `abc123demoapikey`
@@ -324,6 +315,7 @@ IG_CA_BUNDLE_PATH=
 
 ```env
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+NEXT_PUBLIC_API_AUTH_TOKEN=
 NEXT_PUBLIC_ENABLE_DEV_FALLBACK=true
 ```
 
@@ -341,14 +333,20 @@ NEXT_PUBLIC_ENABLE_DEV_FALLBACK=true
   `false`: frontend fails fast instead of falling back.
   Change it when: You want to force the UI to use the real backend during local development.
 
+- `NEXT_PUBLIC_API_AUTH_TOKEN`
+  Example: `dev-investmate-token-9f4c3a2b`
+  Meaning: Bearer token sent by `frontend/lib/api.ts` as `Authorization: Bearer <token>` on backend requests.
+  Change it when: Rotating the backend API token.
+  Important: This value is exposed to browser code because it is a `NEXT_PUBLIC_*` variable; use this setup for local/dev environments only.
+
 ### Recommended Config Sets
 
-Local simulation:
+Backend local baseline:
 
 ```env
 DATABASE_URL=sqlite:///./trading_platform.db
-SIMULATION_MODE=true
 BROKER_MODE=DEMO
+API_AUTH_TOKEN=dev-investmate-token-9f4c3a2b
 IG_TRADING_ENABLED=false
 ```
 
@@ -370,6 +368,7 @@ Frontend strict real-backend mode:
 
 ```env
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+NEXT_PUBLIC_API_AUTH_TOKEN=dev-investmate-token-9f4c3a2b
 NEXT_PUBLIC_ENABLE_DEV_FALLBACK=false
 ```
 

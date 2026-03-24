@@ -3,16 +3,18 @@ import { StatusBadge } from "@/components/ui/status-badge";
 
 type ModeIndicatorProps = {
   mode: "DEMO" | "LIVE";
+  backendMode?: "live" | "dev-fallback";
   brokerAuth?: BrokerAuthStatus;
 };
 
-export function ModeIndicator({ mode, brokerAuth }: ModeIndicatorProps) {
+export function ModeIndicator({ mode, backendMode = "live", brokerAuth }: ModeIndicatorProps) {
   const brokerTone =
     brokerAuth?.state === "connected"
       ? "live"
       : brokerAuth?.state === "disconnected"
         ? "negative"
         : "neutral";
+  const backendConnected = backendMode === "live";
   const modeDetail =
     mode === "LIVE"
       ? "Orders are pointed at the live environment."
@@ -36,6 +38,7 @@ export function ModeIndicator({ mode, brokerAuth }: ModeIndicatorProps) {
           label={mode === "DEMO" ? "Demo Account" : "Live Account"}
           tone={mode === "DEMO" ? "warning" : "neutral"}
         />
+        <StatusBadge label={backendConnected ? "Backend Connected" : "Demo Mode"} tone={backendConnected ? "live" : "warning"} />
         {brokerAuth ? (
           <StatusBadge label={brokerAuth.label} tone={brokerTone} />
         ) : null}

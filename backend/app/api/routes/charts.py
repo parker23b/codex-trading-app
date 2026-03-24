@@ -3,7 +3,6 @@ from sqlmodel import Session
 
 from app.db.session import get_session
 from app.services.chart_service import ChartService
-from app.services.simulation_service import simulation_service
 from app.services.trade_service import TradeService
 
 router = APIRouter(prefix="/charts")
@@ -11,17 +10,14 @@ router = APIRouter(prefix="/charts")
 
 @router.get("/equity")
 def get_equity_chart(session: Session = Depends(get_session)) -> list[dict[str, float | str]]:
-    simulation_service.advance_market(session, ticks=1)
     return ChartService(TradeService(session)).get_equity_chart()
 
 
 @router.get("/drawdown")
 def get_drawdown_chart(session: Session = Depends(get_session)) -> list[dict[str, float | str]]:
-    simulation_service.advance_market(session, ticks=1)
     return ChartService(TradeService(session)).get_drawdown_chart()
 
 
 @router.get("/risk-allocation")
 def get_risk_allocation_chart(session: Session = Depends(get_session)) -> dict[str, object]:
-    simulation_service.advance_market(session, ticks=1)
     return ChartService(TradeService(session)).get_risk_allocation_chart()

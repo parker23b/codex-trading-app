@@ -85,7 +85,7 @@ export default async function DashboardPage() {
     <main className="dashboard-layout">
       <section className="top-command-bar">
         <div className="top-command-bar__mode">
-          <ModeIndicator mode={mode} brokerAuth={brokerAuth} />
+          <ModeIndicator mode={mode} backendMode={backendMode} brokerAuth={brokerAuth} />
         </div>
         <div className="top-command-bar__snapshot">
           <Card title="Book Snapshot" subtitle="Quick read on current book quality." className="card--compact">

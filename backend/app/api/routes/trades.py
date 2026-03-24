@@ -6,8 +6,6 @@ from sqlmodel import Session
 
 from app.db.session import get_session
 from app.models.trade import Trade
-from app.services.broker_service import BrokerService
-from app.services.simulation_service import simulation_service
 from app.services.trade_service import TradeService
 
 router = APIRouter()
@@ -56,17 +54,12 @@ def list_trades(
     date_to: datetime | None = Query(default=None),
     session: Session = Depends(get_session),
 ) -> list[TradeResponse]:
-    simulation_service.advance_market(session, ticks=1)
     trades = TradeService(session).list_trades(strategy_name=strategy, date_from=date_from, date_to=date_to)
     return [_serialize_trade(trade) for trade in trades]
 
 
 @router.get("/positions")
 def list_positions_compat(session: Session = Depends(get_session)) -> list[dict[str, object]]:
-    if simulation_service.enabled:
-        simulation_service.advance_market(session, ticks=1)
-    else:
-        BrokerService().reconcile_positions(session)
     positions = TradeService(session).list_positions()
     now = datetime.now(UTC)
     return [

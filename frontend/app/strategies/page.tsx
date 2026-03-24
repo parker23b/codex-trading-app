@@ -10,7 +10,7 @@ export default async function StrategiesPage() {
   return (
     <main className="page-grid">
       <section className="top-command-bar">
-        <ModeIndicator mode={mode} />
+        <ModeIndicator mode={mode} backendMode={backendMode} />
       </section>
       <Card
         title="Strategy Control Panel"

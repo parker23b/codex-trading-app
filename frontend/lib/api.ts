@@ -13,10 +13,13 @@ import {
 } from "@/lib/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const API_AUTH_TOKEN = process.env.NEXT_PUBLIC_API_AUTH_TOKEN ?? "";
+const IS_DEVELOPMENT = process.env.NODE_ENV !== "production";
 const DEV_FALLBACK_ENABLED =
   process.env.NODE_ENV !== "production" && process.env.NEXT_PUBLIC_ENABLE_DEV_FALLBACK !== "false";
 const REQUEST_TIMEOUT_MS = 1500;
 const MARKET_REQUEST_TIMEOUT_MS = 12000;
+let hasWarnedMissingAuthToken = false;
 
 type BackendMode = "live" | "dev-fallback";
 
@@ -29,6 +32,27 @@ class HttpError extends Error {
     this.status = status;
     this.detail = detail;
   }
+}
+
+function isProtectedBackendPath(path: string): boolean {
+  if (path.startsWith("/strategy/")) {
+    return true;
+  }
+  if (path.startsWith("/broker")) {
+    return true;
+  }
+  return path.startsWith("/strategies/") && (path.endsWith("/start") || path.endsWith("/stop"));
+}
+
+function warnMissingAuthToken(path: string): void {
+  if (!IS_DEVELOPMENT || API_AUTH_TOKEN || hasWarnedMissingAuthToken || !isProtectedBackendPath(path)) {
+    return;
+  }
+  hasWarnedMissingAuthToken = true;
+  console.warn(
+    `[api] NEXT_PUBLIC_API_AUTH_TOKEN is missing. Protected endpoint "${path}" may return 401. ` +
+      "Set NEXT_PUBLIC_API_AUTH_TOKEN in frontend/.env.local to match backend API_AUTH_TOKEN.",
+  );
 }
 
 const mockTrades: Trade[] = [
@@ -757,10 +781,13 @@ async function isBackendReachable(): Promise<boolean> {
 }
 
 async function request<T>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  warnMissingAuthToken(path);
+  const authHeaders = API_AUTH_TOKEN ? { Authorization: `Bearer ${API_AUTH_TOKEN}` } : {};
   const response = await fetchWithTimeout(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...authHeaders,
       ...(init?.headers ?? {}),
     },
     cache: "no-store",
