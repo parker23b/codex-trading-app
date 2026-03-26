@@ -27,6 +27,16 @@ class Settings(BaseSettings):
     runtime_max_open_risk_percent: float = 4.0
     runtime_daily_loss_limit: float = 2_000.0
     runtime_one_position_per_instrument: bool = False
+    runtime_max_position_notional: float = 25_000.0
+    runtime_max_spread_percent_of_price: float = 0.0015
+    runtime_price_stale_after_seconds: float = 15.0
+    runtime_entry_burst_limit: int = 3
+    runtime_entry_burst_window_seconds: int = 300
+    runtime_cooldown_after_loss_seconds: int = 900
+    runtime_cooldown_after_exit_seconds: int = 120
+    runtime_duplicate_signal_window_seconds: int = 30
+    runtime_max_unhealthy_runtimes: int = 0
+    runtime_global_entry_kill_switch: bool = False
     ig_api_key: str | None = None
     ig_username: str | None = None
     ig_password: str | None = None
@@ -76,6 +86,11 @@ class Settings(BaseSettings):
     @field_validator(
         "runtime_max_open_positions",
         "runtime_max_positions_per_strategy",
+        "runtime_entry_burst_limit",
+        "runtime_entry_burst_window_seconds",
+        "runtime_cooldown_after_loss_seconds",
+        "runtime_cooldown_after_exit_seconds",
+        "runtime_duplicate_signal_window_seconds",
         mode="after",
     )
     @classmethod
@@ -84,18 +99,25 @@ class Settings(BaseSettings):
             raise ValueError("Runtime position limit settings must be greater than 0.")
         return value
 
-    @field_validator("runtime_max_open_risk_percent", mode="after")
+    @field_validator(
+        "runtime_max_open_risk_percent",
+        "runtime_daily_loss_limit",
+        "runtime_max_position_notional",
+        "runtime_max_spread_percent_of_price",
+        "runtime_price_stale_after_seconds",
+        mode="after",
+    )
     @classmethod
-    def validate_positive_runtime_risk_cap(cls, value: float) -> float:
+    def validate_positive_runtime_numeric_limits(cls, value: float) -> float:
         if value <= 0:
-            raise ValueError("RUNTIME_MAX_OPEN_RISK_PERCENT must be greater than 0.")
+            raise ValueError("Runtime numeric limit settings must be greater than 0.")
         return value
 
-    @field_validator("runtime_daily_loss_limit", mode="after")
+    @field_validator("runtime_max_unhealthy_runtimes", mode="after")
     @classmethod
-    def validate_positive_runtime_daily_loss_limit(cls, value: float) -> float:
-        if value <= 0:
-            raise ValueError("RUNTIME_DAILY_LOSS_LIMIT must be greater than 0.")
+    def validate_non_negative_runtime_health_limit(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("RUNTIME_MAX_UNHEALTHY_RUNTIMES must be zero or greater.")
         return value
 
     @field_validator("ig_market_cache_ttl_seconds", "ig_market_cache_stale_ttl_seconds")

@@ -20,7 +20,7 @@ class StrategyService:
     def __init__(self, session: Session | None = None):
         self.session = session
         self.settings = get_settings()
-        self.risk_service = PortfolioRiskService()
+        self.risk_service = PortfolioRiskService(session)
         self.runtime_state_service = RuntimeStateService(session) if session is not None else None
 
     def list_strategies(self) -> list[dict[str, object]]:
@@ -247,7 +247,12 @@ class StrategyService:
                         execution,
                         status=ExecutionStatus.RISK_APPROVED,
                         reason=signal.reason or "Risk approved",
-                        details={"risk_percent": signal.risk_percent},
+                        details={
+                            "risk_percent": signal.risk_percent,
+                            "risk_rejection_layer": signal.rejection_layer,
+                            "risk_audit_summary": signal.audit_summary,
+                            "risk_audit_trail": signal.audit_trail,
+                        },
                     )
                     try:
                         created_position = self._execute_entry_signal(
@@ -276,6 +281,12 @@ class StrategyService:
                         status=ExecutionStatus.RISK_REJECTED,
                         reason=signal.reason or "Risk rejected",
                         requires_manual_review=False,
+                        details={
+                            "risk_percent": signal.risk_percent,
+                            "risk_rejection_layer": signal.rejection_layer,
+                            "risk_audit_summary": signal.audit_summary,
+                            "risk_audit_trail": signal.audit_trail,
+                        },
                     )
                     engine.current_position = None
 

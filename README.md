@@ -41,7 +41,7 @@ That boundary maps to the current tables like this:
 - `trade`
   Stores closed trades after a broker close has been confirmed by the execution path.
 - `execution`
-  Stores the execution lifecycle for both entry and close attempts, including signal generation, risk approval or rejection, order submission, acknowledgement, fill progress, confirmed open or close, and failure or manual-review states.
+  Stores the execution lifecycle for both entry and close attempts, including signal generation, layered risk approval or rejection, order submission, acknowledgement, fill progress, confirmed open or close, and failure or manual-review states. Risk outcomes are written into `details` so every rejection stays auditable.
 - `strategyruntimestate`
   Stores runtime assignment, recovery status, cached prices, and serialized strategy state. It does not own broker exposure.
 - `reconciliationevent`
@@ -674,10 +674,39 @@ Currently simulated or local-only in the frontend:
 3. A price update arrives from simulation or broker polling.
 4. The engine calls `strategy.on_price_update(...)`.
 5. If `should_enter_trade()` returns true, `StrategyService` creates an `execution` record at `SIGNAL_GENERATED` and runs the risk gate.
-6. Approved entries advance through states such as `RISK_APPROVED`, `ORDER_SUBMITTED`, `ORDER_ACKNOWLEDGED`, `FILL_FULL` or `FILL_PARTIAL`, and then `POSITION_OPENED`.
-7. The resulting broker-confirmed position is reflected into persistence and later price updates recalculate unrealized PnL.
-8. If `should_exit_trade()` returns true, `StrategyService` creates a close-side `execution` record, moves it through `CLOSE_REQUESTED` and broker order states, and only records a `Trade` after a confirmed close.
-9. Failed or incomplete closes can remain in `FAILED` or `NEEDS_MANUAL_REVIEW` instead of being flattened into a fake closed trade.
+6. The risk gate evaluates layered controls across pre-trade, portfolio, market-quality, platform-health, and kill-switch checks, then stores the audit trail in the execution record.
+7. Approved entries advance through states such as `RISK_APPROVED`, `ORDER_SUBMITTED`, `ORDER_ACKNOWLEDGED`, `FILL_FULL` or `FILL_PARTIAL`, and then `POSITION_OPENED`.
+8. The resulting broker-confirmed position is reflected into persistence and later price updates recalculate unrealized PnL.
+9. If `should_exit_trade()` returns true, `StrategyService` creates a close-side `execution` record, moves it through `CLOSE_REQUESTED` and broker order states, and only records a `Trade` after a confirmed close.
+10. Failed or incomplete closes can remain in `FAILED` or `NEEDS_MANUAL_REVIEW` instead of being flattened into a fake closed trade.
+
+## Risk Controls
+
+The runtime now splits entry risk into five auditable layers:
+
+- `pre_trade`
+  Instrument uniqueness, per-strategy concurrency, duplicate-signal suppression, burst-entry throttling, and cooldowns after loss or exit.
+- `portfolio`
+  Max open positions, projected open risk, max position notional, and daily loss limits.
+- `market_quality`
+  Spread gating, stale-price gating, and basic market-status checks.
+- `platform_health`
+  Active price-feed errors and unhealthy runtime recovery states.
+- `kill_switch`
+  Global entry kill switch, unhealthy-runtime tolerance, and daily drawdown stop.
+
+Relevant settings live in [backend/app/core/config.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/config.py), including:
+
+- `runtime_max_position_notional`
+- `runtime_max_spread_percent_of_price`
+- `runtime_price_stale_after_seconds`
+- `runtime_entry_burst_limit`
+- `runtime_entry_burst_window_seconds`
+- `runtime_cooldown_after_loss_seconds`
+- `runtime_cooldown_after_exit_seconds`
+- `runtime_duplicate_signal_window_seconds`
+- `runtime_max_unhealthy_runtimes`
+- `runtime_global_entry_kill_switch`
 
 This flow is the core of the codebase. Everything else is mostly presentation, orchestration, or broker integration around it.
 

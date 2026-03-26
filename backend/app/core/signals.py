@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
@@ -36,6 +36,9 @@ class EntrySignal:
     tradable: bool | None = None
     status: SignalStatus = SignalStatus.PENDING
     reason: str | None = None
+    rejection_layer: str | None = None
+    audit_trail: list[dict[str, object]] = field(default_factory=list)
+    audit_summary: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
