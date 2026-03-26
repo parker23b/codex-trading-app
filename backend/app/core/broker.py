@@ -16,6 +16,15 @@ class OrderDirection(str, Enum):
     SELL = "SELL"
 
 
+class BrokerOrderStatus(str, Enum):
+    ACKNOWLEDGED = "ACKNOWLEDGED"
+    PARTIALLY_FILLED = "PARTIALLY_FILLED"
+    FILLED = "FILLED"
+    CANCELLED = "CANCELLED"
+    REJECTED = "REJECTED"
+    FAILED = "FAILED"
+
+
 @dataclass(slots=True)
 class OrderRequest:
     instrument: str
@@ -43,6 +52,16 @@ class BrokerOrderResult:
     size: float
     price: float
     executed_at: datetime
+    status: BrokerOrderStatus = BrokerOrderStatus.FILLED
+    requested_size: float | None = None
+    filled_size: float | None = None
+    average_fill_price: float | None = None
+    submitted_at: datetime | None = None
+    acknowledged_at: datetime | None = None
+    reason: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    requires_manual_review: bool = False
 
 
 @dataclass(slots=True)

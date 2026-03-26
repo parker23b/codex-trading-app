@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any, Optional
 
 from sqlalchemy import Column
@@ -32,6 +33,27 @@ class Trade(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now, nullable=False)
 
 
+class ExecutionPhase(str, Enum):
+    ENTRY = "ENTRY"
+    CLOSE = "CLOSE"
+
+
+class ExecutionStatus(str, Enum):
+    SIGNAL_GENERATED = "SIGNAL_GENERATED"
+    RISK_APPROVED = "RISK_APPROVED"
+    RISK_REJECTED = "RISK_REJECTED"
+    ORDER_SUBMITTED = "ORDER_SUBMITTED"
+    ORDER_ACKNOWLEDGED = "ORDER_ACKNOWLEDGED"
+    FILL_PARTIAL = "FILL_PARTIAL"
+    FILL_FULL = "FILL_FULL"
+    POSITION_OPENED = "POSITION_OPENED"
+    CLOSE_REQUESTED = "CLOSE_REQUESTED"
+    CLOSE_CONFIRMED = "CLOSE_CONFIRMED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+    NEEDS_MANUAL_REVIEW = "NEEDS_MANUAL_REVIEW"
+
+
 class Position(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     strategy_name: str
@@ -56,6 +78,33 @@ class Position(SQLModel, table=True):
     broker_closed_confirmed_at: datetime | None = None
     last_reconciled_at: datetime | None = None
     created_at: datetime = Field(default_factory=utc_now, nullable=False)
+
+
+class Execution(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    strategy_name: str = Field(index=True)
+    instrument: str = Field(index=True)
+    phase: str = Field(index=True)
+    status: str = Field(index=True)
+    broker_reference: str | None = Field(default=None, index=True)
+    local_position_id: int | None = Field(default=None, index=True)
+    local_trade_id: int | None = Field(default=None, index=True)
+    signal_time: datetime
+    submitted_at: datetime | None = None
+    acknowledged_at: datetime | None = None
+    completed_at: datetime | None = None
+    last_transition_at: datetime = Field(default_factory=utc_now, nullable=False, index=True)
+    requested_size: float | None = None
+    filled_size: float | None = None
+    requested_price: float | None = None
+    average_fill_price: float | None = None
+    reason: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    requires_manual_review: bool = False
+    details: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utc_now, nullable=False)
+    updated_at: datetime = Field(default_factory=utc_now, nullable=False)
 
 
 class ReconciliationEvent(SQLModel, table=True):

@@ -2,7 +2,7 @@ from datetime import datetime
 
 from sqlmodel import Session, desc, select
 
-from app.models.trade import Position, ReconciliationEvent, Trade, utc_now
+from app.models.trade import Execution, ExecutionStatus, Position, ReconciliationEvent, Trade, utc_now
 
 
 class TradeService:
@@ -30,6 +30,10 @@ class TradeService:
         statement = select(Position).where(Position.is_open.is_(True)).order_by(desc(Position.open_time))
         return list(self.session.exec(statement).all())
 
+    def list_executions(self, *, limit: int = 100) -> list[Execution]:
+        statement = select(Execution).order_by(desc(Execution.last_transition_at)).limit(limit)
+        return list(self.session.exec(statement).all())
+
     def list_all_open_positions(self) -> list[Position]:
         statement = select(Position).where(Position.is_open.is_(True))
         return list(self.session.exec(statement).all())
@@ -54,6 +58,65 @@ class TradeService:
         self.session.commit()
         self.session.refresh(trade)
         return trade
+
+    def create_execution(self, execution: Execution) -> Execution:
+        self.session.add(execution)
+        self.session.commit()
+        self.session.refresh(execution)
+        return execution
+
+    def transition_execution(
+        self,
+        execution: Execution,
+        *,
+        status: ExecutionStatus | str,
+        broker_reference: str | None = None,
+        local_position_id: int | None = None,
+        local_trade_id: int | None = None,
+        submitted_at: datetime | None = None,
+        acknowledged_at: datetime | None = None,
+        completed_at: datetime | None = None,
+        filled_size: float | None = None,
+        average_fill_price: float | None = None,
+        reason: str | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        requires_manual_review: bool | None = None,
+        details: dict[str, object] | None = None,
+    ) -> Execution:
+        execution.status = status.value if isinstance(status, ExecutionStatus) else status
+        execution.last_transition_at = completed_at or acknowledged_at or submitted_at or utc_now()
+        execution.updated_at = utc_now()
+        if broker_reference is not None:
+            execution.broker_reference = broker_reference
+        if local_position_id is not None:
+            execution.local_position_id = local_position_id
+        if local_trade_id is not None:
+            execution.local_trade_id = local_trade_id
+        if submitted_at is not None:
+            execution.submitted_at = submitted_at
+        if acknowledged_at is not None:
+            execution.acknowledged_at = acknowledged_at
+        if completed_at is not None:
+            execution.completed_at = completed_at
+        if filled_size is not None:
+            execution.filled_size = filled_size
+        if average_fill_price is not None:
+            execution.average_fill_price = average_fill_price
+        if reason is not None:
+            execution.reason = reason
+        if error_code is not None:
+            execution.error_code = error_code
+        if error_message is not None:
+            execution.error_message = error_message
+        if requires_manual_review is not None:
+            execution.requires_manual_review = requires_manual_review
+        if details:
+            execution.details = {**(execution.details or {}), **details}
+        self.session.add(execution)
+        self.session.commit()
+        self.session.refresh(execution)
+        return execution
 
     def record_broker_position(self, position: Position) -> Position:
         if position.broker_open_confirmed_at is None:

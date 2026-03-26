@@ -3,11 +3,11 @@ from sqlmodel import SQLModel
 
 from app.db.session import engine
 from app.models.runtime import StrategyRuntimeState
-from app.models.trade import Position, ReconciliationEvent, Trade
+from app.models.trade import Execution, Position, ReconciliationEvent, Trade
 
 
 def initialize_database() -> None:
-    _ = (Trade, Position, StrategyRuntimeState, ReconciliationEvent)
+    _ = (Trade, Position, StrategyRuntimeState, ReconciliationEvent, Execution)
     SQLModel.metadata.create_all(engine)
     _ensure_sqlite_column("position", "broker_reference", "VARCHAR")
     _ensure_sqlite_column("position", "broker_sync_status", "VARCHAR DEFAULT 'PENDING'")
@@ -16,6 +16,23 @@ def initialize_database() -> None:
     _ensure_sqlite_column("position", "last_reconciled_at", "TIMESTAMP")
     _ensure_sqlite_column("trade", "broker_reference", "VARCHAR")
     _ensure_sqlite_column("trade", "close_broker_reference", "VARCHAR")
+    _ensure_sqlite_column("execution", "broker_reference", "VARCHAR")
+    _ensure_sqlite_column("execution", "local_position_id", "INTEGER")
+    _ensure_sqlite_column("execution", "local_trade_id", "INTEGER")
+    _ensure_sqlite_column("execution", "submitted_at", "TIMESTAMP")
+    _ensure_sqlite_column("execution", "acknowledged_at", "TIMESTAMP")
+    _ensure_sqlite_column("execution", "completed_at", "TIMESTAMP")
+    _ensure_sqlite_column("execution", "last_transition_at", "TIMESTAMP")
+    _ensure_sqlite_column("execution", "requested_size", "FLOAT")
+    _ensure_sqlite_column("execution", "filled_size", "FLOAT")
+    _ensure_sqlite_column("execution", "requested_price", "FLOAT")
+    _ensure_sqlite_column("execution", "average_fill_price", "FLOAT")
+    _ensure_sqlite_column("execution", "reason", "VARCHAR")
+    _ensure_sqlite_column("execution", "error_code", "VARCHAR")
+    _ensure_sqlite_column("execution", "error_message", "VARCHAR")
+    _ensure_sqlite_column("execution", "requires_manual_review", "BOOLEAN DEFAULT 0")
+    _ensure_sqlite_column("execution", "details", "JSON")
+    _ensure_sqlite_column("execution", "updated_at", "TIMESTAMP")
     _ensure_sqlite_column("strategyruntimestate", "strategy_version", "VARCHAR DEFAULT '1'")
     _ensure_sqlite_column("strategyruntimestate", "recovery_state", "VARCHAR DEFAULT 'PENDING'")
     _ensure_sqlite_column("strategyruntimestate", "recovery_reason", "VARCHAR")

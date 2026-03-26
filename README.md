@@ -40,6 +40,8 @@ That boundary maps to the current tables like this:
   Stores broker-confirmed open exposure plus local metadata such as `risk_percent`, `reason`, and `manual_override`. The broker-owned fields are `broker_reference`, size, direction, open/close timestamps, and sync markers like `broker_sync_status`.
 - `trade`
   Stores closed trades after a broker close has been confirmed by the execution path.
+- `execution`
+  Stores the execution lifecycle for both entry and close attempts, including signal generation, risk approval or rejection, order submission, acknowledgement, fill progress, confirmed open or close, and failure or manual-review states.
 - `strategyruntimestate`
   Stores runtime assignment, recovery status, cached prices, and serialized strategy state. It does not own broker exposure.
 - `reconciliationevent`
@@ -47,8 +49,8 @@ That boundary maps to the current tables like this:
 
 Two important current limits are worth calling out explicitly:
 
-- Orders and fills are not first-class tables yet. The current broker adapter returns an immediate execution result, so the app persists confirmed positions and closed trades rather than a separate order lifecycle.
-- Because of that, partial fills and pending order state are not modeled in detail yet. The code and docs now make that limitation explicit instead of implying that "trade", "order", and "position" are interchangeable.
+- The broker adapters still resolve most demo flows synchronously, so many executions will move through multiple lifecycle states in a single service call.
+- Partial fills, stale quotes, rejection reasons, and manual-review cases now have a place in the model, but richer broker-specific recovery policies still need to be implemented adapter by adapter.
 
 ## Repository Layout
 
@@ -535,6 +537,8 @@ Main endpoints:
   Open-exposure allocation.
 - `GET /positions`
   Open positions with enriched timing and PnL fields.
+- `GET /executions`
+  Recent execution lifecycle records for entry and close attempts.
 - `GET /trades`
   Closed trades, optionally filtered by strategy or date range.
 - `GET /trades/positions`
@@ -669,11 +673,11 @@ Currently simulated or local-only in the frontend:
 2. The runtime manager creates a `TradingEngine` bound to one strategy and one instrument.
 3. A price update arrives from simulation or broker polling.
 4. The engine calls `strategy.on_price_update(...)`.
-5. If `should_enter_trade()` returns true, the engine places an order through the broker adapter.
-6. The resulting position is reflected into persistence by `StrategyService`.
-7. On later price updates, unrealized PnL is recalculated for the open position.
-8. If `should_exit_trade()` returns true, the engine closes the broker position and returns a `Trade`.
-9. `StrategyService` records the closed trade and closes the persisted position.
+5. If `should_enter_trade()` returns true, `StrategyService` creates an `execution` record at `SIGNAL_GENERATED` and runs the risk gate.
+6. Approved entries advance through states such as `RISK_APPROVED`, `ORDER_SUBMITTED`, `ORDER_ACKNOWLEDGED`, `FILL_FULL` or `FILL_PARTIAL`, and then `POSITION_OPENED`.
+7. The resulting broker-confirmed position is reflected into persistence and later price updates recalculate unrealized PnL.
+8. If `should_exit_trade()` returns true, `StrategyService` creates a close-side `execution` record, moves it through `CLOSE_REQUESTED` and broker order states, and only records a `Trade` after a confirmed close.
+9. Failed or incomplete closes can remain in `FAILED` or `NEEDS_MANUAL_REVIEW` instead of being flattened into a fake closed trade.
 
 This flow is the core of the codebase. Everything else is mostly presentation, orchestration, or broker integration around it.
 

@@ -17,6 +17,7 @@ from app.core.broker import (
     BrokerAccountSummary,
     BrokerMarketDetails,
     BrokerOrderResult,
+    BrokerOrderStatus,
     BrokerPosition,
     OrderDirection,
     OrderRequest,
@@ -100,12 +101,13 @@ class IGBroker(Broker):
         return self._account_type
 
     def place_order(self, order: OrderRequest) -> BrokerOrderResult:
+        submitted_at = now_utc()
         if not self._trading_enabled:
             logger.info(
                 "IG trading disabled; using local simulated fill",
                 extra={"instrument": order.instrument, "direction": order.direction.value},
             )
-            return self._simulate_place_order(order)
+            return self._simulate_place_order(order, submitted_at=submitted_at)
 
         self._ensure_authenticated()
         payload = {
@@ -153,15 +155,26 @@ class IGBroker(Broker):
             size=order.size,
             price=executed_price,
             executed_at=executed_at,
+            status=BrokerOrderStatus.FILLED,
+            requested_size=order.size,
+            filled_size=order.size,
+            average_fill_price=executed_price,
+            submitted_at=submitted_at,
+            acknowledged_at=executed_at,
         )
 
     def close_position(self, instrument: str, *, broker_reference: str | None = None) -> BrokerOrderResult:
+        submitted_at = now_utc()
         if not self._trading_enabled:
             logger.info(
                 "IG trading disabled; using local simulated close",
                 extra={"instrument": instrument, "broker_reference": broker_reference},
             )
-            return self._simulate_close_position(instrument, broker_reference=broker_reference)
+            return self._simulate_close_position(
+                instrument,
+                broker_reference=broker_reference,
+                submitted_at=submitted_at,
+            )
 
         self._ensure_authenticated()
         open_position = self._positions.get(broker_reference) if broker_reference is not None else None
@@ -217,6 +230,12 @@ class IGBroker(Broker):
             size=open_position.size,
             price=executed_price,
             executed_at=executed_at,
+            status=BrokerOrderStatus.FILLED,
+            requested_size=open_position.size,
+            filled_size=open_position.size,
+            average_fill_price=executed_price,
+            submitted_at=submitted_at,
+            acknowledged_at=executed_at,
         )
 
     def get_positions(self) -> list[BrokerPosition]:
@@ -377,7 +396,7 @@ class IGBroker(Broker):
             account_type=self._account_type,
         )
 
-    def _simulate_place_order(self, order: OrderRequest) -> BrokerOrderResult:
+    def _simulate_place_order(self, order: OrderRequest, *, submitted_at: datetime | None = None) -> BrokerOrderResult:
         logger.info(
             "Stub order placed via IG broker",
             extra={"instrument": order.instrument, "direction": order.direction.value},
@@ -399,9 +418,21 @@ class IGBroker(Broker):
             size=order.size,
             price=order.price,
             executed_at=executed_at,
+            status=BrokerOrderStatus.FILLED,
+            requested_size=order.size,
+            filled_size=order.size,
+            average_fill_price=order.price,
+            submitted_at=submitted_at or executed_at,
+            acknowledged_at=executed_at,
         )
 
-    def _simulate_close_position(self, instrument: str, *, broker_reference: str | None = None) -> BrokerOrderResult:
+    def _simulate_close_position(
+        self,
+        instrument: str,
+        *,
+        broker_reference: str | None = None,
+        submitted_at: datetime | None = None,
+    ) -> BrokerOrderResult:
         position: BrokerPosition | None = None
         if broker_reference is not None:
             position = self._positions.pop(broker_reference, None)
@@ -426,6 +457,12 @@ class IGBroker(Broker):
             size=position.size,
             price=position.open_price,
             executed_at=now_utc(),
+            status=BrokerOrderStatus.FILLED,
+            requested_size=position.size,
+            filled_size=position.size,
+            average_fill_price=position.open_price,
+            submitted_at=submitted_at or now_utc(),
+            acknowledged_at=now_utc(),
         )
 
     def _ensure_authenticated(self) -> None:
