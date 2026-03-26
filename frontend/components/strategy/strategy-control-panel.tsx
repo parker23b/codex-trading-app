@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { Card } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { formatCurrency, formatInstrumentLabel, formatPrice } from "@/lib/format";
+import { formatCurrency, formatInstrumentLabel, formatPrice, formatSignedCurrency } from "@/lib/format";
 import { startStrategy, stopStrategy } from "@/lib/api";
 import { StrategyDefinition } from "@/lib/types";
 
@@ -70,29 +70,28 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
   const runAction = (strategy: StrategyDefinition) => {
     startTransition(async () => {
       const instrument = instrumentOverrides[strategy.name];
-      if (strategy.status === "RUNNING") {
-        const result = await stopStrategy(instrument);
-        setConfigDrafts((current) => ({
-          ...current,
-          [strategy.name]: {
-            ...current[strategy.name],
-            status: "STOPPED",
-            current_pnl: 0,
-          },
-        }));
-        setStatusMessage(result.status === "stopped" ? `Stopped ${strategy.name}.` : result.status);
-      } else {
-        const result = await startStrategy(strategy.name, instrument);
-        setConfigDrafts((current) => ({
-          ...current,
-          [strategy.name]: {
-            ...current[strategy.name],
-            status: "RUNNING",
-            instrument,
-          },
-        }));
-        setStatusMessage(result.status === "started" ? `Started ${strategy.name}.` : result.status);
-      }
+      const result = await startStrategy(strategy.name, instrument);
+      setConfigDrafts((current) => ({
+        ...current,
+        [strategy.name]: {
+          ...current[strategy.name],
+          status: "RUNNING",
+          instrument,
+        },
+      }));
+      setStatusMessage(result.status === "started" ? `Started ${strategy.name} on ${formatInstrumentLabel(instrument)}.` : result.status);
+      router.refresh();
+    });
+  };
+
+  const stopRuntime = (strategyName: string, instrument: string) => {
+    startTransition(async () => {
+      const result = await stopStrategy({ strategyName, instrument });
+      setStatusMessage(
+        result.status === "stopped"
+          ? `Stopped ${strategyName} on ${formatInstrumentLabel(instrument)}.`
+          : result.status,
+      );
       router.refresh();
     });
   };
@@ -109,7 +108,7 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
             subtitle={strategy.description}
             action={
               <StatusBadge
-                label={strategy.status === "RUNNING" ? "Running" : "Stopped"}
+                label={strategy.status === "RUNNING" ? `${strategy.active_runtime_count ?? 1} Live` : "Stopped"}
                 tone={strategy.status === "RUNNING" ? "live" : "neutral"}
               />
             }
@@ -117,7 +116,7 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
           >
             <div className="strategy-card__meta">
               <div className="strategy-stat">
-                <span className="eyebrow">Instrument</span>
+                <span className="eyebrow">Next Instrument</span>
                 <strong>{formatInstrumentLabel(instrumentOverrides[strategy.name])}</strong>
               </div>
               <div className="strategy-stat">
@@ -128,12 +127,12 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
                 </strong>
               </div>
               <div className="strategy-stat">
-                <span className="eyebrow">Trade Count</span>
-                <strong>{strategy.trade_count}</strong>
+                <span className="eyebrow">Live Runtimes</span>
+                <strong>{strategy.active_runtime_count ?? 0}</strong>
               </div>
               <div className="strategy-stat">
-                <span className="eyebrow">Win Rate</span>
-                <strong>{strategy.win_rate}%</strong>
+                <span className="eyebrow">Open Positions</span>
+                <strong>{strategy.open_position_count ?? 0}</strong>
               </div>
               <div className="strategy-stat">
                 <span className="eyebrow">Last Price</span>
@@ -141,9 +140,18 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
                 <div className="muted">{priceStatusLabel(strategy)}</div>
                 {strategy.price_error ? <div className="muted">{strategy.price_error}</div> : null}
               </div>
+              <div className="strategy-stat">
+                <span className="eyebrow">Win Rate</span>
+                <strong>{strategy.win_rate}%</strong>
+              </div>
+            </div>
+            <div className="status-note status-note--inline">
+              {strategy.active_runtime_count
+                ? `${strategy.active_runtime_count} runtime${strategy.active_runtime_count === 1 ? "" : "s"} active across ${strategy.active_instruments?.length ?? 0} instrument${(strategy.active_instruments?.length ?? 0) === 1 ? "" : "s"}.`
+                : "Stopped. Launch one or more instruments to start scanning."}
             </div>
             <label className="strategy-card__instrument">
-              <span className="eyebrow">Instrument Override</span>
+              <span className="eyebrow">Launch Another Runtime</span>
               <select
                 value={instrumentOverrides[strategy.name]}
                 onChange={(event) =>
@@ -164,9 +172,43 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
                 ))}
               </select>
             </label>
+            {strategy.active_runtimes?.length ? (
+              <div className="strategy-runtime-list">
+                {strategy.active_runtimes.map((runtime) => (
+                  <div key={runtime.runtime_key} className="strategy-runtime-row">
+                    <div className="cell-stack">
+                      <strong>{formatInstrumentLabel(runtime.instrument)}</strong>
+                      <span className="muted">
+                        {runtime.has_open_position
+                          ? `${runtime.direction ?? "LIVE"} ${runtime.broker_reference ?? "pending fill"}`
+                          : "Scanning only"}
+                      </span>
+                    </div>
+                    <div className="cell-stack">
+                      <StatusBadge
+                        label={runtime.has_open_position ? "Position Open" : "Watching"}
+                        tone={runtime.has_open_position ? "live" : "neutral"}
+                      />
+                      <span className={((runtime.unrealized_pnl ?? 0) >= 0 ? "value-positive" : "value-negative")}>
+                        {runtime.unrealized_pnl != null ? formatSignedCurrency(runtime.unrealized_pnl) : "No PnL"}
+                      </span>
+                    </div>
+                    <button
+                      className="button secondary table-action"
+                      disabled={pending}
+                      onClick={() => stopRuntime(strategy.name, runtime.instrument)}
+                    >
+                      Stop Runtime
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="status-note">No live runtimes. Start one or more instruments to begin scanning.</div>
+            )}
             <div className="strategy-card__actions">
               <button className="button" disabled={pending} onClick={() => runAction(strategy)}>
-                {strategy.status === "RUNNING" ? "Stop" : "Start"}
+                Start Runtime
               </button>
               <button className="button secondary" onClick={() => setSelectedStrategy(strategy)}>
                 Settings

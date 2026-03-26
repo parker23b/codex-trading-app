@@ -123,9 +123,12 @@ export async function startStrategy(strategyName: string, instrument: string): P
   });
 }
 
-export async function stopStrategy(instrument: string): Promise<{ status: string }> {
+export async function stopStrategy(params: { instrument?: string; strategyName?: string }): Promise<{ status: string }> {
   return request<{ status: string }>("/strategy/stop", {
     method: "POST",
-    body: JSON.stringify({ instrument }),
+    body: JSON.stringify({
+      instrument: params.instrument,
+      strategy_name: params.strategyName,
+    }),
   });
 }

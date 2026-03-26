@@ -27,6 +27,7 @@ class OrderRequest:
 
 @dataclass(slots=True)
 class BrokerPosition:
+    broker_reference: str
     instrument: str
     direction: OrderDirection
     size: float
@@ -82,7 +83,7 @@ class Broker(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def close_position(self, instrument: str) -> BrokerOrderResult:
+    def close_position(self, instrument: str, *, broker_reference: str | None = None) -> BrokerOrderResult:
         raise NotImplementedError
 
     @abstractmethod

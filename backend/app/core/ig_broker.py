@@ -90,7 +90,6 @@ class IGBroker(Broker):
         self._market_cache_ttl_seconds = get_settings().ig_market_cache_ttl_seconds
         self._market_cache_stale_ttl_seconds = get_settings().ig_market_cache_stale_ttl_seconds
         self._positions: dict[str, BrokerPosition] = {}
-        self._deal_references_by_instrument: dict[str, str] = {}
         self._last_prices: dict[str, float] = {}
         self._market_details_cache: dict[str, CachedMarketDetails] = {}
         self._account_currency: str | None = None
@@ -129,22 +128,26 @@ class IGBroker(Broker):
         deal_id = confirmation.get("dealId")
         executed_price = float(confirmation.get("level") or order.price)
         executed_at = self._parse_ig_timestamp(confirmation.get("date")) or now_utc()
-        if deal_id:
-            self._deal_references_by_instrument[order.instrument] = deal_id
         position = BrokerPosition(
+            broker_reference=deal_id or deal_reference,
             instrument=order.instrument,
             direction=order.direction,
             size=order.size,
             open_price=executed_price,
             opened_at=executed_at,
         )
-        self._positions[order.instrument] = position
+        self._positions[position.broker_reference] = position
         logger.info(
             "IG order opened",
-            extra={"instrument": order.instrument, "deal_id": deal_id, "direction": order.direction.value},
+            extra={
+                "instrument": order.instrument,
+                "deal_id": deal_id,
+                "broker_reference": position.broker_reference,
+                "direction": order.direction.value,
+            },
         )
         return BrokerOrderResult(
-            broker_reference=deal_id or deal_reference,
+            broker_reference=position.broker_reference,
             instrument=order.instrument,
             direction=order.direction,
             size=order.size,
@@ -152,24 +155,36 @@ class IGBroker(Broker):
             executed_at=executed_at,
         )
 
-    def close_position(self, instrument: str) -> BrokerOrderResult:
+    def close_position(self, instrument: str, *, broker_reference: str | None = None) -> BrokerOrderResult:
         if not self._trading_enabled:
-            logger.info("IG trading disabled; using local simulated close", extra={"instrument": instrument})
-            return self._simulate_close_position(instrument)
+            logger.info(
+                "IG trading disabled; using local simulated close",
+                extra={"instrument": instrument, "broker_reference": broker_reference},
+            )
+            return self._simulate_close_position(instrument, broker_reference=broker_reference)
 
         self._ensure_authenticated()
-        open_position = self._positions.get(instrument)
+        open_position = self._positions.get(broker_reference) if broker_reference is not None else None
         if open_position is None:
             remote_positions = self.get_positions()
-            open_position = next((position for position in remote_positions if position.instrument == instrument), None)
+            if broker_reference is not None:
+                open_position = next(
+                    (position for position in remote_positions if position.broker_reference == broker_reference),
+                    None,
+                )
+            if open_position is None:
+                open_position = next((position for position in remote_positions if position.instrument == instrument), None)
         if open_position is None:
-            raise IGBrokerError(f"No broker position found for instrument '{instrument}'.")
+            raise IGBrokerError(
+                f"No broker position found for instrument '{instrument}'"
+                + (f" and broker reference '{broker_reference}'." if broker_reference else ".")
+            )
 
-        deal_id = self._deal_references_by_instrument.get(instrument)
+        deal_id = open_position.broker_reference
         opposite_direction = OrderDirection.SELL if open_position.direction is OrderDirection.BUY else OrderDirection.BUY
         payload = {
             "direction": opposite_direction.value,
-            "epic": instrument,
+            "epic": open_position.instrument,
             "expiry": "-",
             "orderType": "MARKET",
             "size": open_position.size,
@@ -186,12 +201,18 @@ class IGBroker(Broker):
         executed_price = float(confirmation.get("level") or open_position.open_price)
         executed_at = self._parse_ig_timestamp(confirmation.get("date")) or now_utc()
         closed_deal_id = confirmation.get("dealId") or deal_reference
-        self._positions.pop(instrument, None)
-        self._deal_references_by_instrument.pop(instrument, None)
-        logger.info("IG position closed", extra={"instrument": instrument, "deal_id": closed_deal_id})
+        self._positions.pop(open_position.broker_reference, None)
+        logger.info(
+            "IG position closed",
+            extra={
+                "instrument": open_position.instrument,
+                "deal_id": closed_deal_id,
+                "broker_reference": open_position.broker_reference,
+            },
+        )
         return BrokerOrderResult(
             broker_reference=closed_deal_id,
-            instrument=instrument,
+            instrument=open_position.instrument,
             direction=opposite_direction,
             size=open_position.size,
             price=executed_price,
@@ -212,11 +233,12 @@ class IGBroker(Broker):
             if not instrument:
                 continue
             opened_at = self._parse_ig_timestamp(position_data.get("createdDateUTC")) or now_utc()
-            deal_id = position_data.get("dealId")
-            if deal_id:
-                self._deal_references_by_instrument[instrument] = deal_id
+            deal_id = position_data.get("dealId") or position_data.get("dealReference")
+            if not deal_id:
+                deal_id = f"ig-{instrument}-{len(positions) + 1}"
             positions.append(
                 BrokerPosition(
+                    broker_reference=deal_id,
                     instrument=instrument,
                     direction=OrderDirection(direction_value),
                     size=float(position_data.get("size", 0.0)),
@@ -224,7 +246,7 @@ class IGBroker(Broker):
                     opened_at=opened_at,
                 )
             )
-        self._positions = {position.instrument: position for position in positions}
+        self._positions = {position.broker_reference: position for position in positions}
         return positions
 
     def get_latest_price(self, instrument: str) -> float:
@@ -240,8 +262,10 @@ class IGBroker(Broker):
             price = round((details.high + details.low) / 2, 5)
         elif instrument in self._last_prices:
             price = self._last_prices[instrument]
-        elif instrument in self._positions:
-            price = self._positions[instrument].open_price
+        else:
+            matching_position = next((position for position in self._positions.values() if position.instrument == instrument), None)
+            if matching_position is not None:
+                price = matching_position.open_price
 
         if price is None:
             raise IGBrokerError(f"IG market snapshot for '{instrument}' did not include a usable price.")
@@ -359,7 +383,9 @@ class IGBroker(Broker):
             extra={"instrument": order.instrument, "direction": order.direction.value},
         )
         executed_at = now_utc()
-        self._positions[order.instrument] = BrokerPosition(
+        broker_reference = f"ig-{uuid4()}"
+        self._positions[broker_reference] = BrokerPosition(
+            broker_reference=broker_reference,
             instrument=order.instrument,
             direction=order.direction,
             size=order.size,
@@ -367,7 +393,7 @@ class IGBroker(Broker):
             opened_at=executed_at,
         )
         return BrokerOrderResult(
-            broker_reference=f"ig-{uuid4()}",
+            broker_reference=broker_reference,
             instrument=order.instrument,
             direction=order.direction,
             size=order.size,
@@ -375,12 +401,24 @@ class IGBroker(Broker):
             executed_at=executed_at,
         )
 
-    def _simulate_close_position(self, instrument: str) -> BrokerOrderResult:
-        position = self._positions.pop(instrument, None)
+    def _simulate_close_position(self, instrument: str, *, broker_reference: str | None = None) -> BrokerOrderResult:
+        position: BrokerPosition | None = None
+        if broker_reference is not None:
+            position = self._positions.pop(broker_reference, None)
+        if position is None:
+            position_key = next(
+                (key for key, value in self._positions.items() if value.instrument == instrument),
+                None,
+            )
+            if position_key is not None:
+                position = self._positions.pop(position_key)
         if position is None:
             raise ValueError(f"No open position for instrument '{instrument}'.")
 
-        logger.info("Stub position closed via IG broker", extra={"instrument": instrument})
+        logger.info(
+            "Stub position closed via IG broker",
+            extra={"instrument": instrument, "broker_reference": position.broker_reference},
+        )
         return BrokerOrderResult(
             broker_reference=f"ig-{uuid4()}",
             instrument=position.instrument,

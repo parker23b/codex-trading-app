@@ -13,6 +13,8 @@ def utc_now() -> datetime:
 class Trade(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     strategy_name: str
+    broker_reference: str | None = Field(default=None, index=True)
+    close_broker_reference: str | None = Field(default=None, index=True)
     instrument: str
     direction: str
     size: float
@@ -31,6 +33,7 @@ class Trade(SQLModel, table=True):
 class Position(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     strategy_name: str
+    broker_reference: str | None = Field(default=None, index=True)
     instrument: str = Field(index=True)
     direction: str
     size: float
@@ -47,3 +50,9 @@ class Position(SQLModel, table=True):
     account_type: str
     is_open: bool = True
     created_at: datetime = Field(default_factory=utc_now, nullable=False)
+
+
+def clone_position(position: Position | None) -> Position | None:
+    if position is None:
+        return None
+    return Position.model_validate(position.model_dump())

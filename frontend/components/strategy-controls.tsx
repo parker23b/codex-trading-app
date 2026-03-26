@@ -36,7 +36,7 @@ export function StrategyControls({ strategies }: StrategyControlsProps) {
     setStatusMessage(null);
     startTransition(async () => {
       try {
-        const result = await stopStrategy(instrument);
+        const result = await stopStrategy({ instrument });
         setStatusMessage(result.status === "stopped" ? `Stopped strategy on ${instrument}.` : result.status);
         router.refresh();
       } catch (err) {

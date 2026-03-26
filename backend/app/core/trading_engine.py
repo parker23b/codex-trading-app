@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from uuid import uuid4
 
-from app.core.broker import Broker, OrderDirection, OrderRequest
+from app.core.broker import Broker, OrderDirection
 from app.core.logging import get_logger
+from app.core.signals import EntrySignal, ExitSignal, SignalKind
 from app.models.trade import Position, Trade
 from app.strategies.base import PriceUpdate, Strategy
 
@@ -22,21 +25,27 @@ class TradingEngine:
     strategy: Strategy
     broker: Broker
     instrument: str
+    runtime_id: str = field(default_factory=lambda: str(uuid4()))
     trade_size: float = 1.0
     active: bool = False
     current_position: Position | None = field(default=None, init=False)
+    last_heartbeat_at: datetime | None = field(default=None, init=False)
 
     def start(self) -> None:
         self.active = True
+        self.last_heartbeat_at = datetime.now(UTC)
         logger.info("Strategy engine started", extra={"instrument": self.instrument})
 
     def stop(self) -> None:
         self.active = False
+        self.last_heartbeat_at = datetime.now(UTC)
         logger.info("Strategy engine stopped", extra={"instrument": self.instrument})
 
-    def process_price_update(self, update: PriceUpdate) -> Trade | None:
+    def process_price_update(self, update: PriceUpdate) -> EntrySignal | ExitSignal | None:
         if not self.active:
             return None
+        signal_time = update.received_at or datetime.now(UTC)
+        self.last_heartbeat_at = signal_time
 
         logger.debug(
             "Broker price tick received",
@@ -54,7 +63,7 @@ class TradingEngine:
         if self.current_position is None and self.strategy.should_enter_trade():
             direction = self.strategy.entry_direction()
             logger.info(
-                "Strategy entry decision emitted",
+                "Strategy entry candidate emitted",
                 extra={
                     "strategy": self.strategy.name,
                     "instrument": self.instrument,
@@ -65,40 +74,24 @@ class TradingEngine:
                     "spread": update.spread,
                 },
             )
-            order = self.broker.place_order(
-                OrderRequest(
-                    instrument=self.instrument,
-                    direction=direction,
-                    size=self.trade_size,
-                    price=update.price,
-                    strategy_name=self.strategy.name,
-                )
-            )
-            self.current_position = Position(
-                instrument=self.instrument,
-                direction=direction.value,
-                size=self.trade_size,
-                open_price=order.price,
-                open_time=order.executed_at,
+            return EntrySignal(
+                kind=SignalKind.ENTRY,
                 strategy_name=self.strategy.name,
-                account_type=self.broker.account_type.value,
-                is_open=True,
+                instrument=self.instrument,
+                observed_price=update.price,
+                signal_at=signal_time,
+                direction=direction,
+                size=self.trade_size,
+                risk_percent=0.0,
+                bid=update.bid,
+                ask=update.ask,
+                market_status=update.market_status,
+                tradable=update.tradable,
             )
-            self.strategy.on_position_opened(direction=direction, entry_price=order.price)
-            logger.info(
-                "Opened position",
-                extra={
-                    "instrument": self.instrument,
-                    "strategy": self.strategy.name,
-                    "direction": direction.value,
-                    "open_price": order.price,
-                },
-            )
-            return None
 
         if self.current_position is not None and self.strategy.should_exit_trade():
             logger.info(
-                "Strategy exit decision emitted",
+                "Strategy exit candidate emitted",
                 extra={
                     "strategy": self.strategy.name,
                     "instrument": self.instrument,
@@ -108,41 +101,18 @@ class TradingEngine:
                     "spread": update.spread,
                 },
             )
-            closed_order = self.broker.close_position(self.instrument)
-            pnl = self._calculate_pnl(
-                direction=OrderDirection(self.current_position.direction),
-                open_price=self.current_position.open_price,
-                close_price=closed_order.price,
-                size=self.current_position.size,
+            return ExitSignal(
+                kind=SignalKind.EXIT,
+                strategy_name=self.strategy.name,
+                instrument=self.instrument,
+                observed_price=update.price,
+                signal_at=signal_time,
+                position=self.current_position,
+                bid=update.bid,
+                ask=update.ask,
+                market_status=update.market_status,
+                tradable=update.tradable,
             )
-            trade = Trade(
-                strategy_name=self.current_position.strategy_name,
-                instrument=self.current_position.instrument,
-                direction=self.current_position.direction,
-                size=self.current_position.size,
-                open_price=self.current_position.open_price,
-                close_price=closed_order.price,
-                open_time=self.current_position.open_time,
-                close_time=closed_order.executed_at,
-                pnl=pnl,
-                account_type=self.current_position.account_type,
-            )
-            self.current_position.is_open = False
-            self.current_position.close_price = closed_order.price
-            self.current_position.close_time = closed_order.executed_at
-            self.current_position.pnl = pnl
-            self.strategy.on_position_closed()
-            logger.info(
-                "Closed position",
-                extra={
-                    "instrument": self.instrument,
-                    "strategy": self.strategy.name,
-                    "close_price": closed_order.price,
-                    "pnl": pnl,
-                },
-            )
-            self.current_position = None
-            return trade
 
         logger.info(
             "Strategy evaluated with no trade action",
@@ -156,17 +126,4 @@ class TradingEngine:
                 "state": "in_position" if self.current_position is not None else "flat",
             },
         )
-
         return None
-
-    @staticmethod
-    def _calculate_pnl(
-        *,
-        direction: OrderDirection,
-        open_price: float,
-        close_price: float,
-        size: float,
-    ) -> float:
-        price_delta = close_price - open_price
-        signed_delta = price_delta if direction is OrderDirection.BUY else -price_delta
-        return signed_delta * size

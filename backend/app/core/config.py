@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     starting_account_value: float = 100_000.0
     dashboard_recent_trade_window: int = 30
     market_data_poll_interval_seconds: float = 2.0
+    runtime_max_open_positions: int = 6
+    runtime_max_positions_per_strategy: int = 3
+    runtime_max_open_risk_percent: float = 4.0
+    runtime_daily_loss_limit: float = 2_000.0
+    runtime_one_position_per_instrument: bool = False
     ig_api_key: str | None = None
     ig_username: str | None = None
     ig_password: str | None = None
@@ -66,6 +71,31 @@ class Settings(BaseSettings):
     def validate_positive_poll_intervals(cls, value: float) -> float:
         if value <= 0:
             raise ValueError("Polling interval settings must be greater than 0.")
+        return value
+
+    @field_validator(
+        "runtime_max_open_positions",
+        "runtime_max_positions_per_strategy",
+        mode="after",
+    )
+    @classmethod
+    def validate_positive_runtime_position_limits(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("Runtime position limit settings must be greater than 0.")
+        return value
+
+    @field_validator("runtime_max_open_risk_percent", mode="after")
+    @classmethod
+    def validate_positive_runtime_risk_cap(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("RUNTIME_MAX_OPEN_RISK_PERCENT must be greater than 0.")
+        return value
+
+    @field_validator("runtime_daily_loss_limit", mode="after")
+    @classmethod
+    def validate_positive_runtime_daily_loss_limit(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("RUNTIME_DAILY_LOSS_LIMIT must be greater than 0.")
         return value
 
     @field_validator("ig_market_cache_ttl_seconds", "ig_market_cache_stale_ttl_seconds")

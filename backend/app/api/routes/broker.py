@@ -10,6 +10,7 @@ router = APIRouter(prefix="/broker")
 
 
 class BrokerPositionResponse(BaseModel):
+    broker_reference: str
     instrument: str
     direction: str
     size: float
@@ -26,6 +27,7 @@ def list_broker_positions() -> list[BrokerPositionResponse]:
 
     return [
         BrokerPositionResponse(
+            broker_reference=position.broker_reference,
             instrument=position.instrument,
             direction=position.direction.value,
             size=position.size,

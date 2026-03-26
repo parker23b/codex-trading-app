@@ -5,13 +5,16 @@ from time import perf_counter
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from sqlmodel import Session
 
 from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.db.init_db import initialize_database
+from app.db.session import engine
 from app.services.ig_streaming_service import get_ig_streaming_service
 from app.services.market_data_service import MarketDataService
+from app.services.runtime_recovery_service import RuntimeRecoveryService
 
 settings = get_settings()
 configure_logging(settings.log_level)
@@ -22,6 +25,8 @@ logger = get_logger(__name__)
 async def lifespan(_: FastAPI):
     logger.info("Starting application")
     initialize_database()
+    with Session(engine) as session:
+        RuntimeRecoveryService(session).recover()
     streaming_service = get_ig_streaming_service()
     streaming_enabled = streaming_service.is_enabled()
     market_data_task = asyncio.create_task(MarketDataService(poll_prices=not streaming_enabled).run())

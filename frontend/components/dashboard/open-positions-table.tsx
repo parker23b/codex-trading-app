@@ -14,9 +14,11 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
   const [message, setMessage] = useState<string | null>(null);
   const activeRows = useMemo(() => positions.filter((row) => row.is_open), [positions]);
 
-  const handleClose = (id: number, instrument: string) => {
+  const handleClose = (id: number, instrument: string, brokerReference?: string | null) => {
     void id;
-    setMessage(`Demo close is not wired to the backend yet for ${formatInstrumentLabel(instrument)}.`);
+    setMessage(
+      `Runtime-specific close is not wired to the frontend yet for ${formatInstrumentLabel(instrument)}${brokerReference ? ` (${brokerReference})` : ""}.`,
+    );
   };
 
   const handleOverrideToggle = (id: number) => {
@@ -35,6 +37,7 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
           <tr>
             <th>Instrument</th>
             <th>Strategy</th>
+            <th>Broker Ref</th>
             <th>Duration</th>
             <th>PnL</th>
             <th>Risk</th>
@@ -57,6 +60,7 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
                   {position.reason ? <span className="muted">{position.reason}</span> : null}
                 </div>
               </td>
+              <td><span className="muted">{position.broker_reference ?? "pending"}</span></td>
               <td>{formatRelativeDuration(position.open_time)}</td>
               <td className={(position.unrealized_pnl ?? 0) >= 0 ? "value-positive live-pulse" : "value-negative live-pulse"}>
                 <div className="cell-stack">
@@ -84,7 +88,10 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
                 </label>
               </td>
               <td>
-                <button className="button secondary table-action" onClick={() => handleClose(position.id, position.instrument)}>
+                <button
+                  className="button secondary table-action"
+                  onClick={() => handleClose(position.id, position.instrument, position.broker_reference)}
+                >
                   Demo Close
                 </button>
               </td>

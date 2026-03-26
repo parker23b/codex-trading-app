@@ -1,6 +1,8 @@
 export type Trade = {
   id: number;
   strategy_name: string;
+  broker_reference?: string | null;
+  close_broker_reference?: string | null;
   instrument: string;
   direction: "BUY" | "SELL";
   size: number;
@@ -17,6 +19,7 @@ export type Trade = {
 export type Position = {
   id: number;
   strategy_name: string;
+  broker_reference?: string | null;
   instrument: string;
   direction: "BUY" | "SELL";
   size: number;
@@ -41,6 +44,28 @@ export type StrategyParameter = {
   step?: number;
 };
 
+export type StrategyRuntime = {
+  strategy_name: string;
+  instrument: string;
+  runtime_key: string;
+  has_open_position: boolean;
+  broker_reference?: string | null;
+  direction?: "BUY" | "SELL" | null;
+  current_price?: number | null;
+  unrealized_pnl?: number | null;
+};
+
+export type StrategyPositionSummary = {
+  broker_reference?: string | null;
+  instrument: string;
+  direction: "BUY" | "SELL";
+  size: number;
+  open_price: number;
+  current_price?: number | null;
+  unrealized_pnl?: number | null;
+  risk_percent?: number | null;
+};
+
 export type StrategyDefinition = {
   name: string;
   description: string;
@@ -56,6 +81,11 @@ export type StrategyDefinition = {
   account_type: "DEMO" | "LIVE";
   position_size: number;
   risk_per_trade: number;
+  active_instruments?: string[];
+  active_runtime_count?: number;
+  open_position_count?: number;
+  active_runtimes?: StrategyRuntime[];
+  open_positions?: StrategyPositionSummary[];
   instrument_options?: { epic: string; label: string; category: string }[];
   parameters: StrategyParameter[];
 };
@@ -89,6 +119,9 @@ export type DashboardSnapshot = {
     name: string;
     instrument: string;
     instrumentLabel: string;
+    runtimeKey?: string;
+    brokerReference?: string | null;
+    hasOpenPosition?: boolean;
     lastPrice?: number | null;
   }[];
 };

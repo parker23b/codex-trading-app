@@ -34,8 +34,19 @@ class TradeService:
         statement = select(Position).where(Position.is_open.is_(True))
         return list(self.session.exec(statement).all())
 
-    def get_open_position(self, instrument: str) -> Position | None:
-        statement = select(Position).where(Position.instrument == instrument, Position.is_open.is_(True))
+    def get_open_position(
+        self,
+        instrument: str,
+        strategy_name: str | None = None,
+        broker_reference: str | None = None,
+    ) -> Position | None:
+        statement = select(Position).where(Position.is_open.is_(True))
+        if broker_reference is not None:
+            statement = statement.where(Position.broker_reference == broker_reference)
+        else:
+            statement = statement.where(Position.instrument == instrument)
+        if strategy_name is not None:
+            statement = statement.where(Position.strategy_name == strategy_name)
         return self.session.exec(statement).first()
 
     def record_trade(self, trade: Trade) -> Trade:
@@ -45,10 +56,15 @@ class TradeService:
         return trade
 
     def upsert_position(self, position: Position) -> Position:
-        existing = self.get_open_position(position.instrument)
+        existing = self.get_open_position(
+            position.instrument,
+            strategy_name=position.strategy_name,
+            broker_reference=position.broker_reference,
+        )
         if existing is not None:
             for field_name in (
                 "strategy_name",
+                "broker_reference",
                 "direction",
                 "size",
                 "open_price",

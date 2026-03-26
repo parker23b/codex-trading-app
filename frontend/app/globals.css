@@ -1163,6 +1163,15 @@ p {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 18px;
+  align-items: start;
+}
+
+.strategy-grid > * {
+  min-width: 0;
+}
+
+.strategy-card {
+  min-width: 0;
 }
 
 .strategy-card__meta {
@@ -1173,6 +1182,7 @@ p {
 }
 
 .strategy-stat {
+  min-width: 0;
   padding: 14px;
   border-radius: 16px;
   background: color-mix(in srgb, var(--glassSolid) 70%, transparent);
@@ -1183,6 +1193,7 @@ p {
   display: block;
   margin-top: 6px;
   font-size: 1.1rem;
+  overflow-wrap: anywhere;
 }
 
 .strategy-card__instrument {
@@ -1190,6 +1201,7 @@ p {
   flex-direction: column;
   gap: 8px;
   margin-bottom: 16px;
+  min-width: 0;
 }
 
 .strategy-card__instrument input,
@@ -1206,6 +1218,80 @@ p {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.strategy-runtime-list {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.strategy-runtime-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  grid-template-areas:
+    "runtime-info runtime-state"
+    "runtime-action runtime-action";
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--glassSolid) 82%, white 18%);
+}
+
+.strategy-runtime-row > * {
+  min-width: 0;
+}
+
+.strategy-runtime-row > :nth-child(1) {
+  grid-area: runtime-info;
+}
+
+.strategy-runtime-row > :nth-child(2) {
+  grid-area: runtime-state;
+  justify-self: end;
+}
+
+.strategy-runtime-row > :nth-child(3) {
+  grid-area: runtime-action;
+  justify-self: stretch;
+}
+
+.strategy-runtime-row strong,
+.strategy-runtime-row .muted,
+.strategy-runtime-row .eyebrow {
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.strategy-runtime-row strong,
+.strategy-runtime-row .muted {
+  line-height: 1.35;
+}
+
+.strategy-runtime-row .table-action {
+  width: 100%;
+}
+
+@media (max-width: 860px) {
+  .strategy-runtime-row {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "runtime-info"
+      "runtime-state"
+      "runtime-action";
+  }
+
+  .strategy-runtime-row .table-action {
+    width: 100%;
+  }
+}
+
+@media (max-width: 560px) {
+  .strategy-card__meta {
+    grid-template-columns: 1fr;
+  }
 }
 
 .config-drawer-backdrop {

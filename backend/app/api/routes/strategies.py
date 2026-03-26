@@ -15,7 +15,8 @@ class StartStrategyRequest(BaseModel):
 
 
 class StopStrategyRequest(BaseModel):
-    instrument: str = Field(..., description="Instrument currently being managed.")
+    instrument: str | None = Field(default=None, description="Instrument currently being managed.")
+    strategy_name: str | None = Field(default=None, description="Optional strategy name to target a specific runtime.")
 
 
 class StrategyControlResponse(BaseModel):
@@ -55,7 +56,10 @@ def stop_strategy(
     session: Session = Depends(get_session),
 ) -> dict[str, str]:
     try:
-        StrategyService(session).stop_strategy(instrument=payload.instrument)
+        StrategyService(session).stop_strategy(
+            instrument=payload.instrument,
+            strategy_name=payload.strategy_name,
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

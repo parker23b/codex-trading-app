@@ -115,11 +115,12 @@ export function DashboardLive({
   const equityCurve = trailingTrades
     .slice()
     .reverse()
-    .reduce<{ label: string; value: number; drawdown: number }[]>((series, trade, index) => {
+    .reduce<{ timestamp: string; label: string; value: number; drawdown: number }[]>((series, trade, index) => {
       const previous = series[index - 1]?.value ?? 100000;
       const nextValue = Number((previous + trade.pnl).toFixed(2));
       const peak = Math.max(...series.map((point) => point.value), 100000, nextValue);
       series.push({
+        timestamp: trade.close_time,
         label: new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(new Date(trade.close_time)),
         value: nextValue,
         drawdown: Number((((peak - nextValue) / peak) * 100).toFixed(2)),
@@ -166,6 +167,11 @@ export function DashboardLive({
                 : openRiskPercent < 4
                   ? "Risk is buildable, but new entries should be selective."
                   : "Risk is elevated. Prioritise netting, trims, or tighter stops before adding."}
+            </div>
+            <div className="status-note status-note--inline">
+              {(dashboard.runningStrategies ?? []).length > 0
+                ? `${(dashboard.runningStrategies ?? []).filter((row) => row.hasOpenPosition).length} runtime${(dashboard.runningStrategies ?? []).filter((row) => row.hasOpenPosition).length === 1 ? "" : "s"} currently hold exposure; the rest are scanning only.`
+                : "No active runtimes are publishing into the dashboard yet."}
             </div>
           </Card>
         </div>
@@ -215,6 +221,9 @@ export function DashboardLive({
       </section>
       <section className="page-grid">
         <Card title="Open Positions" subtitle="Current exposure and controls." className="card--table card--full-width">
+          <div className="status-note status-note--inline">
+            Runtime-specific positions are now shown with broker references so same-instrument exposure stays distinguishable.
+          </div>
           <div className="status-note status-note--inline">Demo actions only. Close and override changes stay in the UI and do not send orders.</div>
           <OpenPositionsTable positions={positions} />
         </Card>

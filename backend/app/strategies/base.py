@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from app.core.broker import OrderDirection
 
@@ -69,3 +70,16 @@ class Strategy(ABC):
 
     def on_position_closed(self) -> None:
         """Optional lifecycle hook invoked after the active position is closed."""
+
+    def export_state_snapshot(self) -> dict[str, Any]:
+        """
+        Return a JSON-serializable snapshot of internal strategy state.
+
+        Strategies can override this to make rolling windows and cooldown state
+        recoverable across process restarts.
+        """
+
+        return {}
+
+    def restore_state_snapshot(self, snapshot: dict[str, Any]) -> None:
+        """Restore state previously returned by `export_state_snapshot()`."""

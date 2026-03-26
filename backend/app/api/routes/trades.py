@@ -15,6 +15,8 @@ router = APIRouter()
 class TradeResponse(BaseModel):
     id: int
     strategy_name: str
+    broker_reference: str | None
+    close_broker_reference: str | None
     instrument: str
     direction: str
     size: float
@@ -33,6 +35,8 @@ def _serialize_trade(trade: Trade) -> TradeResponse:
     return TradeResponse(
         id=trade.id or 0,
         strategy_name=trade.strategy_name,
+        broker_reference=trade.broker_reference,
+        close_broker_reference=trade.close_broker_reference,
         instrument=trade.instrument,
         direction=trade.direction,
         size=trade.size,
@@ -68,6 +72,7 @@ def list_positions_compat(session: Session = Depends(get_session)) -> list[dict[
         {
             "id": position.id or 0,
             "strategy_name": position.strategy_name,
+            "broker_reference": position.broker_reference,
             "instrument": position.instrument,
             "direction": position.direction,
             "size": position.size,

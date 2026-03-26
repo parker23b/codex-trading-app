@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from typing import Any
 
 from app.core.broker import OrderDirection
 from app.strategies.base import PriceUpdate, Strategy
@@ -185,3 +186,23 @@ class FxMicroPullbackStrategy(Strategy):
             return self.last_ask
         assert self.last_price is not None
         return self.last_price
+
+    def export_state_snapshot(self) -> dict[str, Any]:
+        return {
+            "prices": list(self.prices),
+            "last_price": self.last_price,
+            "last_bid": self.last_bid,
+            "last_ask": self.last_ask,
+            "entry_direction": self._entry_direction.value if self._entry_direction else None,
+            "entry_price": self._entry_price,
+        }
+
+    def restore_state_snapshot(self, snapshot: dict[str, Any]) -> None:
+        prices = snapshot.get("prices") or []
+        self.prices = deque((float(price) for price in prices), maxlen=self.slow_window + self.momentum_window + 5)
+        self.last_price = snapshot.get("last_price")
+        self.last_bid = snapshot.get("last_bid")
+        self.last_ask = snapshot.get("last_ask")
+        direction = snapshot.get("entry_direction")
+        self._entry_direction = OrderDirection(direction) if direction else None
+        self._entry_price = snapshot.get("entry_price")

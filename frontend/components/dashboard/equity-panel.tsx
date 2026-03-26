@@ -10,6 +10,7 @@ type TimeFilter = "6 Trades" | "10 Trades" | "16 Trades" | "All";
 
 type EquityPoint = {
   label: string;
+  timestamp?: string;
   value: number;
   drawdown: number;
 };
@@ -82,8 +83,8 @@ export function EquityPanel({ points, latestValue, delta }: EquityPanelProps) {
           <span><i className="legend-swatch legend-swatch--drawdown" /> Drawdown</span>
         </div>
         <div className="chart-axis">
-          {filteredPoints.map((point) => (
-            <span key={point.label}>{point.label}</span>
+          {filteredPoints.map((point, index) => (
+            <span key={point.timestamp ?? `${point.label}-${index}`}>{point.label}</span>
           ))}
         </div>
       </div>

@@ -239,7 +239,7 @@ class IGStreamingService:
         self._loop.call_soon_threadsafe(self._queue.put_nowait, update)
 
     async def _reconcile_subscription(self) -> None:
-        active_instruments = tuple(sorted(runtime_manager.engines.keys()))
+        active_instruments = tuple(runtime_manager.list_active_instruments())
         if not active_instruments:
             if self._subscription is not None:
                 logger.info("No active instruments remain; closing IG price subscription.")

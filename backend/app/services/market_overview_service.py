@@ -60,7 +60,9 @@ class MarketOverviewService:
             raise ValueError(f"Unsupported market category '{category}'.")
 
         now = datetime.now(UTC)
-        positions = {position.instrument: position for position in self.trade_service.list_positions()}
+        positions_by_instrument: dict[str, list[Position]] = {}
+        for position in self.trade_service.list_positions():
+            positions_by_instrument.setdefault(position.instrument, []).append(position)
         trades = self.trade_service.list_trades()
         rows: list[dict[str, object]] = []
 
@@ -74,7 +76,7 @@ class MarketOverviewService:
                 definition=definition,
                 details=details,
                 now=now,
-                position=positions.get(definition.epic),
+                positions=positions_by_instrument.get(definition.epic, []),
                 trades=trades,
             )
             )
@@ -91,13 +93,15 @@ class MarketOverviewService:
         definition: InstrumentDefinition,
         details: BrokerMarketDetails,
         now: datetime,
-        position: Position | None,
+        positions: list[Position],
         trades: list[Trade],
     ) -> dict[str, object]:
-        price = self._select_price(details, position, definition)
-        active = self._is_active(definition=definition, details=details, now=now, position=position, trades=trades)
-        status = self._map_status(details.market_status, tradable=details.tradable, has_open_position=bool(position and position.is_open))
-        session_note = self._session_note(details=details, status=status, has_open_position=bool(position and position.is_open))
+        primary_position = positions[0] if positions else None
+        has_open_position = any(position.is_open for position in positions)
+        price = self._select_price(details, primary_position, definition)
+        active = self._is_active(definition=definition, details=details, now=now, positions=positions, trades=trades)
+        status = self._map_status(details.market_status, tradable=details.tradable, has_open_position=has_open_position)
+        session_note = self._session_note(details=details, status=status, has_open_position=has_open_position)
 
         return {
             "id": definition.epic,
@@ -181,14 +185,14 @@ class MarketOverviewService:
         definition: InstrumentDefinition,
         details: BrokerMarketDetails,
         now: datetime,
-        position: Position | None,
+        positions: list[Position],
         trades: list[Trade],
     ) -> bool:
         active_runtime = any(
             engine.instrument == definition.epic and engine.active
             for engine in runtime_manager.engines.values()
         )
-        has_open_position = bool(position and position.is_open)
+        has_open_position = any(position.is_open for position in positions)
         has_recent_trade = any(
             trade.instrument == definition.epic and (now - trade.close_time.astimezone(UTC)) <= timedelta(days=2)
             for trade in trades[:30]

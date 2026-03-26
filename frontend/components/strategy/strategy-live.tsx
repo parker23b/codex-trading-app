@@ -55,7 +55,7 @@ export function StrategyLive({ initialStrategies, initialStreamHealth }: Strateg
       </section>
       <Card
         title="Strategy Control Panel"
-        subtitle="Each card exposes run-state, current performance, and configuration so you can operate strategies like a control surface, not a list."
+        subtitle="Each card can launch multiple instrument runtimes, show which ones are only scanning, and surface live exposure without collapsing everything into a single row."
       >
         <StrategyControlPanel strategies={strategies} />
       </Card>

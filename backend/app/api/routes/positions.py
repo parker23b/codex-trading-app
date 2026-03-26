@@ -15,6 +15,7 @@ router = APIRouter()
 class PositionResponse(BaseModel):
     id: int
     strategy_name: str
+    broker_reference: str | None
     instrument: str
     direction: str
     size: float
@@ -38,6 +39,7 @@ def _serialize_position(position: Position) -> PositionResponse:
     return PositionResponse(
         id=position.id or 0,
         strategy_name=position.strategy_name,
+        broker_reference=position.broker_reference,
         instrument=position.instrument,
         direction=position.direction,
         size=position.size,

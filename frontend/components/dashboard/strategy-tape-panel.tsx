@@ -5,6 +5,9 @@ type StrategyTapeRow = {
   name: string;
   instrument: string;
   instrumentLabel: string;
+  runtimeKey?: string;
+  brokerReference?: string | null;
+  hasOpenPosition?: boolean;
   lastPrice?: number | null;
 };
 
@@ -24,10 +27,13 @@ export function StrategyTapePanel({ rows }: StrategyTapePanelProps) {
       ) : (
         <div className="strategy-tape">
           {rows.map((row) => (
-            <article key={`${row.name}:${row.instrument}`} className="strategy-tape__row">
+            <article key={row.runtimeKey ?? `${row.name}:${row.instrument}`} className="strategy-tape__row">
               <div>
                 <div className="eyebrow">{row.name}</div>
                 <strong>{row.instrumentLabel}</strong>
+                <div className="muted">
+                  {row.hasOpenPosition ? row.brokerReference ?? "position open" : "scan runtime"}
+                </div>
               </div>
               <div className="strategy-tape__price">{row.lastPrice != null ? formatPrice(row.lastPrice, row.instrument) : "Waiting..."}</div>
             </article>

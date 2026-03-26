@@ -45,16 +45,20 @@ class MarketDataService:
             await asyncio.sleep(self.settings.market_data_poll_interval_seconds)
 
     async def _poll_once(self) -> None:
-        active_engines = list(runtime_manager.engines.items())
-        if not active_engines:
+        active_instruments = runtime_manager.list_active_instruments()
+        if not active_instruments:
             return
 
         with Session(engine) as session:
             BrokerService().reconcile_positions(session)
             strategy_service = StrategyService(session)
-            for instrument, trading_engine in active_engines:
+            for instrument in active_instruments:
                 if not self._should_poll_instrument(instrument):
                     continue
+                instrument_engines = runtime_manager.get_engines_for_instrument(instrument)
+                if not instrument_engines:
+                    continue
+                trading_engine = instrument_engines[0][1]
                 try:
                     market_details = await asyncio.to_thread(trading_engine.broker.get_market_details, instrument)
                 except IGBrokerError as exc:

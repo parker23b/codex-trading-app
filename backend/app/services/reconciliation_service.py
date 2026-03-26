@@ -3,7 +3,8 @@ from __future__ import annotations
 from app.core.broker_factory import get_broker
 from app.core.logging import get_logger
 from app.core.runtime import runtime_manager
-from app.models.trade import Position
+from app.models.trade import Position, clone_position
+from app.services.runtime_state_service import RuntimeStateService
 from app.services.trade_service import TradeService
 
 logger = get_logger(__name__)
@@ -15,21 +16,61 @@ class ReconciliationService:
     def __init__(self, trade_service: TradeService):
         self.trade_service = trade_service
         self.broker = get_broker()
+        self.runtime_state_service = RuntimeStateService(trade_service.session)
 
     def reconcile_open_positions(self) -> list[Position]:
         remote_positions = self.broker.get_positions()
         local_positions = self.trade_service.list_all_open_positions()
-        local_by_instrument = {position.instrument: position for position in local_positions}
-        remote_by_instrument = {position.instrument: position for position in remote_positions}
+        local_by_broker_reference = {
+            position.broker_reference: position
+            for position in local_positions
+            if position.broker_reference
+        }
+        local_by_runtime_key = {
+            (position.strategy_name, position.instrument): position
+            for position in local_positions
+        }
+        local_by_instrument: dict[str, list[Position]] = {}
+        for position in local_positions:
+            local_by_instrument.setdefault(position.instrument, []).append(position)
+        remote_by_broker_reference = {position.broker_reference: position for position in remote_positions}
 
-        for instrument, remote_position in remote_by_instrument.items():
-            runtime_engine = runtime_manager.engines.get(instrument)
-            local_position = local_by_instrument.get(instrument)
-            strategy_name = runtime_engine.strategy.name if runtime_engine else (local_position.strategy_name if local_position else "broker_sync")
+        for remote_position in remote_positions:
+            instrument = remote_position.instrument
+            runtime_engines = runtime_manager.get_engines_for_instrument(instrument)
+            local_position = local_by_broker_reference.get(remote_position.broker_reference)
+            matching_engine = next(
+                (
+                    engine
+                    for _, engine in runtime_engines
+                    if engine.current_position is not None
+                    and engine.current_position.broker_reference == remote_position.broker_reference
+                ),
+                None,
+            )
+            if local_position is None and matching_engine is None and len(runtime_engines) == 1:
+                local_position = next(iter(local_by_instrument.get(instrument, [])), None)
+
+            if local_position is not None:
+                mapped_engine = runtime_manager.get_engine(local_position.strategy_name, instrument)
+                if mapped_engine is not None:
+                    matching_engine = mapped_engine
+
+            strategy_name = (
+                local_position.strategy_name
+                if local_position
+                else (matching_engine.strategy.name if matching_engine else "broker_sync")
+            )
+            persisted_id = local_position.id if local_position else None
+            if persisted_id is None:
+                runtime_position = local_by_runtime_key.get((strategy_name, instrument))
+                if runtime_position is not None and runtime_position.broker_reference is None:
+                    persisted_id = runtime_position.id
             runtime_manager.last_prices.setdefault(instrument, remote_position.open_price)
             synced_position = Position(
-                id=local_position.id if local_position else None,
+                id=persisted_id,
                 strategy_name=strategy_name,
+                broker_reference=remote_position.broker_reference,
                 instrument=remote_position.instrument,
                 direction=remote_position.direction.value,
                 size=remote_position.size,
@@ -44,17 +85,44 @@ class ReconciliationService:
                 is_open=True,
             )
             persisted = self.trade_service.upsert_position(synced_position)
-            if runtime_engine is not None:
-                runtime_engine.current_position = persisted
+            if matching_engine is not None:
+                matching_engine.current_position = clone_position(persisted)
+                self.runtime_state_service.sync_engine_state(
+                    strategy_name=matching_engine.strategy.name,
+                    instrument=matching_engine.instrument,
+                    status="RUNNING",
+                    recovery_state="RUNNING",
+                    last_price_seen=runtime_manager.get_last_price(instrument) or remote_position.open_price,
+                    last_price_seen_at=runtime_manager.get_last_price_updated_at(instrument),
+                    current_position=persisted,
+                )
 
-        for instrument, local_position in local_by_instrument.items():
-            if instrument in remote_by_instrument:
+        for local_position in local_positions:
+            if local_position.broker_reference and local_position.broker_reference in remote_by_broker_reference:
+                continue
+            if local_position.broker_reference is None and any(
+                remote_position.instrument == local_position.instrument
+                for remote_position in remote_positions
+            ):
                 continue
             local_position.is_open = False
             self.trade_service.close_position(local_position)
-            runtime_engine = runtime_manager.engines.get(instrument)
-            if runtime_engine is not None:
+            runtime_engine = runtime_manager.get_engine(local_position.strategy_name, local_position.instrument)
+            if runtime_engine is not None and runtime_engine.current_position is not None and (
+                runtime_engine.current_position.broker_reference == local_position.broker_reference
+                or (
+                    runtime_engine.current_position.broker_reference is None
+                    and local_position.broker_reference is None
+                )
+            ):
                 runtime_engine.current_position = None
+                self.runtime_state_service.mark_recovery_state(
+                    strategy_name=runtime_engine.strategy.name,
+                    instrument=runtime_engine.instrument,
+                    recovery_state="RUNNING",
+                    recovery_reason=None,
+                    current_position_broker_reference=None,
+                )
 
         logger.info(
             "Broker reconciliation complete",

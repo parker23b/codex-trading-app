@@ -150,7 +150,7 @@ class DashboardService:
 
         instruments = {item["epic"]: item for item in list_instruments()}
         rows: list[dict[str, object]] = []
-        for instrument, engine in runtime_manager.engines.items():
+        for (_, instrument), engine in runtime_manager.engines.items():
             if not engine.active:
                 continue
             last_price = get_ig_streaming_service().get_last_price(instrument)
@@ -167,8 +167,11 @@ class DashboardService:
                 {
                     "name": engine.strategy.name,
                     "instrument": instrument,
+                    "runtimeKey": f"{engine.strategy.name}:{instrument}",
+                    "brokerReference": engine.current_position.broker_reference if engine.current_position else None,
                     "instrumentLabel": instruments.get(instrument, {}).get("label", instrument),
                     "lastPrice": last_price,
+                    "hasOpenPosition": engine.current_position is not None,
                 }
             )
         return rows
