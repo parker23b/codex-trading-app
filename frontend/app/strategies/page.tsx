@@ -17,9 +17,6 @@ export default async function StrategiesPage() {
         subtitle="Each card exposes run-state, current performance, and configuration so you can operate strategies like a control surface, not a list."
       >
         <StrategyControlPanel strategies={strategies} />
-        {backendMode === "dev-fallback" ? (
-          <div className="status-note">Strategy actions are simulated locally while the backend is unavailable.</div>
-        ) : null}
       </Card>
     </main>
   );

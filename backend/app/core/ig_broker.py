@@ -220,7 +220,7 @@ class IGBroker(Broker):
         return positions
 
     def get_latest_price(self, instrument: str) -> float:
-        details = self.get_market_details(instrument)
+        details = self._load_market_details(instrument, use_cache=False)
         price: float | None = None
         if details.bid is not None and details.offer is not None:
             price = round((details.bid + details.offer) / 2, 5)
@@ -242,8 +242,11 @@ class IGBroker(Broker):
         return price
 
     def get_market_details(self, instrument: str) -> BrokerMarketDetails:
+        return self._load_market_details(instrument, use_cache=True)
+
+    def _load_market_details(self, instrument: str, *, use_cache: bool) -> BrokerMarketDetails:
         cached = self._market_details_cache.get(instrument)
-        if cached is not None and self._is_cache_fresh(cached):
+        if use_cache and cached is not None and self._is_cache_fresh(cached):
             return cached.details
 
         self._ensure_authenticated()

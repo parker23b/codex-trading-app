@@ -1,8 +1,12 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+
+BACKEND_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
 class Settings(BaseSettings):
@@ -15,8 +19,6 @@ class Settings(BaseSettings):
     broker_provider: str = "IG"
     broker_mode: str = "DEMO"
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000", "http://127.0.0.1:3000"]
-    simulation_mode: bool = True
-    simulation_seed: int = 20260320
     starting_account_value: float = 100_000.0
     dashboard_recent_trade_window: int = 30
     market_data_poll_interval_seconds: float = 2.0
@@ -32,7 +34,7 @@ class Settings(BaseSettings):
     ig_verify_ssl: bool = True
     ig_ca_bundle_path: str | None = None
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
+    model_config = SettingsConfigDict(env_file=BACKEND_ENV_FILE, case_sensitive=False, extra="ignore")
 
     @field_validator("cors_origins", mode="before")
     @classmethod

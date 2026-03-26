@@ -23,11 +23,7 @@ export function StrategyControls({ strategies }: StrategyControlsProps) {
     startTransition(async () => {
       try {
         const result = await startStrategy(strategyName, instrument);
-        setStatusMessage(
-          result.status.startsWith("simulated-start:")
-            ? `Simulated start for ${strategyName} on ${instrument}.`
-            : `Started ${strategyName} on ${instrument}.`,
-        );
+        setStatusMessage(result.status === "started" ? `Started ${strategyName} on ${instrument}.` : result.status);
         router.refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unable to start strategy.");
@@ -41,11 +37,7 @@ export function StrategyControls({ strategies }: StrategyControlsProps) {
     startTransition(async () => {
       try {
         const result = await stopStrategy(instrument);
-        setStatusMessage(
-          result.status.startsWith("simulated-stop:")
-            ? `Simulated stop for ${instrument}.`
-            : `Stopped strategy on ${instrument}.`,
-        );
+        setStatusMessage(result.status === "stopped" ? `Stopped strategy on ${instrument}.` : result.status);
         router.refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unable to stop strategy.");

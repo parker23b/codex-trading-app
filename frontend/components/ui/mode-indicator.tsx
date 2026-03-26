@@ -16,7 +16,7 @@ export function ModeIndicator({ mode, brokerAuth }: ModeIndicatorProps) {
   const modeDetail =
     mode === "LIVE"
       ? "Orders are pointed at the live environment."
-      : "Frontend is configured for simulated behavior.";
+      : "Orders are pointed at the demo environment.";
 
   return (
     <div className="mode-indicator">

@@ -4,7 +4,6 @@ from sqlmodel import Session
 
 from app.db.session import get_session
 from app.services.broker_service import BrokerService
-from app.services.simulation_service import simulation_service
 from app.services.strategy_service import StrategyService
 
 router = APIRouter()
@@ -27,10 +26,7 @@ class StrategyControlResponse(BaseModel):
 
 @router.get("/strategies")
 def list_strategies(session: Session = Depends(get_session)) -> list[dict[str, object]]:
-    if simulation_service.enabled:
-        simulation_service.advance_market(session, ticks=1)
-    else:
-        BrokerService().reconcile_positions(session)
+    BrokerService().reconcile_positions(session)
     return StrategyService(session).list_strategies()
 
 

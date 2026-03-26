@@ -7,13 +7,12 @@ import { RiskPanel } from "@/components/dashboard/risk-panel";
 import { StrategyTapePanel } from "@/components/dashboard/strategy-tape-panel";
 import { ModeIndicator } from "@/components/ui/mode-indicator";
 import { Card } from "@/components/ui/card";
-import { getBackendMode, getBrokerAuthStatus, getDashboardSnapshot, getOpenPositions, getTrades } from "@/lib/api";
+import { getBrokerAuthStatus, getDashboardSnapshot, getOpenPositions, getTrades } from "@/lib/api";
 
 export default async function DashboardPage() {
-  const [positions, trades, backendMode, brokerAuth, dashboard] = await Promise.all([
+  const [positions, trades, brokerAuth, dashboard] = await Promise.all([
     getOpenPositions(),
     getTrades(),
-    getBackendMode(),
     getBrokerAuthStatus(),
     getDashboardSnapshot(),
   ]);
@@ -160,17 +159,11 @@ export default async function DashboardPage() {
         <Card title="Open Positions" subtitle="Current exposure and controls." className="card--table card--full-width">
           <div className="status-note status-note--inline">Demo actions only. Close and override changes stay in the UI and do not send orders.</div>
           <OpenPositionsTable positions={positions} />
-          {backendMode === "dev-fallback" ? (
-            <div className="status-note">Displaying sample positions because the backend is offline.</div>
-          ) : null}
         </Card>
       </section>
       <section className="page-grid">
         <Card title="Recent Trades" subtitle="Latest closed trades." className="card--table">
           <RecentTradesTable trades={sortedTrades.slice(0, 10)} />
-          {backendMode === "dev-fallback" ? (
-            <div className="status-note">Displaying sample trades because the backend is offline.</div>
-          ) : null}
         </Card>
       </section>
     </main>

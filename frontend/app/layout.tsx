@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 
 import { AppNav } from "@/components/app-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { getBackendMode } from "@/lib/api";
 
 import "./globals.css";
 
@@ -17,7 +16,6 @@ export default async function RootLayout({
 }: Readonly<{
   children: ReactNode;
 }>) {
-  const backendMode = await getBackendMode();
   const themeInitScript = `
     (function () {
       var storageKey = "trading-platform-theme";
@@ -93,12 +91,6 @@ export default async function RootLayout({
             </div>
             <AppNav />
           </header>
-          {backendMode === "dev-fallback" ? (
-            <div className="dev-banner">
-              Backend is not reachable, so the frontend is running in
-              development fallback mode with mock data.
-            </div>
-          ) : null}
           {children}
         </div>
         <ThemeToggle />

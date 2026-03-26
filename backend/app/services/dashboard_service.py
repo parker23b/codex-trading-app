@@ -29,27 +29,26 @@ class DashboardService:
         daily_pnl = self._daily_pnl(trades, positions)
         account_value_percent = ((account_value - self.settings.starting_account_value) / self.settings.starting_account_value) * 100
 
-        if not self.settings.simulation_mode:
-            try:
-                account_summary = get_broker().get_account_summary()
-                account_value = account_summary.equity
-                daily_pnl = account_summary.profit_loss
-                baseline = account_summary.equity - account_summary.profit_loss
-                account_value_percent = ((account_summary.equity - self.settings.starting_account_value) / self.settings.starting_account_value) * 100
-                daily_pnl_percent = (account_summary.profit_loss / baseline) * 100 if baseline else 0.0
-            except IGBrokerError:
-                daily_pnl_percent = (daily_pnl / self.settings.starting_account_value) * 100
-            else:
-                return {
-                    "accountValue": round(account_value, 2),
-                    "accountValuePercent": round(account_value_percent, 2),
-                    "dailyPnl": round(daily_pnl, 2),
-                    "dailyPnlPercent": round(daily_pnl_percent, 2),
-                    "openRisk": round(sum(position.risk_percent or 0.0 for position in positions), 2),
-                    "winRate": round(self._win_rate(recent_trades), 2),
-                    "riskReward": round(self._risk_reward(recent_trades), 2),
-                    "runningStrategies": self._running_strategies(),
-                }
+        try:
+            account_summary = get_broker().get_account_summary()
+            account_value = account_summary.equity
+            daily_pnl = account_summary.profit_loss
+            baseline = account_summary.equity - account_summary.profit_loss
+            daily_pnl_percent = (account_summary.profit_loss / baseline) * 100 if baseline else 0.0
+        except IGBrokerError:
+            daily_pnl_percent = (daily_pnl / self.settings.starting_account_value) * 100
+        else:
+            account_value_percent = ((account_summary.equity - self.settings.starting_account_value) / self.settings.starting_account_value) * 100
+            return {
+                "accountValue": round(account_value, 2),
+                "accountValuePercent": round(account_value_percent, 2),
+                "dailyPnl": round(daily_pnl, 2),
+                "dailyPnlPercent": round(daily_pnl_percent, 2),
+                "openRisk": round(sum(position.risk_percent or 0.0 for position in positions), 2),
+                "winRate": round(self._win_rate(recent_trades), 2),
+                "riskReward": round(self._risk_reward(recent_trades), 2),
+                "runningStrategies": self._running_strategies(),
+            }
 
         return {
             "accountValue": round(account_value, 2),

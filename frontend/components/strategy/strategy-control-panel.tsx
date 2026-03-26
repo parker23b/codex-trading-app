@@ -51,11 +51,7 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
             current_pnl: 0,
           },
         }));
-        setStatusMessage(
-          result.status.startsWith("simulated-stop:")
-            ? `Simulated stop for ${formatInstrumentLabel(instrument)}.`
-            : `Stopped ${strategy.name}.`,
-        );
+        setStatusMessage(result.status === "stopped" ? `Stopped ${strategy.name}.` : result.status);
       } else {
         const result = await startStrategy(strategy.name, instrument);
         setConfigDrafts((current) => ({
@@ -66,11 +62,7 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
             instrument,
           },
         }));
-        setStatusMessage(
-          result.status.startsWith("simulated-start:")
-            ? `Simulated start for ${strategy.name} on ${formatInstrumentLabel(instrument)}.`
-            : `Started ${strategy.name}.`,
-        );
+        setStatusMessage(result.status === "started" ? `Started ${strategy.name}.` : result.status);
       }
       router.refresh();
     });
@@ -165,7 +157,7 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
                 <button
                   className="button"
                   onClick={() => {
-                    setStatusMessage(`Saved simulated settings for ${selectedStrategy.name}.`);
+                    setStatusMessage(`Saved settings for ${selectedStrategy.name}.`);
                     setSelectedStrategy(null);
                   }}
                 >
