@@ -934,6 +934,21 @@ p {
   accent-color: var(--accent);
 }
 
+.config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--glassBorder);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--surface) 88%, white 12%);
+}
+
+.config-field strong {
+  font-size: 1rem;
+  letter-spacing: -0.02em;
+}
+
 .table-action {
   min-width: 76px;
 }

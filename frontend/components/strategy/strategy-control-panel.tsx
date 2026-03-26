@@ -21,25 +21,21 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
   );
   const [selectedStrategy, setSelectedStrategy] = useState<StrategyDefinition | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [configDrafts, setConfigDrafts] = useState<Record<string, StrategyDefinition>>(
-    Object.fromEntries(strategies.map((strategy) => [strategy.name, strategy])),
-  );
 
   useEffect(() => {
     setInstrumentOverrides((current) => ({
       ...Object.fromEntries(strategies.map((strategy) => [strategy.name, strategy.instrument])),
       ...current,
     }));
-    setConfigDrafts(Object.fromEntries(strategies.map((strategy) => [strategy.name, strategy])));
     setSelectedStrategy((current) => (current ? strategies.find((strategy) => strategy.name === current.name) ?? null : null));
   }, [strategies]);
 
   const sortedStrategies = useMemo(
     () =>
-      Object.values(configDrafts).sort((left, right) =>
+      strategies.slice().sort((left, right) =>
         left.status === right.status ? left.name.localeCompare(right.name) : left.status === "RUNNING" ? -1 : 1,
       ),
-    [configDrafts],
+    [strategies],
   );
   const groupedInstrumentOptions = (strategy: StrategyDefinition) =>
     (strategy.instrument_options ?? []).reduce<Record<string, { epic: string; label: string; category: string }[]>>((groups, option) => {
@@ -71,14 +67,6 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
     startTransition(async () => {
       const instrument = instrumentOverrides[strategy.name];
       const result = await startStrategy(strategy.name, instrument);
-      setConfigDrafts((current) => ({
-        ...current,
-        [strategy.name]: {
-          ...current[strategy.name],
-          status: "RUNNING",
-          instrument,
-        },
-      }));
       setStatusMessage(result.status === "started" ? `Started ${strategy.name} on ${formatInstrumentLabel(instrument)}.` : result.status);
       router.refresh();
     });
@@ -95,8 +83,6 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
       router.refresh();
     });
   };
-
-  const selectedDraft = selectedStrategy ? configDrafts[selectedStrategy.name] : null;
 
   return (
     <div className="strategy-workspace">
@@ -211,7 +197,7 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
                 Start Runtime
               </button>
               <button className="button secondary" onClick={() => setSelectedStrategy(strategy)}>
-                Settings
+                View Config
               </button>
             </div>
           </Card>
@@ -227,75 +213,29 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
                 <h3>{selectedStrategy.name}</h3>
               </div>
               <div className="strategy-card__actions">
-                <button
-                  className="button"
-                  onClick={() => {
-                    setStatusMessage(`Saved settings for ${selectedStrategy.name}.`);
-                    setSelectedStrategy(null);
-                  }}
-                >
-                  Save
-                </button>
                 <button className="button secondary" onClick={() => setSelectedStrategy(null)}>
                   Close
                 </button>
               </div>
             </div>
             <div className="config-grid">
-              <label>
+              <div className="config-field">
                 <span className="eyebrow">Position Size</span>
-                <input
-                  value={selectedDraft?.position_size ?? ""}
-                  onChange={(event) =>
-                    setConfigDrafts((current) => ({
-                      ...current,
-                      [selectedStrategy.name]: {
-                        ...current[selectedStrategy.name],
-                        position_size: Number(event.target.value),
-                      },
-                    }))
-                  }
-                />
-              </label>
-              <label>
+                <strong>{selectedStrategy.position_size}</strong>
+              </div>
+              <div className="config-field">
                 <span className="eyebrow">Risk Per Trade (%)</span>
-                <input
-                  value={selectedDraft?.risk_per_trade ?? ""}
-                  onChange={(event) =>
-                    setConfigDrafts((current) => ({
-                      ...current,
-                      [selectedStrategy.name]: {
-                        ...current[selectedStrategy.name],
-                        risk_per_trade: Number(event.target.value),
-                      },
-                    }))
-                  }
-                />
-              </label>
-              {selectedDraft?.parameters.map((parameter) => (
-                <label key={parameter.key}>
+                <strong>{selectedStrategy.risk_per_trade}</strong>
+              </div>
+              {selectedStrategy.parameters.map((parameter) => (
+                <div key={parameter.key} className="config-field">
                   <span className="eyebrow">{parameter.label}</span>
-                  <input
-                    value={parameter.value}
-                    onChange={(event) =>
-                      setConfigDrafts((current) => ({
-                        ...current,
-                        [selectedStrategy.name]: {
-                          ...current[selectedStrategy.name],
-                          parameters: current[selectedStrategy.name].parameters.map((currentParameter) =>
-                            currentParameter.key === parameter.key
-                              ? { ...currentParameter, value: Number(event.target.value) }
-                              : currentParameter,
-                          ),
-                        },
-                      }))
-                    }
-                  />
-                </label>
+                  <strong>{parameter.value}</strong>
+                </div>
               ))}
             </div>
             <p className="status-note">
-              Settings are shown in a side panel to keep the main control surface focused on run-state and intervention.
+              Configuration is read-only here. Runtime start and stop are live, but strategy setting edits are hidden until they can persist through the backend.
             </p>
           </aside>
         </div>

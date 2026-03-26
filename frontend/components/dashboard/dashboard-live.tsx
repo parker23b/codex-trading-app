@@ -220,11 +220,13 @@ export function DashboardLive({
         </div>
       </section>
       <section className="page-grid">
-        <Card title="Open Positions" subtitle="Current exposure and controls." className="card--table card--full-width">
+        <Card title="Open Positions" subtitle="Current exposure and execution state." className="card--table card--full-width">
           <div className="status-note status-note--inline">
             Runtime-specific positions are now shown with broker references so same-instrument exposure stays distinguishable.
           </div>
-          <div className="status-note status-note--inline">Demo actions only. Close and override changes stay in the UI and do not send orders.</div>
+          <div className="status-note status-note--inline">
+            This table is read-only until position close and manual override actions are backed by durable backend mutations.
+          </div>
           <OpenPositionsTable positions={positions} />
         </Card>
       </section>

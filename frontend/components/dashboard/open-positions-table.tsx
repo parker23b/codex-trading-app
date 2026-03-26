@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import { StatusBadge } from "@/components/ui/status-badge";
 import { formatCurrency, formatInstrumentLabel, formatPercent, formatPrice, formatRelativeDuration, formatSignedCurrency } from "@/lib/format";
@@ -11,20 +11,7 @@ type OpenPositionsTableProps = {
 };
 
 export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
-  const [message, setMessage] = useState<string | null>(null);
   const activeRows = useMemo(() => positions.filter((row) => row.is_open), [positions]);
-
-  const handleClose = (id: number, instrument: string, brokerReference?: string | null) => {
-    void id;
-    setMessage(
-      `Runtime-specific close is not wired to the frontend yet for ${formatInstrumentLabel(instrument)}${brokerReference ? ` (${brokerReference})` : ""}.`,
-    );
-  };
-
-  const handleOverrideToggle = (id: number) => {
-    void id;
-    setMessage("Manual override is still UI-only.");
-  };
 
   if (activeRows.length === 0) {
     return <div className="empty-state">No open positions right now.</div>;
@@ -41,8 +28,8 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
             <th>Duration</th>
             <th>PnL</th>
             <th>Risk</th>
-            <th>Override</th>
-            <th>Action</th>
+            <th>Override Status</th>
+            <th>Execution Status</th>
           </tr>
         </thead>
         <tbody>
@@ -78,28 +65,18 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
                 </div>
               </td>
               <td>
-                <label className="override-toggle">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(position.manual_override)}
-                    onChange={() => handleOverrideToggle(position.id)}
-                  />
-                  <span>{position.manual_override ? "On" : "Off"}</span>
-                </label>
+                <StatusBadge
+                  label={position.manual_override ? "Manual Override Flagged" : "System Managed"}
+                  tone={position.manual_override ? "warning" : "neutral"}
+                />
               </td>
               <td>
-                <button
-                  className="button secondary table-action"
-                  onClick={() => handleClose(position.id, position.instrument, position.broker_reference)}
-                >
-                  Demo Close
-                </button>
+                <span className="muted">Read-only in dashboard</span>
               </td>
             </tr>
           ))}
         </tbody>
       </table>
-      {message ? <div className="status-note">{message}</div> : null}
     </div>
   );
 }
