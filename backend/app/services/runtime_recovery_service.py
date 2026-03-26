@@ -7,7 +7,7 @@ from sqlmodel import Session
 from app.core.broker_factory import get_broker
 from app.core.logging import get_logger
 from app.core.runtime import runtime_manager
-from app.models.trade import Position, clone_position
+from app.models.trade import Position, clone_position, utc_now
 from app.services.runtime_state_service import RuntimeStateService
 from app.services.trade_service import TradeService
 
@@ -75,6 +75,14 @@ class RuntimeRecoveryService:
             )
 
             if broker_error is not None:
+                self.trade_service.record_reconciliation_event(
+                    event_type="RUNTIME_RECOVERY_REQUIRED",
+                    strategy_name=runtime.strategy_name,
+                    instrument=runtime.instrument,
+                    broker_reference=runtime.current_position_broker_reference,
+                    local_position_id=local_position.id if local_position is not None else None,
+                    details={"reason": f"Broker positions unavailable during startup recovery: {broker_error}"},
+                )
                 self.runtime_state_service.mark_recovery_state(
                     strategy_name=runtime.strategy_name,
                     instrument=runtime.instrument,
@@ -92,6 +100,14 @@ class RuntimeRecoveryService:
                 continue
 
             if runtime.current_position_broker_reference and remote_position is None:
+                self.trade_service.record_reconciliation_event(
+                    event_type="RUNTIME_RECOVERY_REQUIRED",
+                    strategy_name=runtime.strategy_name,
+                    instrument=runtime.instrument,
+                    broker_reference=runtime.current_position_broker_reference,
+                    local_position_id=local_position.id if local_position is not None else None,
+                    details={"reason": "Persisted runtime references an open position that the broker did not confirm."},
+                )
                 self.runtime_state_service.mark_recovery_state(
                     strategy_name=runtime.strategy_name,
                     instrument=runtime.instrument,
@@ -111,7 +127,7 @@ class RuntimeRecoveryService:
             current_position = local_position
             if current_position is None and remote_position is not None:
                 current_position = self._position_from_remote(runtime.strategy_name, remote_position)
-                current_position = self.trade_service.upsert_position(current_position)
+                current_position = self.trade_service.record_broker_position(current_position)
 
             engine = runtime_manager.start(
                 runtime.strategy_name,
@@ -181,5 +197,8 @@ class RuntimeRecoveryService:
             manual_override=False,
             account_type=self.broker.account_type.value,
             is_open=True,
+            broker_sync_status="CONFIRMED",
+            broker_open_confirmed_at=remote_position.opened_at,
+            last_reconciled_at=utc_now(),
             created_at=now,
         )

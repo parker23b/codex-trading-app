@@ -3,13 +3,17 @@ from sqlmodel import SQLModel
 
 from app.db.session import engine
 from app.models.runtime import StrategyRuntimeState
-from app.models.trade import Position, Trade
+from app.models.trade import Position, ReconciliationEvent, Trade
 
 
 def initialize_database() -> None:
-    _ = (Trade, Position, StrategyRuntimeState)
+    _ = (Trade, Position, StrategyRuntimeState, ReconciliationEvent)
     SQLModel.metadata.create_all(engine)
     _ensure_sqlite_column("position", "broker_reference", "VARCHAR")
+    _ensure_sqlite_column("position", "broker_sync_status", "VARCHAR DEFAULT 'PENDING'")
+    _ensure_sqlite_column("position", "broker_open_confirmed_at", "TIMESTAMP")
+    _ensure_sqlite_column("position", "broker_closed_confirmed_at", "TIMESTAMP")
+    _ensure_sqlite_column("position", "last_reconciled_at", "TIMESTAMP")
     _ensure_sqlite_column("trade", "broker_reference", "VARCHAR")
     _ensure_sqlite_column("trade", "close_broker_reference", "VARCHAR")
     _ensure_sqlite_column("strategyruntimestate", "strategy_version", "VARCHAR DEFAULT '1'")

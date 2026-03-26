@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
+from sqlalchemy import Column
+from sqlalchemy.types import JSON
 from sqlmodel import Field, SQLModel
 
 
@@ -49,6 +51,21 @@ class Position(SQLModel, table=True):
     manual_override: bool = False
     account_type: str
     is_open: bool = True
+    broker_sync_status: str = Field(default="PENDING", index=True)
+    broker_open_confirmed_at: datetime | None = None
+    broker_closed_confirmed_at: datetime | None = None
+    last_reconciled_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now, nullable=False)
+
+
+class ReconciliationEvent(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    event_type: str = Field(index=True)
+    strategy_name: str | None = Field(default=None, index=True)
+    instrument: str | None = Field(default=None, index=True)
+    broker_reference: str | None = Field(default=None, index=True)
+    local_position_id: int | None = Field(default=None, index=True)
+    details: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utc_now, nullable=False)
 
 

@@ -26,6 +26,30 @@ There are two distinct operating modes:
 - `SIMULATION_MODE=false`
   The backend authenticates against IG, polls market data for running strategies, and reconciles local state against broker-truth positions.
 
+## State Ownership
+
+The backend now treats state ownership as a first-class boundary:
+
+- Broker is the source of truth for actual open positions and confirmed closes.
+- Local database is the source of truth for app metadata, runtime assignments, analytics overlays, historical trades, and reconciliation audit events.
+- Runtime memory is temporary strategy computation state only. It can cache a current position reference, but it is not authoritative on whether exposure really exists at the broker.
+
+That boundary maps to the current tables like this:
+
+- `position`
+  Stores broker-confirmed open exposure plus local metadata such as `risk_percent`, `reason`, and `manual_override`. The broker-owned fields are `broker_reference`, size, direction, open/close timestamps, and sync markers like `broker_sync_status`.
+- `trade`
+  Stores closed trades after a broker close has been confirmed by the execution path.
+- `strategyruntimestate`
+  Stores runtime assignment, recovery status, cached prices, and serialized strategy state. It does not own broker exposure.
+- `reconciliationevent`
+  Stores an audit trail of broker/local drift detection and recovery actions.
+
+Two important current limits are worth calling out explicitly:
+
+- Orders and fills are not first-class tables yet. The current broker adapter returns an immediate execution result, so the app persists confirmed positions and closed trades rather than a separate order lifecycle.
+- Because of that, partial fills and pending order state are not modeled in detail yet. The code and docs now make that limitation explicit instead of implying that "trade", "order", and "position" are interchangeable.
+
 ## Repository Layout
 
 ```text

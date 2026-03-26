@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.core.broker_factory import get_broker
 from app.core.logging import get_logger
 from app.core.runtime import runtime_manager
-from app.models.trade import Position, clone_position
+from app.models.trade import Position, clone_position, utc_now
 from app.services.runtime_state_service import RuntimeStateService
 from app.services.trade_service import TradeService
 
@@ -83,8 +83,24 @@ class ReconciliationService:
                 manual_override=local_position.manual_override if local_position else False,
                 account_type=self.broker.account_type.value,
                 is_open=True,
+                broker_sync_status="CONFIRMED",
+                broker_open_confirmed_at=remote_position.opened_at,
+                last_reconciled_at=utc_now(),
             )
-            persisted = self.trade_service.upsert_position(synced_position)
+            persisted = self.trade_service.record_broker_position(synced_position)
+            self.trade_service.record_reconciliation_event(
+                event_type="POSITION_SYNCED_FROM_BROKER" if local_position is not None else "POSITION_ADOPTED_FROM_BROKER",
+                strategy_name=strategy_name,
+                instrument=instrument,
+                broker_reference=remote_position.broker_reference,
+                local_position_id=persisted.id,
+                details={
+                    "matched_local_position": local_position is not None,
+                    "matched_runtime_engine": matching_engine is not None,
+                    "size": remote_position.size,
+                    "open_price": remote_position.open_price,
+                },
+            )
             if matching_engine is not None:
                 matching_engine.current_position = clone_position(persisted)
                 self.runtime_state_service.sync_engine_state(
@@ -105,8 +121,25 @@ class ReconciliationService:
                 for remote_position in remote_positions
             ):
                 continue
-            local_position.is_open = False
-            self.trade_service.close_position(local_position)
+            self.trade_service.close_position(
+                local_position,
+                close_price=local_position.current_price or local_position.open_price,
+                close_time=utc_now(),
+                pnl=local_position.unrealized_pnl,
+                broker_sync_status="MISSING_AT_BROKER",
+                close_reason="Closed locally after broker reconciliation found no matching open broker position.",
+            )
+            self.trade_service.record_reconciliation_event(
+                event_type="LOCAL_POSITION_CLOSED_AFTER_BROKER_MISS",
+                strategy_name=local_position.strategy_name,
+                instrument=local_position.instrument,
+                broker_reference=local_position.broker_reference,
+                local_position_id=local_position.id,
+                details={
+                    "had_broker_reference": local_position.broker_reference is not None,
+                    "close_price": local_position.current_price or local_position.open_price,
+                },
+            )
             runtime_engine = runtime_manager.get_engine(local_position.strategy_name, local_position.instrument)
             if runtime_engine is not None and runtime_engine.current_position is not None and (
                 runtime_engine.current_position.broker_reference == local_position.broker_reference

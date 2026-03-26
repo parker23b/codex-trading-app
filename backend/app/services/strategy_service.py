@@ -227,7 +227,7 @@ class StrategyService:
                 )
                 if signal.status is SignalStatus.APPROVED:
                     created_position = self._execute_entry_signal(engine=engine, signal=signal)
-                    trade_service.upsert_position(created_position)
+                    trade_service.record_broker_position(created_position)
                     if self.runtime_state_service is not None:
                         self.runtime_state_service.sync_engine_state(
                             strategy_name=engine.strategy.name,
@@ -262,27 +262,33 @@ class StrategyService:
                     engine.current_position.unrealized_pnl = round(unrealized_pnl, 2)
                     engine.current_position.risk_percent = risk_percent
                     engine.current_position.reason = f"{engine.strategy.name} signal active"
-                    trade_service.upsert_position(engine.current_position)
+                    trade_service.record_broker_position(engine.current_position)
                 else:
-                    existing_position.current_price = mark_price
-                    existing_position.unrealized_pnl = round(unrealized_pnl, 2)
-                    existing_position.risk_percent = risk_percent
-                    existing_position.pnl = round(unrealized_pnl, 2)
-                    trade_service.upsert_position(existing_position)
+                    trade_service.update_position_analytics(
+                        existing_position,
+                        current_price=mark_price,
+                        unrealized_pnl=unrealized_pnl,
+                        risk_percent=risk_percent,
+                        pnl=unrealized_pnl,
+                    )
             elif existing_position is not None:
-                existing_position.current_price = self._mark_price(
+                mark_price = self._mark_price(
                     direction=existing_position.direction,
                     price=price,
                     bid=bid,
                     ask=ask,
                 )
-                existing_position.unrealized_pnl = self._calculate_open_pnl(
+                unrealized_pnl = self._calculate_open_pnl(
                     direction=existing_position.direction,
                     open_price=existing_position.open_price,
-                    current_price=existing_position.current_price,
+                    current_price=mark_price,
                     size=existing_position.size,
                 )
-                trade_service.upsert_position(existing_position)
+                trade_service.update_position_analytics(
+                    existing_position,
+                    current_price=mark_price,
+                    unrealized_pnl=unrealized_pnl,
+                )
 
             if isinstance(signal, ExitSignal):
                 trade = self._execute_exit_signal(engine=engine, signal=signal)
@@ -296,13 +302,14 @@ class StrategyService:
                     broker_reference=trade.broker_reference,
                 )
                 if existing_position is not None:
-                    existing_position.is_open = False
-                    existing_position.close_price = trade.close_price
-                    existing_position.close_time = trade.close_time
-                    existing_position.pnl = trade.pnl
-                    existing_position.current_price = trade.close_price
-                    existing_position.unrealized_pnl = 0.0
-                    trade_service.close_position(existing_position)
+                    trade_service.close_position(
+                        existing_position,
+                        close_price=trade.close_price,
+                        close_time=trade.close_time,
+                        pnl=trade.pnl,
+                        broker_sync_status="CONFIRMED",
+                        broker_confirmed_at=trade.close_time,
+                    )
                 trade_service.record_trade(trade)
                 if self.runtime_state_service is not None:
                     self.runtime_state_service.sync_engine_state(
