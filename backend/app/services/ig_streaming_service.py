@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 PRICE_FIELDS = ["BIDPRICE1", "ASKPRICE1", "TIMESTAMP"]
+MARKET_FIELDS = ["BID", "OFFER", "UPDATE_TIME", "MARKET_STATE"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +44,10 @@ class StreamPriceUpdate:
     bid: float | None
     ask: float | None
     timestamp: int | None
+    high: float | None = None
+    low: float | None = None
+    market_status: str | None = None
+    tradable: bool | None = None
 
 
 @dataclass(slots=True)
@@ -108,6 +113,45 @@ class _PriceSubscriptionListener(SubscriptionListener):
         )
 
 
+class _MarketSubscriptionListener(SubscriptionListener):
+    def __init__(self, service: "IGStreamingService"):
+        self._service = service
+
+    def onSubscription(self) -> None:  # noqa: N802 - SDK callback shape
+        logger.info("IG Lightstreamer market subscription active", extra={"count": len(self._service._subscribed_instruments)})
+
+    def onSubscriptionError(self, code: int, message: str) -> None:  # noqa: N802 - SDK callback shape
+        logger.error("IG Lightstreamer market subscription failed", extra={"code": code, "message": message})
+
+    def onUnsubscription(self) -> None:  # noqa: N802 - SDK callback shape
+        logger.info("IG Lightstreamer market subscription removed")
+
+    def onItemUpdate(self, update: "ItemUpdate") -> None:  # noqa: N802 - SDK callback shape
+        item_name = update.getItemName()
+        if not item_name:
+            return
+        parts = item_name.split(":", 1)
+        if len(parts) != 2:
+            return
+        instrument = parts[1]
+        bid = self._service._coerce_float(update.getValue("BID"))
+        ask = self._service._coerce_float(update.getValue("OFFER"))
+        price = self._service._select_price(bid=bid, ask=ask)
+        if price is None:
+            return
+        market_status = update.getValue("MARKET_STATE") or None
+        self._service.publish_price_update(
+            StreamPriceUpdate(
+                instrument=instrument,
+                price=price,
+                bid=bid,
+                ask=ask,
+                timestamp=None,
+                market_status=market_status,
+            )
+        )
+
+
 class IGStreamingService:
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -118,6 +162,8 @@ class IGStreamingService:
         self._client_listener: Any | None = None
         self._subscription: Any | None = None
         self._subscription_listener: Any | None = None
+        self._market_subscription: Any | None = None
+        self._market_subscription_listener: Any | None = None
         self._credentials: IGStreamingCredentials | None = None
         self._subscribed_instruments: tuple[str, ...] = ()
         self._latest_prices: dict[str, float] = {}
@@ -224,7 +270,7 @@ class IGStreamingService:
         with Session(engine) as session:
             strategy_service = StrategyService(session)
             for update in latest_by_instrument.values():
-                logger.info(
+                logger.debug(
                     "IG streaming tick received",
                     extra={
                         "instrument": update.instrument,
@@ -234,7 +280,17 @@ class IGStreamingService:
                         "timestamp": update.timestamp,
                     },
                 )
-                strategy_service.process_price_update(update.instrument, update.price)
+                strategy_service.process_price_update(
+                    update.instrument,
+                    update.price,
+                    bid=update.bid,
+                    ask=update.ask,
+                    high=update.high,
+                    low=update.low,
+                    market_status=update.market_status,
+                    tradable=update.tradable,
+                    received_at=datetime.now(UTC),
+                )
 
     def _reset_client(self, credentials: IGStreamingCredentials) -> None:
         self._teardown_client()
@@ -261,9 +317,18 @@ class IGStreamingService:
         self._client.subscribe(subscription)
         self._subscription = subscription
         self._subscription_listener = listener
+
+        market_items = [f"MARKET:{instrument}" for instrument in instruments]
+        market_subscription = Subscription("MERGE", market_items, MARKET_FIELDS)
+        market_subscription.setRequestedSnapshot("yes")
+        market_listener = _MarketSubscriptionListener(self)
+        market_subscription.addListener(market_listener)
+        self._client.subscribe(market_subscription)
+        self._market_subscription = market_subscription
+        self._market_subscription_listener = market_listener
         self._subscribed_instruments = instruments
         self._health.subscribed_instruments = instruments
-        logger.info("IG Lightstreamer price subscription requested", extra={"instruments": list(instruments)})
+        logger.info("IG Lightstreamer subscriptions requested", extra={"instruments": list(instruments)})
 
     def _unsubscribe_price_stream(self) -> None:
         if self._client is not None and self._subscription is not None:
@@ -271,8 +336,15 @@ class IGStreamingService:
                 self._client.unsubscribe(self._subscription)
             except Exception as exc:  # pragma: no cover - defensive cleanup path
                 logger.warning("Failed to unsubscribe IG price stream cleanly", extra={"error": str(exc)})
+        if self._client is not None and self._market_subscription is not None:
+            try:
+                self._client.unsubscribe(self._market_subscription)
+            except Exception as exc:  # pragma: no cover - defensive cleanup path
+                logger.warning("Failed to unsubscribe IG market stream cleanly", extra={"error": str(exc)})
         self._subscription = None
         self._subscription_listener = None
+        self._market_subscription = None
+        self._market_subscription_listener = None
         self._subscribed_instruments = ()
         self._health.subscribed_instruments = ()
 
@@ -287,16 +359,6 @@ class IGStreamingService:
         self._client_listener = None
         self._credentials = None
         self._health.connected = False
-
-
-_streaming_service: IGStreamingService | None = None
-
-
-def get_ig_streaming_service() -> IGStreamingService:
-    global _streaming_service
-    if _streaming_service is None:
-        _streaming_service = IGStreamingService()
-    return _streaming_service
 
     @staticmethod
     def _coerce_float(raw_value: str | None) -> float | None:
@@ -325,3 +387,13 @@ def get_ig_streaming_service() -> IGStreamingService:
         if ask is not None:
             return ask
         return None
+
+
+_streaming_service: IGStreamingService | None = None
+
+
+def get_ig_streaming_service() -> IGStreamingService:
+    global _streaming_service
+    if _streaming_service is None:
+        _streaming_service = IGStreamingService()
+    return _streaming_service

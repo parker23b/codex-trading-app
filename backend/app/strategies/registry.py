@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from collections.abc import Callable
 
 from app.strategies.breakout_guard import BreakoutGuardStrategy
+from app.strategies.bad_trade_flow import BadTradeFlowStrategy
 from app.strategies.carry_drift import CarryDriftStrategy
+from app.strategies.fx_micro_pullback import FxMicroPullbackStrategy
 from app.strategies.base import Strategy
 from app.strategies.mean_reversion import MeanReversionStrategy
 
@@ -96,4 +98,35 @@ strategy_registry.register(
         ),
     ),
     factory=CarryDriftStrategy,
+)
+strategy_registry.register(
+    metadata=StrategyMetadata(
+        name=FxMicroPullbackStrategy.name,
+        description="Follows short-term FX trend continuation after shallow pullbacks and quick momentum rejoin.",
+        default_instrument="CS.D.EURUSD.MINI.IP",
+        position_size=0.5,
+        risk_per_trade=0.4,
+        parameters=(
+            StrategyParameterDefinition(key="fast_window", label="Fast EMA", value=8, step=1),
+            StrategyParameterDefinition(key="slow_window", label="Slow EMA", value=21, step=1),
+            StrategyParameterDefinition(key="trend_threshold", label="Trend Filter", value=1.5, step=0.1),
+            StrategyParameterDefinition(key="max_spread_threshold", label="Max Spread", value=1.2, step=0.1),
+        ),
+    ),
+    factory=FxMicroPullbackStrategy,
+)
+strategy_registry.register(
+    metadata=StrategyMetadata(
+        name=BadTradeFlowStrategy.name,
+        description="Deliberately bad high-churn strategy for validating order, position, and trade flow.",
+        default_instrument="CS.D.EURUSD.MINI.IP",
+        position_size=0.2,
+        risk_per_trade=0.1,
+        parameters=(
+            StrategyParameterDefinition(key="warmup_ticks", label="Warmup Ticks", value=3, step=1),
+            StrategyParameterDefinition(key="hold_seconds", label="Hold Seconds", value=3, step=0.5),
+            StrategyParameterDefinition(key="lookback_ticks", label="Lookback Ticks", value=3, step=1),
+        ),
+    ),
+    factory=BadTradeFlowStrategy,
 )

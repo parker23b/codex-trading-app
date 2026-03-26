@@ -46,6 +46,26 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
       groups[option.category] = [...(groups[option.category] ?? []), option];
       return groups;
     }, {});
+  const priceStatusLabel = (strategy: StrategyDefinition) => {
+    switch (strategy.price_status) {
+      case "LIVE":
+        return "Live stream";
+      case "POLLED":
+        return "REST fallback";
+      case "STALE":
+        return "Price stale";
+      case "ERROR":
+        return "Price unavailable";
+      case "POSITION":
+        return "Position price";
+      case "CACHED":
+        return "Cached";
+      case "REST":
+        return "REST quote";
+      default:
+        return strategy.status === "RUNNING" ? "Waiting for price" : "No live price";
+    }
+  };
 
   const runAction = (strategy: StrategyDefinition) => {
     startTransition(async () => {
@@ -118,6 +138,8 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
               <div className="strategy-stat">
                 <span className="eyebrow">Last Price</span>
                 <strong>{strategy.last_price != null ? formatPrice(strategy.last_price, strategy.instrument) : "Waiting..."}</strong>
+                <div className="muted">{priceStatusLabel(strategy)}</div>
+                {strategy.price_error ? <div className="muted">{strategy.price_error}</div> : null}
               </div>
             </div>
             <label className="strategy-card__instrument">

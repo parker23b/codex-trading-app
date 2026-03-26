@@ -16,10 +16,12 @@ export function ModeIndicator({ mode, brokerAuth, streamHealth }: ModeIndicatorP
         : "neutral";
   const streamLabel = !streamHealth?.enabled
     ? "Streaming Off"
-    : streamHealth.connected
+    : streamHealth.connected && streamHealth.last_tick_at
       ? "Stream Healthy"
+      : streamHealth.connected
+        ? "Awaiting Ticks"
       : "Stream Degraded";
-  const streamTone = !streamHealth?.enabled ? "neutral" : streamHealth.connected ? "positive" : "warning";
+  const streamTone = !streamHealth?.enabled ? "neutral" : streamHealth.connected && streamHealth.last_tick_at ? "positive" : "warning";
   const modeDetail =
     mode === "LIVE"
       ? "Orders are pointed at the live environment."
@@ -42,7 +44,9 @@ export function ModeIndicator({ mode, brokerAuth, streamHealth }: ModeIndicatorP
             <div className="eyebrow">Price Stream</div>
             <div className="muted">
               {streamHealth.connected
-                ? `Connected with ${streamHealth.subscribed_instruments.length} instrument${streamHealth.subscribed_instruments.length === 1 ? "" : "s"} subscribed`
+                ? streamHealth.last_tick_at
+                  ? `Connected with ${streamHealth.subscribed_instruments.length} instrument${streamHealth.subscribed_instruments.length === 1 ? "" : "s"} subscribed`
+                  : `Connected with ${streamHealth.subscribed_instruments.length} instrument${streamHealth.subscribed_instruments.length === 1 ? "" : "s"} subscribed, awaiting first tick`
                 : streamHealth.last_error ?? streamHealth.last_status ?? "Awaiting stream connection"}
             </div>
           </div>

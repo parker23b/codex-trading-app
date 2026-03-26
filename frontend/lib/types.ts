@@ -48,6 +48,9 @@ export type StrategyDefinition = {
   status: "RUNNING" | "STOPPED";
   current_pnl: number;
   last_price?: number | null;
+  price_status?: "STOPPED" | "LIVE" | "POLLED" | "CACHED" | "STALE" | "POSITION" | "REST" | "ERROR";
+  price_error?: string | null;
+  last_price_updated_at?: string | null;
   trade_count: number;
   win_rate: number;
   account_type: "DEMO" | "LIVE";

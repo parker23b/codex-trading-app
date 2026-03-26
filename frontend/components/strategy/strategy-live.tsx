@@ -38,7 +38,8 @@ export function StrategyLive({ initialStrategies, initialStreamHealth }: Strateg
       }
     };
 
-    const intervalId = window.setInterval(refresh, 5000);
+    void refresh();
+    const intervalId = window.setInterval(refresh, 2000);
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);

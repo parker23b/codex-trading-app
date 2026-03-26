@@ -76,8 +76,8 @@ export function LineChart({ title, subtitle, points, latestValue, delta, tone = 
           ) : null}
         </svg>
         <div className="chart-axis">
-          {points.map((point) => (
-            <span key={point.label}>{point.label}</span>
+          {points.map((point, index) => (
+            <span key={`${point.label}-${index}`}>{point.label}</span>
           ))}
         </div>
       </div>

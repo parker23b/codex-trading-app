@@ -21,8 +21,8 @@ export function BarChart({ title, subtitle, data }: BarChartProps) {
         </div>
       </div>
       <div className="bar-chart">
-        {data.map((item) => (
-          <div className="bar-row" key={item.label}>
+        {data.map((item, index) => (
+          <div className="bar-row" key={`${item.label}-${index}`}>
             <div className="bar-meta">
               <span>{item.label}</span>
               <span>{item.value.toFixed(1)}%</span>
@@ -36,4 +36,3 @@ export function BarChart({ title, subtitle, data }: BarChartProps) {
     </section>
   );
 }
-
