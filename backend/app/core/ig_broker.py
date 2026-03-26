@@ -42,6 +42,14 @@ class CachedMarketDetails:
     fetched_at: float
 
 
+@dataclass(frozen=True, slots=True)
+class IGStreamingCredentials:
+    account_id: str
+    cst: str
+    security_token: str
+    lightstreamer_endpoint: str
+
+
 class IGBrokerError(RuntimeError):
     pass
 
@@ -243,6 +251,21 @@ class IGBroker(Broker):
 
     def get_market_details(self, instrument: str) -> BrokerMarketDetails:
         return self._load_market_details(instrument, use_cache=True)
+
+    def get_streaming_credentials(self) -> IGStreamingCredentials:
+        self._ensure_authenticated()
+        if self._session is None:
+            raise IGBrokerError("IG session was not established for streaming.")
+        if not self._session.current_account_id:
+            raise IGBrokerError("IG session did not expose an active account id for streaming.")
+        if not self._session.lightstreamer_endpoint:
+            raise IGBrokerError("IG session did not expose a Lightstreamer endpoint.")
+        return IGStreamingCredentials(
+            account_id=self._session.current_account_id,
+            cst=self._session.cst,
+            security_token=self._session.security_token,
+            lightstreamer_endpoint=self._session.lightstreamer_endpoint,
+        )
 
     def _load_market_details(self, instrument: str, *, use_cache: bool) -> BrokerMarketDetails:
         cached = self._market_details_cache.get(instrument)

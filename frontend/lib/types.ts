@@ -64,6 +64,16 @@ export type BrokerAuthStatus = {
   position_count: number;
 };
 
+export type StreamHealthStatus = {
+  enabled: boolean;
+  connected: boolean;
+  dependency_ready: boolean;
+  subscribed_instruments: string[];
+  last_tick_at?: string | null;
+  last_status?: string | null;
+  last_error?: string | null;
+};
+
 export type DashboardSnapshot = {
   accountValue: number;
   accountValuePercent: number;

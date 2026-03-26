@@ -10,6 +10,7 @@ from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.db.init_db import initialize_database
+from app.services.ig_streaming_service import get_ig_streaming_service
 from app.services.market_data_service import MarketDataService
 
 settings = get_settings()
@@ -21,8 +22,17 @@ logger = get_logger(__name__)
 async def lifespan(_: FastAPI):
     logger.info("Starting application")
     initialize_database()
-    market_data_task = asyncio.create_task(MarketDataService().run())
+    streaming_service = get_ig_streaming_service()
+    streaming_enabled = streaming_service.is_enabled()
+    market_data_task = asyncio.create_task(MarketDataService(poll_prices=not streaming_enabled).run())
+    streaming_task: asyncio.Task[None] | None = None
+    if streaming_enabled:
+        streaming_task = asyncio.create_task(streaming_service.run())
     yield
+    if streaming_task is not None:
+        streaming_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await streaming_task
     market_data_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await market_data_task

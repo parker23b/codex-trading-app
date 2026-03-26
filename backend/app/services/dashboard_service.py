@@ -146,17 +146,29 @@ class DashboardService:
 
     @staticmethod
     def _running_strategies() -> list[dict[str, object]]:
+        from app.services.ig_streaming_service import get_ig_streaming_service
+
         instruments = {item["epic"]: item for item in list_instruments()}
         rows: list[dict[str, object]] = []
         for instrument, engine in runtime_manager.engines.items():
             if not engine.active:
                 continue
+            last_price = get_ig_streaming_service().get_last_price(instrument)
+            if last_price is None:
+                last_price = runtime_manager.get_last_price(instrument)
+            if last_price is None and engine.current_position is not None:
+                last_price = engine.current_position.current_price
+            if last_price is None:
+                try:
+                    last_price = engine.broker.get_latest_price(instrument)
+                except IGBrokerError:
+                    last_price = None
             rows.append(
                 {
                     "name": engine.strategy.name,
                     "instrument": instrument,
                     "instrumentLabel": instruments.get(instrument, {}).get("label", instrument),
-                    "lastPrice": runtime_manager.get_last_price(instrument),
+                    "lastPrice": last_price,
                 }
             )
         return rows

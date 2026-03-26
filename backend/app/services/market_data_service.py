@@ -20,11 +20,18 @@ class MarketDataService:
     Poll broker-backed prices and push them through the existing strategy flow.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, poll_prices: bool = True) -> None:
         self.settings = get_settings()
+        self.poll_prices = poll_prices
 
     async def run(self) -> None:
-        logger.info("Market data loop started", extra={"poll_interval": self.settings.market_data_poll_interval_seconds})
+        logger.info(
+            "Market data loop started",
+            extra={
+                "poll_interval": self.settings.market_data_poll_interval_seconds,
+                "poll_prices": self.poll_prices,
+            },
+        )
         while True:
             try:
                 await self._poll_once()
@@ -41,6 +48,8 @@ class MarketDataService:
 
         with Session(engine) as session:
             BrokerService().reconcile_positions(session)
+            if not self.poll_prices:
+                return
             strategy_service = StrategyService(session)
             for instrument, trading_engine in active_engines:
                 try:

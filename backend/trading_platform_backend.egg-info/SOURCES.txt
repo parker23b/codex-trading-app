@@ -4,9 +4,11 @@ app/main.py
 app/api/__init__.py
 app/api/router.py
 app/api/routes/__init__.py
+app/api/routes/broker.py
 app/api/routes/charts.py
 app/api/routes/dashboard.py
 app/api/routes/health.py
+app/api/routes/markets.py
 app/api/routes/positions.py
 app/api/routes/strategies.py
 app/api/routes/trades.py
@@ -15,6 +17,7 @@ app/core/broker.py
 app/core/broker_factory.py
 app/core/config.py
 app/core/ig_broker.py
+app/core/instrument_catalog.py
 app/core/logging.py
 app/core/runtime.py
 app/core/trading_engine.py
@@ -25,9 +28,13 @@ app/db/session.py
 app/models/__init__.py
 app/models/trade.py
 app/services/__init__.py
+app/services/broker_service.py
 app/services/chart_service.py
 app/services/dashboard_service.py
-app/services/simulation_service.py
+app/services/ig_streaming_service.py
+app/services/market_data_service.py
+app/services/market_overview_service.py
+app/services/reconciliation_service.py
 app/services/strategy_service.py
 app/services/trade_service.py
 app/strategies/__init__.py

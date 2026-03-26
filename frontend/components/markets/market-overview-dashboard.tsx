@@ -89,6 +89,32 @@ export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashb
     });
   }, [loadedMarkets, selectedCategory]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const refresh = async () => {
+      try {
+        const overview = await getMarketOverview(selectedCategory);
+        if (cancelled) {
+          return;
+        }
+        setLoadedMarkets((current) => ({ ...current, [selectedCategory]: overview }));
+        setLoadError(null);
+      } catch (error: unknown) {
+        if (cancelled) {
+          return;
+        }
+        setLoadError(error instanceof Error ? error.message : "Failed to refresh market data.");
+      }
+    };
+
+    const intervalId = window.setInterval(refresh, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [selectedCategory]);
+
   const selectedMarket = loadedMarkets[selectedCategory];
   const selectedSummary = selectedMarket?.summary ?? buildPlaceholderSummary(selectedCategory);
   const summaries = MARKET_CATEGORIES.map((category) => loadedMarkets[category]?.summary ?? buildPlaceholderSummary(category));
@@ -205,7 +231,7 @@ export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashb
                   Watchlist stars stay in local browser state so the operator can pin priority instruments without backend writes.
                 </div>
                 {isPending && !selectedMarket ? <div className="status-note status-note--inline">Loading {selectedSummary.label} market data…</div> : null}
-                {loadError && !selectedMarket ? <div className="status-note status-note--inline">{loadError}</div> : null}
+                {loadError ? <div className="status-note status-note--inline">{loadError}</div> : null}
               </div>
             </Card>
           </div>

@@ -1,76 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { StatusBadge } from "@/components/ui/status-badge";
-import { formatCurrency, formatInstrumentLabel, formatPercent, formatRelativeDuration, formatSignedCurrency } from "@/lib/format";
+import { formatCurrency, formatInstrumentLabel, formatPercent, formatPrice, formatRelativeDuration, formatSignedCurrency } from "@/lib/format";
 import { Position } from "@/lib/types";
 
 type OpenPositionsTableProps = {
   positions: Position[];
 };
 
-type PositionState = Position & {
-  uiPnl: number;
-  closed: boolean;
-};
-
 export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
-  const [rows, setRows] = useState<PositionState[]>(
-    positions.map((position) => ({
-      ...position,
-      uiPnl: position.unrealized_pnl ?? 0,
-      closed: false,
-    })),
-  );
   const [message, setMessage] = useState<string | null>(null);
-  const [flashId, setFlashId] = useState<number | null>(null);
-
-  useEffect(() => {
-    setRows(
-      positions.map((position) => ({
-        ...position,
-        uiPnl: position.unrealized_pnl ?? 0,
-        closed: false,
-      })),
-    );
-  }, [positions]);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setRows((current) => {
-        const nextRows = current.map((row, index) => {
-          if (row.closed) {
-            return row;
-          }
-          const drift = ((index % 2 === 0 ? 1 : -1) * (row.uiPnl === 0 ? 1.4 : Math.abs(row.uiPnl) * 0.035));
-          const nextPnl = Number((row.uiPnl + drift).toFixed(2));
-          return {
-            ...row,
-            uiPnl: nextPnl,
-            current_price: Number(((row.current_price ?? row.open_price) + drift / Math.max(row.size, 1)).toFixed(2)),
-          };
-        });
-        const activeRow = nextRows.find((row) => !row.closed);
-        setFlashId(activeRow?.id ?? null);
-        return nextRows;
-      });
-    }, 2400);
-
-    return () => window.clearInterval(interval);
-  }, []);
-
-  const activeRows = useMemo(() => rows.filter((row) => !row.closed), [rows]);
+  const activeRows = useMemo(() => positions.filter((row) => row.is_open), [positions]);
 
   const handleClose = (id: number, instrument: string) => {
-    setRows((current) => current.map((row) => (row.id === id ? { ...row, closed: true } : row)));
-    setMessage(`Simulated close queued for ${formatInstrumentLabel(instrument)}.`);
+    void id;
+    setMessage(`Demo close is not wired to the backend yet for ${formatInstrumentLabel(instrument)}.`);
   };
 
   const handleOverrideToggle = (id: number) => {
-    setRows((current) =>
-      current.map((row) => (row.id === id ? { ...row, manual_override: !row.manual_override } : row)),
-    );
+    void id;
+    setMessage("Manual override is still UI-only.");
   };
 
   if (activeRows.length === 0) {
@@ -97,7 +48,7 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
               <td>
                 <div className="cell-stack">
                   <strong>{formatInstrumentLabel(position.instrument)}</strong>
-                  <span className="muted">{position.direction} {position.size} at {formatCurrency(position.open_price)}</span>
+                  <span className="muted">{position.direction} {position.size} at {formatPrice(position.open_price, position.instrument)}</span>
                 </div>
               </td>
               <td>
@@ -107,10 +58,10 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
                 </div>
               </td>
               <td>{formatRelativeDuration(position.open_time)}</td>
-              <td className={position.uiPnl >= 0 ? `value-positive ${flashId === position.id ? "live-pulse" : ""}` : `value-negative ${flashId === position.id ? "live-pulse" : ""}`}>
+              <td className={(position.unrealized_pnl ?? 0) >= 0 ? "value-positive live-pulse" : "value-negative live-pulse"}>
                 <div className="cell-stack">
-                  <strong>{formatSignedCurrency(position.uiPnl)}</strong>
-                  <span className="muted">Px {formatCurrency(position.current_price ?? position.open_price)}</span>
+                  <strong>{formatSignedCurrency(position.unrealized_pnl ?? 0)}</strong>
+                  <span className="muted">Px {formatPrice(position.current_price ?? position.open_price, position.instrument)}</span>
                 </div>
               </td>
               <td>
@@ -129,12 +80,12 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
                     checked={Boolean(position.manual_override)}
                     onChange={() => handleOverrideToggle(position.id)}
                   />
-                  <span>{position.manual_override ? "Sim On" : "Sim Off"}</span>
+                  <span>{position.manual_override ? "On" : "Off"}</span>
                 </label>
               </td>
               <td>
                 <button className="button secondary table-action" onClick={() => handleClose(position.id, position.instrument)}>
-                  Sim Close
+                  Demo Close
                 </button>
               </td>
             </tr>

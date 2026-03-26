@@ -9,3 +9,4 @@ Requires-Dist: sqlmodel<1.0.0,>=0.0.24
 Requires-Dist: sqlalchemy<3.0.0,>=2.0.0
 Requires-Dist: psycopg[binary]<4.0.0,>=3.2.0
 Requires-Dist: pydantic-settings<3.0.0,>=2.10.0
+Requires-Dist: lightstreamer-client-lib<3.0.0,>=2.2.2

@@ -18,8 +18,67 @@ export function formatSignedPercent(value: number, digits = 1) {
   return `${value >= 0 ? "+" : "-"}${Math.abs(value).toFixed(digits)}%`;
 }
 
+function normalizeInstrumentKey(instrument?: string) {
+  return (instrument ?? "").toUpperCase();
+}
+
+function isForexInstrument(instrument?: string) {
+  const key = normalizeInstrumentKey(instrument);
+  return key.startsWith("CS.D.") || /^[A-Z]{6}$/.test(key);
+}
+
+function isIndexInstrument(instrument?: string) {
+  const key = normalizeInstrumentKey(instrument);
+  return key.startsWith("IX.D.");
+}
+
+function isCommodityInstrument(instrument?: string) {
+  const key = normalizeInstrumentKey(instrument);
+  return key.startsWith("CC.D.") || ["XAUUSD", "XAGUSD", "WTI", "BRENT", "NG", "CL"].includes(key);
+}
+
+function isCryptoInstrument(instrument?: string) {
+  const key = normalizeInstrumentKey(instrument);
+  return key.startsWith("CR.D.") || key.endsWith("BTCUSD") || key.endsWith("ETHUSD") || key.endsWith("SOLUSD");
+}
+
+function quoteDigits(value: number, instrument?: string) {
+  const key = normalizeInstrumentKey(instrument);
+  if (isForexInstrument(key)) {
+    return key.includes("JPY") ? 3 : 5;
+  }
+  if (isIndexInstrument(key)) {
+    return 1;
+  }
+  if (isCommodityInstrument(key)) {
+    return value >= 100 ? 2 : 3;
+  }
+  if (isCryptoInstrument(key)) {
+    return value >= 1000 ? 2 : 4;
+  }
+  if (value >= 1000) {
+    return 1;
+  }
+  if (value >= 100) {
+    return 2;
+  }
+  return 4;
+}
+
+export function formatPrice(value: number, instrument?: string) {
+  const digits = quoteDigits(value, instrument);
+  return new Intl.NumberFormat("en-GB", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+}
+
 export function formatInstrumentLabel(instrument: string) {
-  return instrument.replace("IX.D.", "").replace(".DAILY.IP", "");
+  return instrument
+    .replace("IX.D.", "")
+    .replace("CS.D.", "")
+    .replace(".DAILY.IP", "")
+    .replace(".CFD.IP", "");
 }
 
 export function formatRelativeDuration(fromIso: string, toDate = new Date()) {
@@ -30,4 +89,3 @@ export function formatRelativeDuration(fromIso: string, toDate = new Date()) {
   const minutes = totalMinutes % 60;
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
-

@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import { Card } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { formatCurrency, formatInstrumentLabel } from "@/lib/format";
+import { formatCurrency, formatInstrumentLabel, formatPrice } from "@/lib/format";
 import { startStrategy, stopStrategy } from "@/lib/api";
 import { StrategyDefinition } from "@/lib/types";
 
@@ -24,6 +24,15 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
   const [configDrafts, setConfigDrafts] = useState<Record<string, StrategyDefinition>>(
     Object.fromEntries(strategies.map((strategy) => [strategy.name, strategy])),
   );
+
+  useEffect(() => {
+    setInstrumentOverrides((current) => ({
+      ...Object.fromEntries(strategies.map((strategy) => [strategy.name, strategy.instrument])),
+      ...current,
+    }));
+    setConfigDrafts(Object.fromEntries(strategies.map((strategy) => [strategy.name, strategy])));
+    setSelectedStrategy((current) => (current ? strategies.find((strategy) => strategy.name === current.name) ?? null : null));
+  }, [strategies]);
 
   const sortedStrategies = useMemo(
     () =>
@@ -108,7 +117,7 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
               </div>
               <div className="strategy-stat">
                 <span className="eyebrow">Last Price</span>
-                <strong>{strategy.last_price != null ? formatCurrency(strategy.last_price) : "Waiting..."}</strong>
+                <strong>{strategy.last_price != null ? formatPrice(strategy.last_price, strategy.instrument) : "Waiting..."}</strong>
               </div>
             </div>
             <label className="strategy-card__instrument">

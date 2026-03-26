@@ -3,6 +3,7 @@ from collections import defaultdict
 from sqlmodel import Session
 
 from app.core.config import get_settings
+from app.core.ig_broker import IGBrokerError
 from app.core.instrument_catalog import list_instruments
 from app.core.runtime import runtime_manager
 from app.strategies.registry import strategy_registry
@@ -34,6 +35,7 @@ class StrategyService:
             trade_count = len(strategy_pnls)
             win_count = len([pnl for pnl in strategy_pnls if pnl > 0])
             current_pnl = position.unrealized_pnl if position and position.unrealized_pnl is not None else 0.0
+            last_price = self._resolve_last_price(engine.instrument, position.current_price if position else None) if engine else None
             strategies.append(
                 {
                     "name": metadata.name,
@@ -41,7 +43,7 @@ class StrategyService:
                     "instrument": engine.instrument if engine else metadata.default_instrument,
                     "status": "RUNNING" if engine else "STOPPED",
                     "current_pnl": round(current_pnl, 2),
-                    "last_price": runtime_manager.get_last_price(engine.instrument) if engine else None,
+                    "last_price": last_price,
                     "trade_count": trade_count,
                     "win_rate": round((win_count / trade_count) * 100, 2) if trade_count else 0.0,
                     "account_type": self.settings.broker_mode,
@@ -136,3 +138,23 @@ class StrategyService:
     def _calculate_open_pnl(*, direction: str, open_price: float, current_price: float, size: float) -> float:
         multiplier = 1 if direction == "BUY" else -1
         return (current_price - open_price) * size * multiplier
+
+    @staticmethod
+    def _resolve_last_price(instrument: str, fallback_price: float | None = None) -> float | None:
+        from app.services.ig_streaming_service import get_ig_streaming_service
+
+        streamed_price = get_ig_streaming_service().get_last_price(instrument)
+        if streamed_price is not None:
+            return streamed_price
+        last_price = runtime_manager.get_last_price(instrument)
+        if last_price is not None:
+            return last_price
+        if fallback_price is not None:
+            return fallback_price
+        engine = runtime_manager.engines.get(instrument)
+        if engine is None:
+            return None
+        try:
+            return engine.broker.get_latest_price(instrument)
+        except IGBrokerError:
+            return None

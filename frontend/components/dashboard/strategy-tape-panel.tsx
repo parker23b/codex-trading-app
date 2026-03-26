@@ -1,5 +1,5 @@
 import { Card } from "@/components/ui/card";
-import { formatCurrency } from "@/lib/format";
+import { formatPrice } from "@/lib/format";
 
 type StrategyTapeRow = {
   name: string;
@@ -29,7 +29,7 @@ export function StrategyTapePanel({ rows }: StrategyTapePanelProps) {
                 <div className="eyebrow">{row.name}</div>
                 <strong>{row.instrumentLabel}</strong>
               </div>
-              <div className="strategy-tape__price">{row.lastPrice != null ? formatCurrency(row.lastPrice) : "Waiting..."}</div>
+              <div className="strategy-tape__price">{row.lastPrice != null ? formatPrice(row.lastPrice, row.instrument) : "Waiting..."}</div>
             </article>
           ))}
         </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { StatusBadge } from "@/components/ui/status-badge";
-import { formatSignedPercent } from "@/lib/format";
+import { formatPrice, formatSignedPercent } from "@/lib/format";
 import { MarketInstrument } from "@/lib/types";
 
 type InstrumentRowProps = {
@@ -70,7 +70,7 @@ export function InstrumentRow({ instrument, starred, onToggleStar }: InstrumentR
       </td>
       <td>
         <div className="cell-stack">
-          <strong>{instrument.price.toLocaleString("en-GB", { maximumFractionDigits: instrument.price >= 1000 ? 1 : 4 })}</strong>
+          <strong>{formatPrice(instrument.price, instrument.symbol)}</strong>
           <span className={instrument.changePercent >= 0 ? "value-positive" : "value-negative"}>
             {formatSignedPercent(instrument.changePercent, 2)}
           </span>

@@ -5,6 +5,7 @@ import {
   MarketCategoryOverviewResponse,
   Position,
   StrategyDefinition,
+  StreamHealthStatus,
   Trade,
 } from "@/lib/types";
 
@@ -92,6 +93,10 @@ export async function getBrokerAuthStatus(): Promise<BrokerAuthStatus> {
       position_count: 0,
     };
   }
+}
+
+export async function getStreamHealth(): Promise<StreamHealthStatus> {
+  return request<StreamHealthStatus>("/health/stream");
 }
 
 export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
