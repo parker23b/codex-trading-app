@@ -32,8 +32,9 @@ class Settings(BaseSettings):
     runtime_price_stale_after_seconds: float = 15.0
     runtime_entry_burst_limit: int = 3
     runtime_entry_burst_window_seconds: int = 300
-    runtime_cooldown_after_loss_seconds: int = 900
-    runtime_cooldown_after_exit_seconds: int = 120
+    runtime_failed_entry_retry_cooldown_seconds: int = 120
+    runtime_cooldown_after_loss_seconds: int = 20
+    runtime_cooldown_after_exit_seconds: int = 10
     runtime_duplicate_signal_window_seconds: int = 30
     runtime_max_unhealthy_runtimes: int = 0
     runtime_global_entry_kill_switch: bool = False
@@ -88,6 +89,7 @@ class Settings(BaseSettings):
         "runtime_max_positions_per_strategy",
         "runtime_entry_burst_limit",
         "runtime_entry_burst_window_seconds",
+        "runtime_failed_entry_retry_cooldown_seconds",
         "runtime_cooldown_after_loss_seconds",
         "runtime_cooldown_after_exit_seconds",
         "runtime_duplicate_signal_window_seconds",

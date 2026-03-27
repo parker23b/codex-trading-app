@@ -147,6 +147,9 @@ class RuntimeRecoveryService:
                 last_price_seen=runtime.last_price_seen,
                 last_price_seen_at=runtime.last_price_seen_at,
                 current_position=clone_position(current_position),
+                current_position_broker_reference=(
+                    current_position.broker_reference if current_position is not None else None
+                ),
             )
             outcomes.append(
                 {

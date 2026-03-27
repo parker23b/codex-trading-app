@@ -110,18 +110,60 @@ class IGBroker(Broker):
             return self._simulate_place_order(order, submitted_at=submitted_at)
 
         self._ensure_authenticated()
+        market_payload = self._request("GET", f"/markets/{order.instrument}", version="4")
+        market_details = self._parse_market_details(order.instrument, market_payload)
+        self._market_details_cache[order.instrument] = CachedMarketDetails(
+            details=market_details,
+            fetched_at=time.monotonic(),
+        )
+        account_summary = self.get_account_summary()
+        order_currency = self._resolve_order_currency(market_payload)
+        if market_details.min_deal_size is not None and order.size < market_details.min_deal_size:
+            raise IGBrokerError(
+                f"Requested size {order.size} is below IG minimum deal size {market_details.min_deal_size} "
+                f"for {order.instrument}."
+            )
         payload = {
-            "currencyCode": self._get_account_currency(),
+            "currencyCode": order_currency,
             "direction": order.direction.value,
             "epic": order.instrument,
             "expiry": "-",
-            "forceOpen": True,
+            "forceOpen": False,
             "guaranteedStop": False,
             "orderType": "MARKET",
             "size": order.size,
-            "timeInForce": "FILL_OR_KILL",
         }
+        logger.info(
+            "Submitting IG order",
+            extra={
+                "instrument": order.instrument,
+                "strategy": order.strategy_name,
+                "direction": order.direction.value,
+                "size": order.size,
+                "payload": payload,
+                "market_status": market_details.market_status,
+                "tradable": market_details.tradable,
+                "min_deal_size": market_details.min_deal_size,
+                "market_order_preference": market_details.market_order_preference,
+                "min_normal_stop_or_limit_distance": market_details.min_normal_stop_or_limit_distance,
+                "account_id": account_summary.account_id,
+                "account_type": account_summary.account_type.value,
+                "account_available": account_summary.available,
+                "account_balance": account_summary.balance,
+                "account_currency": self._get_account_currency(),
+                "order_currency": order_currency,
+                "market_payload": market_payload,
+            },
+        )
         response = self._request("POST", "/positions/otc", version="2", body=payload)
+        logger.info(
+            "IG order submission acknowledged",
+            extra={
+                "instrument": order.instrument,
+                "strategy": order.strategy_name,
+                "response": response,
+            },
+        )
         deal_reference = response.get("dealReference")
         if not deal_reference:
             raise IGBrokerError("IG order placement did not return a dealReference.")
@@ -196,16 +238,30 @@ class IGBroker(Broker):
         deal_id = open_position.broker_reference
         opposite_direction = OrderDirection.SELL if open_position.direction is OrderDirection.BUY else OrderDirection.BUY
         payload = {
+            "dealId": deal_id,
             "direction": opposite_direction.value,
-            "epic": open_position.instrument,
-            "expiry": "-",
             "orderType": "MARKET",
             "size": open_position.size,
-            "timeInForce": "FILL_OR_KILL",
         }
-        if deal_id:
-            payload["dealId"] = deal_id
+        logger.info(
+            "Submitting IG close",
+            extra={
+                "instrument": open_position.instrument,
+                "broker_reference": open_position.broker_reference,
+                "direction": opposite_direction.value,
+                "size": open_position.size,
+                "payload": payload,
+            },
+        )
         response = self._request("DELETE", "/positions/otc", version="1", body=payload)
+        logger.info(
+            "IG close submission acknowledged",
+            extra={
+                "instrument": open_position.instrument,
+                "broker_reference": open_position.broker_reference,
+                "response": response,
+            },
+        )
         deal_reference = response.get("dealReference")
         if not deal_reference:
             raise IGBrokerError("IG close-position request did not return a dealReference.")
@@ -326,30 +382,7 @@ class IGBroker(Broker):
                 )
                 return cached.details
             raise
-        instrument_data = payload.get("instrument", {})
-        snapshot = payload.get("snapshot", {})
-        dealing_rules = payload.get("dealingRules", {})
-        bid = self._coerce_float(snapshot.get("bid"))
-        offer = self._coerce_float(snapshot.get("offer"))
-        high = self._coerce_float(snapshot.get("high"))
-        low = self._coerce_float(snapshot.get("low"))
-        market_status = snapshot.get("marketStatus")
-        market_order_preference = str(dealing_rules.get("marketOrderPreference") or "").upper()
-        tradable = market_status in {"TRADEABLE", "TRADEABLE_ONLINE"} and market_order_preference != "NOT_AVAILABLE"
-
-        details = BrokerMarketDetails(
-            instrument=instrument,
-            name=instrument_data.get("name") or instrument,
-            bid=bid,
-            offer=offer,
-            high=high,
-            low=low,
-            percentage_change=self._coerce_float(snapshot.get("percentageChange")),
-            net_change=self._coerce_float(snapshot.get("netChange")),
-            market_status=market_status,
-            update_time=snapshot.get("updateTime"),
-            tradable=tradable,
-        )
+        details = self._parse_market_details(instrument, payload)
         self._market_details_cache[instrument] = CachedMarketDetails(details=details, fetched_at=time.monotonic())
         return details
 
@@ -555,9 +588,77 @@ class IGBroker(Broker):
                 return response
             if deal_status == "REJECTED":
                 reason = response.get("reason") or "Unknown rejection"
-                raise IGBrokerError(f"IG rejected deal {deal_reference}: {reason}")
+                raise IGBrokerError(
+                    f"IG rejected deal {deal_reference}: {reason}. Confirmation: {json.dumps(response, default=str)}"
+                )
             time.sleep(0.4)
         raise IGBrokerError(f"Timed out waiting for IG confirmation for deal {deal_reference}: {last_response}")
+
+    def _parse_market_details(self, instrument: str, payload: dict[str, Any]) -> BrokerMarketDetails:
+        instrument_data = payload.get("instrument", {})
+        snapshot = payload.get("snapshot", {})
+        dealing_rules = payload.get("dealingRules", {})
+        bid = self._coerce_float(snapshot.get("bid"))
+        offer = self._coerce_float(snapshot.get("offer"))
+        high = self._coerce_float(snapshot.get("high"))
+        low = self._coerce_float(snapshot.get("low"))
+        market_status = snapshot.get("marketStatus")
+        market_order_preference = str(dealing_rules.get("marketOrderPreference") or "").upper()
+        tradable = market_status in {"TRADEABLE", "TRADEABLE_ONLINE"} and market_order_preference != "NOT_AVAILABLE"
+        min_deal_size = self._extract_rule_value(dealing_rules.get("minDealSize"))
+        min_normal_stop_or_limit_distance = self._extract_rule_value(
+            dealing_rules.get("minNormalStopOrLimitDistance")
+        )
+
+        return BrokerMarketDetails(
+            instrument=instrument,
+            name=instrument_data.get("name") or instrument,
+            bid=bid,
+            offer=offer,
+            high=high,
+            low=low,
+            percentage_change=self._coerce_float(snapshot.get("percentageChange")),
+            net_change=self._coerce_float(snapshot.get("netChange")),
+            market_status=market_status,
+            update_time=snapshot.get("updateTime"),
+            tradable=tradable,
+            min_deal_size=min_deal_size,
+            min_normal_stop_or_limit_distance=min_normal_stop_or_limit_distance,
+            market_order_preference=market_order_preference or None,
+        )
+
+    def _extract_rule_value(self, raw_value: Any) -> float | None:
+        if raw_value is None:
+            return None
+        if isinstance(raw_value, (int, float)):
+            return float(raw_value)
+        if isinstance(raw_value, dict):
+            for key in ("value", "min", "amount"):
+                if key in raw_value:
+                    return self._coerce_float(raw_value.get(key))
+        return self._coerce_float(raw_value)
+
+    def _resolve_order_currency(self, market_payload: dict[str, Any]) -> str:
+        currencies = market_payload.get("instrument", {}).get("currencies") or []
+        default_currency = next(
+            (
+                currency.get("code")
+                for currency in currencies
+                if currency.get("isDefault") and currency.get("code")
+            ),
+            None,
+        )
+        if default_currency:
+            return str(default_currency)
+
+        first_currency = next(
+            (currency.get("code") for currency in currencies if currency.get("code")),
+            None,
+        )
+        if first_currency:
+            return str(first_currency)
+
+        return self._get_account_currency()
 
     def _raw_request(
         self,
@@ -574,6 +675,12 @@ class IGBroker(Broker):
             "VERSION": version,
             **(headers or {}),
         }
+        request_method = method
+        if method == "DELETE" and body is not None:
+            # IG recommends POST + _method: DELETE because some HTTP clients do
+            # not send DELETE request bodies reliably.
+            request_method = "POST"
+            request_headers["_method"] = "DELETE"
         if self._api_key:
             request_headers.setdefault("X-IG-API-KEY", self._api_key)
         if self._session is not None:
@@ -585,7 +692,7 @@ class IGBroker(Broker):
             url=f"{self._base_url}{path}",
             data=raw_body,
             headers=request_headers,
-            method=method,
+            method=request_method,
         )
         try:
             with urlopen(

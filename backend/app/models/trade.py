@@ -121,4 +121,28 @@ class ReconciliationEvent(SQLModel, table=True):
 def clone_position(position: Position | None) -> Position | None:
     if position is None:
         return None
-    return Position.model_validate(position.model_dump())
+    return Position(
+        id=position.id,
+        strategy_name=position.strategy_name,
+        broker_reference=position.broker_reference,
+        instrument=position.instrument,
+        direction=position.direction,
+        size=position.size,
+        open_price=position.open_price,
+        close_price=position.close_price,
+        open_time=position.open_time,
+        close_time=position.close_time,
+        pnl=position.pnl,
+        current_price=position.current_price,
+        unrealized_pnl=position.unrealized_pnl,
+        risk_percent=position.risk_percent,
+        reason=position.reason,
+        manual_override=position.manual_override,
+        account_type=position.account_type,
+        is_open=position.is_open,
+        broker_sync_status=position.broker_sync_status,
+        broker_open_confirmed_at=position.broker_open_confirmed_at,
+        broker_closed_confirmed_at=position.broker_closed_confirmed_at,
+        last_reconciled_at=position.last_reconciled_at,
+        created_at=position.created_at,
+    )

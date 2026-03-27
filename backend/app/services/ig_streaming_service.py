@@ -270,6 +270,12 @@ class IGStreamingService:
         with Session(engine) as session:
             strategy_service = StrategyService(session)
             for update in latest_by_instrument.values():
+                if not runtime_manager.get_engines_for_instrument(update.instrument):
+                    logger.debug(
+                        "Skipping streamed tick for inactive instrument",
+                        extra={"instrument": update.instrument},
+                    )
+                    continue
                 logger.debug(
                     "IG streaming tick received",
                     extra={

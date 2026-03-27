@@ -6,14 +6,17 @@ from sqlmodel import Session
 from app.core.broker import BrokerOrderStatus, OrderDirection, OrderRequest
 from app.core.config import get_settings
 from app.core.ig_broker import IGBrokerError
+from app.core.logging import get_logger
 from app.core.signals import EntrySignal, ExitSignal, SignalStatus
 from app.core.instrument_catalog import list_instruments
 from app.core.runtime import runtime_manager
-from app.models.trade import Execution, ExecutionPhase, ExecutionStatus, Position, Trade, utc_now
+from app.models.trade import Execution, ExecutionPhase, ExecutionStatus, Position, Trade, clone_position, utc_now
 from app.strategies.registry import strategy_registry
 from app.services.portfolio_risk_service import PortfolioRiskService
 from app.services.runtime_state_service import RuntimeStateService
 from app.services.trade_service import TradeService
+
+logger = get_logger(__name__)
 
 
 class StrategyService:
@@ -30,12 +33,20 @@ class StrategyService:
         trade_service = TradeService(self.session)
         trades = trade_service.list_trades()
         positions = trade_service.list_positions()
+        executions = trade_service.list_executions(limit=250)
         open_positions_by_strategy: dict[str, list] = defaultdict(list)
         for position in positions:
             open_positions_by_strategy[position.strategy_name].append(position)
         trades_by_strategy: dict[str, list[float]] = defaultdict(list)
         for trade in trades:
             trades_by_strategy[trade.strategy_name].append(trade.pnl)
+        latest_execution_warning_by_key: dict[tuple[str, str], Execution] = {}
+        for execution in executions:
+            if execution.status not in {ExecutionStatus.FAILED.value, ExecutionStatus.NEEDS_MANUAL_REVIEW.value, ExecutionStatus.RISK_REJECTED.value}:
+                continue
+            key = (execution.strategy_name, execution.instrument)
+            if key not in latest_execution_warning_by_key:
+                latest_execution_warning_by_key[key] = execution
 
         strategies: list[dict[str, object]] = []
         runtimes_by_key = {}
@@ -56,6 +67,7 @@ class StrategyService:
                 2,
             )
             primary_instrument = primary_engine.instrument if primary_engine else metadata.default_instrument
+            primary_warning = latest_execution_warning_by_key.get((metadata.name, primary_instrument))
             price_snapshot = (
                 self._resolve_price_snapshot(
                     primary_instrument,
@@ -83,6 +95,13 @@ class StrategyService:
                     "active_instruments": [engine.instrument for _, engine in active_engines],
                     "active_runtime_count": len(active_engines),
                     "open_position_count": len(strategy_positions),
+                    "warning_message": (
+                        primary_warning.error_message or primary_warning.reason
+                        if primary_warning is not None
+                        else None
+                    ),
+                    "warning_instrument": primary_warning.instrument if primary_warning is not None else None,
+                    "warning_status": primary_warning.status if primary_warning is not None else None,
                     "active_runtimes": [
                         {
                             "strategy_name": metadata.name,
@@ -207,6 +226,11 @@ class StrategyService:
                     last_price_seen=price,
                     last_price_seen_at=received_at or datetime.now(UTC),
                     current_position=update_result.engine.current_position,
+                    current_position_broker_reference=(
+                        update_result.engine.current_position.broker_reference
+                        if update_result.engine.current_position is not None
+                        else None
+                    ),
                 )
         for update_result in update_results:
             engine = update_result.engine
@@ -261,8 +285,17 @@ class StrategyService:
                             trade_service=trade_service,
                             execution=execution,
                         )
-                    except Exception:
+                    except Exception as exc:
                         engine.current_position = None
+                        engine.strategy.on_entry_failed()
+                        logger.exception(
+                            "Entry execution failed",
+                            extra={
+                                "strategy": engine.strategy.name,
+                                "instrument": engine.instrument,
+                                "error": str(exc),
+                            },
+                        )
                     else:
                         if self.runtime_state_service is not None:
                             self.runtime_state_service.sync_engine_state(
@@ -273,9 +306,19 @@ class StrategyService:
                                 last_price_seen=price,
                                 last_price_seen_at=received_at or datetime.now(UTC),
                                 current_position=created_position,
+                                current_position_broker_reference=created_position.broker_reference,
                             )
                         open_positions = trade_service.list_positions()
                 else:
+                    logger.info(
+                        "Entry signal rejected by risk controls",
+                        extra={
+                            "strategy": signal.strategy_name,
+                            "instrument": signal.instrument,
+                            "reason": signal.reason,
+                            "rejection_layer": signal.rejection_layer,
+                        },
+                    )
                     trade_service.transition_execution(
                         execution,
                         status=ExecutionStatus.RISK_REJECTED,
@@ -493,8 +536,8 @@ class StrategyService:
             reason="Position opened",
         )
         engine.strategy.on_position_opened(direction=signal.direction, entry_price=order.price)
-        engine.current_position = persisted_position
-        return persisted_position
+        engine.current_position = clone_position(persisted_position)
+        return clone_position(persisted_position)
 
     @staticmethod
     def _execute_exit_signal(*, engine, signal: ExitSignal, trade_service: TradeService, execution: Execution) -> Trade:

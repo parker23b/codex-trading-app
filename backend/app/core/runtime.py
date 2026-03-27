@@ -60,6 +60,7 @@ class StrategyRuntimeManager:
         if key in self.engines:
             raise ValueError(f"Strategy '{strategy_name}' is already running for instrument '{instrument}'.")
 
+        metadata = strategy_registry.get_metadata(strategy_name)
         strategy = strategy_registry.create(strategy_name)
         if strategy_snapshot:
             strategy.restore_state_snapshot(strategy_snapshot)
@@ -69,6 +70,7 @@ class StrategyRuntimeManager:
             instrument=instrument,
             runtime_id=runtime_id or str(uuid4()),
         )
+        engine.trade_size = metadata.position_size
         engine.current_position = clone_position(current_position)
         if activate:
             engine.start()

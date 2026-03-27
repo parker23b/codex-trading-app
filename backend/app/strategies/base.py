@@ -71,6 +71,9 @@ class Strategy(ABC):
     def on_position_closed(self) -> None:
         """Optional lifecycle hook invoked after the active position is closed."""
 
+    def on_entry_failed(self) -> None:
+        """Optional lifecycle hook invoked when an entry order fails."""
+
     def export_state_snapshot(self) -> dict[str, Any]:
         """
         Return a JSON-serializable snapshot of internal strategy state.

@@ -111,6 +111,7 @@ class ReconciliationService:
                     last_price_seen=runtime_manager.get_last_price(instrument) or remote_position.open_price,
                     last_price_seen_at=runtime_manager.get_last_price_updated_at(instrument),
                     current_position=persisted,
+                    current_position_broker_reference=persisted.broker_reference,
                 )
 
         for local_position in local_positions:

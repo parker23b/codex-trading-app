@@ -9,6 +9,7 @@ from app.strategies.carry_drift import CarryDriftStrategy
 from app.strategies.fx_micro_pullback import FxMicroPullbackStrategy
 from app.strategies.base import Strategy
 from app.strategies.mean_reversion import MeanReversionStrategy
+from app.strategies.smoke_test_hold import SmokeTestHoldStrategy
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,4 +130,18 @@ strategy_registry.register(
         ),
     ),
     factory=BadTradeFlowStrategy,
+)
+strategy_registry.register(
+    metadata=StrategyMetadata(
+        name=SmokeTestHoldStrategy.name,
+        description="One-shot live smoke test that opens a single position, holds for a few minutes, then closes.",
+        default_instrument="CS.D.EURUSD.MINI.IP",
+        position_size=0.2,
+        risk_per_trade=0.1,
+        parameters=(
+            StrategyParameterDefinition(key="warmup_ticks", label="Warmup Ticks", value=2, step=1),
+            StrategyParameterDefinition(key="hold_minutes", label="Hold Minutes", value=3, step=0.5),
+        ),
+    ),
+    factory=SmokeTestHoldStrategy,
 )

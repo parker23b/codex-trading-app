@@ -87,6 +87,9 @@ class BrokerMarketDetails:
     market_status: str | None
     update_time: str | None
     tradable: bool
+    min_deal_size: float | None = None
+    min_normal_stop_or_limit_distance: float | None = None
+    market_order_preference: str | None = None
 
 
 class Broker(ABC):

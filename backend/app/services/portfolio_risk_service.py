@@ -17,6 +17,8 @@ from app.services.runtime_state_service import RuntimeStateService
 class PortfolioRiskService:
     """Layered entry gating with auditable rule outcomes."""
 
+    SMOKE_TEST_STRATEGIES = {"smoke_test_hold"}
+
     def __init__(self, session: Session | None = None) -> None:
         self.settings = get_settings()
         self.session = session
@@ -201,14 +203,19 @@ class PortfolioRiskService:
             and (execution.details or {}).get("direction") == signal.direction.value
             and execution.status != ExecutionStatus.RISK_REJECTED.value
         ]
+        duplicate_suppression_enabled = signal.strategy_name not in self.SMOKE_TEST_STRATEGIES
         checks.append(
             self._check(
                 "duplicate_signal_suppression",
-                not duplicate_signals,
-                "No duplicate entry signal in the suppression window.",
+                (not duplicate_signals) if duplicate_suppression_enabled else True,
+                (
+                    "No duplicate entry signal in the suppression window."
+                    if duplicate_suppression_enabled
+                    else "Duplicate signal suppression skipped for smoke-test strategy."
+                ),
                 "Duplicate entry signal detected in suppression window.",
-                actual=len(duplicate_signals),
-                limit=0,
+                actual=len(duplicate_signals) if duplicate_suppression_enabled else "skipped",
+                limit=0 if duplicate_suppression_enabled else None,
             )
         )
 
@@ -220,14 +227,43 @@ class PortfolioRiskService:
             and execution.signal_time.astimezone(UTC) < signal.signal_at.astimezone(UTC)
             and execution.status != ExecutionStatus.RISK_REJECTED.value
         ]
+        burst_limit_enabled = signal.strategy_name not in self.SMOKE_TEST_STRATEGIES
         checks.append(
             self._check(
                 "entry_burst_limit",
-                len(concurrent_entries) < self.settings.runtime_entry_burst_limit,
-                "Entry velocity is within the configured burst window.",
+                (
+                    len(concurrent_entries) < self.settings.runtime_entry_burst_limit
+                    if burst_limit_enabled
+                    else True
+                ),
+                (
+                    "Entry velocity is within the configured burst window."
+                    if burst_limit_enabled
+                    else "Entry burst limit skipped for smoke-test strategy."
+                ),
                 "Too many recent entry attempts in the configured burst window.",
-                actual=len(concurrent_entries),
-                limit=self.settings.runtime_entry_burst_limit,
+                actual=len(concurrent_entries) if burst_limit_enabled else "skipped",
+                limit=self.settings.runtime_entry_burst_limit if burst_limit_enabled else None,
+            )
+        )
+
+        failed_entry_cutoff = signal.signal_at - timedelta(seconds=self.settings.runtime_failed_entry_retry_cooldown_seconds)
+        recent_failed_entries = [
+            execution
+            for execution in recent_executions
+            if execution.created_at.astimezone(UTC) >= failed_entry_cutoff.astimezone(UTC)
+            and execution.strategy_name == signal.strategy_name
+            and execution.instrument == signal.instrument
+            and execution.status in {ExecutionStatus.FAILED.value, ExecutionStatus.NEEDS_MANUAL_REVIEW.value}
+        ]
+        checks.append(
+            self._check(
+                "failed_entry_retry_cooldown",
+                not recent_failed_entries,
+                "No recent broker-side entry failures are blocking retries.",
+                "Recent broker-side entry failure is in cooldown; retry paused to avoid repeated broker requests.",
+                actual=recent_failed_entries[0].created_at.isoformat() if recent_failed_entries else None,
+                limit=self.settings.runtime_failed_entry_retry_cooldown_seconds,
             )
         )
         return self._layer_result("pre_trade", checks)
@@ -356,6 +392,7 @@ class PortfolioRiskService:
             runtime
             for runtime in runtimes
             if runtime.recovery_state in {"RECOVERY_REQUIRED", "ERROR"}
+            and runtime_manager.get_engine(runtime.strategy_name, runtime.instrument) is not None
         ]
         checks.append(
             self._check(
@@ -387,7 +424,12 @@ class PortfolioRiskService:
         )
 
         unhealthy_count = len(
-            [runtime for runtime in runtimes if runtime.recovery_state in {"RECOVERY_REQUIRED", "ERROR"}]
+            [
+                runtime
+                for runtime in runtimes
+                if runtime.recovery_state in {"RECOVERY_REQUIRED", "ERROR"}
+                and runtime_manager.get_engine(runtime.strategy_name, runtime.instrument) is not None
+            ]
         )
         checks.append(
             self._check(
@@ -427,7 +469,12 @@ class PortfolioRiskService:
         daily_pnl = self._daily_closed_pnl(trades)
         open_risk = sum(position.risk_percent or 0.0 for position in open_positions)
         unhealthy_count = len(
-            [runtime for runtime in runtimes if runtime.recovery_state in {"RECOVERY_REQUIRED", "ERROR"}]
+            [
+                runtime
+                for runtime in runtimes
+                if runtime.recovery_state in {"RECOVERY_REQUIRED", "ERROR"}
+                and runtime_manager.get_engine(runtime.strategy_name, runtime.instrument) is not None
+            ]
         )
         return {
             "approved": approved,
@@ -452,6 +499,7 @@ class PortfolioRiskService:
             return []
         lookback_seconds = max(
             self.settings.runtime_entry_burst_window_seconds,
+            self.settings.runtime_failed_entry_retry_cooldown_seconds,
             self.settings.runtime_duplicate_signal_window_seconds,
             self.settings.runtime_cooldown_after_loss_seconds,
             self.settings.runtime_cooldown_after_exit_seconds,

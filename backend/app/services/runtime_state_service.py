@@ -48,6 +48,7 @@ class RuntimeStateService:
         last_price_seen: float | None = None,
         last_price_seen_at: datetime | None = None,
         current_position: Position | None = None,
+        current_position_broker_reference: str | None = None,
     ) -> StrategyRuntimeState:
         engine = runtime_manager.get_engine(strategy_name, instrument)
         if engine is None:
@@ -81,9 +82,13 @@ class RuntimeStateService:
         runtime.last_price_seen = last_price_seen
         runtime.last_price_seen_at = last_price_seen_at
         runtime.current_position_broker_reference = (
-            current_position.broker_reference
-            if current_position is not None
-            else (engine.current_position.broker_reference if engine.current_position is not None else None)
+            current_position_broker_reference
+            if current_position_broker_reference is not None
+            else (
+                current_position.broker_reference
+                if current_position is not None
+                else (engine.current_position.broker_reference if engine.current_position is not None else None)
+            )
         )
         runtime.strategy_state_snapshot = engine.strategy.export_state_snapshot()
         runtime.updated_at = now
