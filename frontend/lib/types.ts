@@ -215,3 +215,157 @@ export type MarketCategoryOverviewResponse = {
   summary: MarketSummary;
   instruments: MarketInstrument[];
 };
+
+export type ReviewObservation = {
+  code: string;
+  severity: "info" | "warning" | "critical";
+  label: string;
+  detail: string;
+  confidence: number;
+  rank: number;
+  time_scope: string;
+  supporting_metrics: Array<{
+    key: string;
+    label: string;
+    value: number | string | null;
+    unit?: string | null;
+    baseline_value?: number | string | null;
+    delta_value?: number | string | null;
+  }>;
+  entity_type?: string | null;
+  entity_id?: string | null;
+};
+
+export type PossibleContributor = {
+  code: string;
+  label: string;
+  detail: string;
+  confidence: number;
+  time_scope: string;
+  related_observation_codes: string[];
+  supporting_metrics: Array<{
+    key: string;
+    label: string;
+    value: number | string | null;
+    unit?: string | null;
+    baseline_value?: number | string | null;
+    delta_value?: number | string | null;
+  }>;
+};
+
+export type ReviewWarning = {
+  code: string;
+  severity: "info" | "warning" | "critical";
+  message: string;
+};
+
+export type SupportingMetric = {
+  key: string;
+  label: string;
+  value: number | string | null;
+  unit?: string | null;
+  baseline_value?: number | string | null;
+  delta_value?: number | string | null;
+  trend: "up" | "down" | "flat" | "unknown";
+  description?: string | null;
+};
+
+export type ReviewMetadata = {
+  review_id?: number | null;
+  review_type:
+    | "operator_summary"
+    | "daily_review"
+    | "strategy_review"
+    | "runtime_health_review"
+    | "trade_postmortem"
+    | "operational_question";
+  generated_at: string;
+  as_of: string;
+  period_start?: string | null;
+  period_end?: string | null;
+  requested_date?: string | null;
+  scope: Record<string, unknown>;
+  source_coverage: {
+    trades_available: boolean;
+    positions_available: boolean;
+    executions_available: boolean;
+    runtimes_available: boolean;
+    reconciliation_available: boolean;
+    broker_summary_available: boolean;
+    stream_health_available: boolean;
+    coverage_notes: string[];
+  };
+  generation_mode: "deterministic_only" | "deterministic_plus_llm";
+};
+
+export type AIReviewSummary = {
+  summary: string;
+  notable_points: string[];
+  operator_checks: string[];
+};
+
+export type OperatorSummaryReview = {
+  metadata: ReviewMetadata;
+  facts: {
+    account_value?: number | null;
+    account_value_change_percent?: number | null;
+    daily_pnl: number;
+    daily_pnl_percent?: number | null;
+    open_risk_percent: number;
+    open_positions_count: number;
+    active_runtimes: number;
+    main_open_risk?: {
+      strategy_name: string;
+      instrument: string;
+      direction: string;
+      risk_percent: number;
+      unrealized_pnl?: number | null;
+      notional_estimate?: number | null;
+      share_of_open_risk_percent?: number | null;
+    } | null;
+    largest_risk_share_percent: number;
+    top_risk_exposures: Array<{
+      strategy_name: string;
+      instrument: string;
+      direction: string;
+      risk_percent: number;
+      unrealized_pnl?: number | null;
+      notional_estimate?: number | null;
+      share_of_open_risk_percent?: number | null;
+    }>;
+    strategy_health: Array<{
+      strategy_name: string;
+      status: string;
+      active_runtime_count: number;
+      open_position_count: number;
+      trade_count_24h: number;
+      pnl_24h: number;
+      win_rate_24h?: number | null;
+      stale_runtime_count: number;
+    }>;
+    risk_rejections_24h: number;
+    execution_failures_24h: number;
+    reconciliation_issues_24h: number;
+    stale_runtimes: number;
+    stream_connected?: boolean | null;
+    stream_last_tick_at?: string | null;
+    baseline_open_risk_percent?: number | null;
+    baseline_largest_risk_share_percent?: number | null;
+    baseline_trade_count_24h?: number | null;
+    baseline_win_rate_24h?: number | null;
+  };
+  derived_observations: ReviewObservation[];
+  possible_contributors: PossibleContributor[];
+  warnings: ReviewWarning[];
+  supporting_metrics: SupportingMetric[];
+  ai_summary?: AIReviewSummary | null;
+  provenance?: {
+    llm_attempted: boolean;
+    llm_provider?: string | null;
+    llm_model?: string | null;
+    prompt_version: string;
+    generated_at?: string | null;
+    prompt_facts: Record<string, unknown>;
+    raw_response?: string | null;
+  } | null;
+};

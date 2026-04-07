@@ -10,7 +10,7 @@ The codebase is structured so strategy logic stays isolated from HTTP, persisten
 
 ## What The App Does
 
-Today the product exposes three main operator workflows:
+Today the product exposes four main operator workflows:
 
 1. Dashboard
    View account KPIs, equity trend, open positions, risk concentration, and recent trades.
@@ -18,6 +18,8 @@ Today the product exposes three main operator workflows:
    Inspect market categories such as forex or indices, see whether instruments are tradable, and understand which instruments are active or strategy-compatible.
 3. Strategies
    Start and stop registered strategies, review current PnL and win rate, and inspect editable strategy settings in the UI.
+4. AI Reviewer
+   Inspect a read-only operator summary, deterministic review observations, warnings, provenance, and persisted review history for audit follow-up.
 
 There are two distinct operating modes:
 
@@ -46,6 +48,8 @@ That boundary maps to the current tables like this:
   Stores runtime assignment, recovery status, cached prices, and serialized strategy state. It does not own broker exposure.
 - `reconciliationevent`
   Stores an audit trail of broker/local drift detection and recovery actions.
+- `generatedreviewrecord`
+  Stores persisted AI Reviewer outputs, including structured facts, ranked derived observations, possible contributors, warnings, optional AI explanation metadata, and raw provenance fields for audit/history use.
 
 Two important current limits are worth calling out explicitly:
 
@@ -75,6 +79,8 @@ backend/
       init_db.py               # Table creation
     models/
       trade.py                 # Trade and Position tables
+      review.py                # Persisted generated review records
+    reviewer/                  # Deterministic review layer and prompt scaffolding
     services/                  # Application service layer
     strategies/                # Pure strategy implementations and registry
     main.py                    # FastAPI app entrypoint
@@ -124,6 +130,8 @@ Useful endpoints to sanity-check startup:
 - [http://localhost:8000/health](http://localhost:8000/health)
 - [http://localhost:8000/dashboard](http://localhost:8000/dashboard)
 - [http://localhost:8000/strategies](http://localhost:8000/strategies)
+- [http://localhost:8000/reviews/operator-summary](http://localhost:8000/reviews/operator-summary)
+- [http://localhost:8000/reviews/history](http://localhost:8000/reviews/history)
 
 ### 2. Start The Frontend
 
@@ -190,6 +198,9 @@ SIMULATION_SEED=20260320
 STARTING_ACCOUNT_VALUE=100000
 DASHBOARD_RECENT_TRADE_WINDOW=30
 MARKET_DATA_POLL_INTERVAL_SECONDS=2
+AI_REVIEWER_LLM_ENABLED=false
+AI_REVIEWER_LLM_PROVIDER=disabled
+AI_REVIEWER_LLM_MODEL=unconfigured
 IG_API_KEY=
 IG_USERNAME=
 IG_PASSWORD=
@@ -281,6 +292,21 @@ IG_CA_BUNDLE_PATH=
   Meaning: Interval for live broker price polling when simulation mode is off.
   Change it when: Tuning responsiveness versus broker/API load.
   Constraint: Must be greater than `0`.
+
+- `AI_REVIEWER_LLM_ENABLED`
+  Example: `false`
+  Meaning: Enables the optional LLM explanation step for the AI Reviewer.
+  Default-safe behavior: `false`, which keeps the review layer deterministic while still generating persisted review records and audit payloads.
+
+- `AI_REVIEWER_LLM_PROVIDER`
+  Example: `disabled`
+  Meaning: Reserved provider label for the future reviewer LLM integration path.
+  Current state: Informational only until a concrete provider-backed client is wired in.
+
+- `AI_REVIEWER_LLM_MODEL`
+  Example: `unconfigured`
+  Meaning: Reserved model identifier for the future reviewer explanation layer.
+  Current state: Informational only while the backend uses the null reviewer client.
 
 - `IG_API_KEY`
   Example: `abc123demoapikey`

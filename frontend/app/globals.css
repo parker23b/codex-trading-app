@@ -293,6 +293,12 @@ p {
   gap: 24px;
 }
 
+.reviewer-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
 .top-command-bar {
   display: grid;
   grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
@@ -458,6 +464,118 @@ p {
   border-radius: 12px;
   background: color-mix(in srgb, var(--background) 88%, white 12%);
   box-shadow: inset 0 0 0 1px var(--glassBorder);
+}
+
+.review-panel__section,
+.review-panel__split {
+  display: grid;
+  gap: 12px;
+}
+
+.review-panel__split {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.reviewer-page .card {
+  gap: 20px;
+}
+
+.reviewer-page .review-metrics-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.review-panel__label {
+  font-size: 0.76rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.review-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.review-metric,
+.review-observation,
+.review-contributor,
+.review-explanation,
+.review-provenance {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--background) 88%, white 12%);
+  box-shadow: inset 0 0 0 1px var(--glassBorder);
+}
+
+.review-metric strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.review-trend {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.review-trend--up {
+  color: var(--danger);
+}
+
+.review-trend--down {
+  color: var(--success);
+}
+
+.review-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.review-observation__header,
+.review-observation__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.review-observation__meta {
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+}
+
+.review-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-strong);
+  border: 1px solid var(--glassBorder);
+  font-size: 0.76rem;
+  text-transform: capitalize;
+}
+
+.review-observation--critical {
+  border-left: 3px solid var(--danger);
+}
+
+.review-observation--warning {
+  border-left: 3px solid var(--warning);
+}
+
+.review-observation--info {
+  border-left: 3px solid var(--accent);
+}
+
+.review-provenance {
+  display: grid;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
 }
 
 .strategy-tape__row > :first-child {

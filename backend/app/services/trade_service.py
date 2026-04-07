@@ -34,6 +34,24 @@ class TradeService:
         statement = select(Execution).order_by(desc(Execution.last_transition_at)).limit(limit)
         return list(self.session.exec(statement).all())
 
+    def list_reconciliation_events(
+        self,
+        *,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        limit: int = 250,
+    ) -> list[ReconciliationEvent]:
+        statement = select(ReconciliationEvent).order_by(desc(ReconciliationEvent.created_at)).limit(limit)
+        if date_from:
+            statement = statement.where(ReconciliationEvent.created_at >= date_from)
+        if date_to:
+            statement = statement.where(ReconciliationEvent.created_at <= date_to)
+        return list(self.session.exec(statement).all())
+
+    def get_trade(self, trade_id: int) -> Trade | None:
+        statement = select(Trade).where(Trade.id == trade_id)
+        return self.session.exec(statement).first()
+
     def list_all_open_positions(self) -> list[Position]:
         statement = select(Position).where(Position.is_open.is_(True))
         return list(self.session.exec(statement).all())

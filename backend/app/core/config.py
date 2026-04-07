@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     runtime_duplicate_signal_window_seconds: int = 30
     runtime_max_unhealthy_runtimes: int = 0
     runtime_global_entry_kill_switch: bool = False
+    ai_reviewer_llm_enabled: bool = False
+    ai_reviewer_llm_provider: str = "disabled"
+    ai_reviewer_llm_model: str = "unconfigured"
     ig_api_key: str | None = None
     ig_username: str | None = None
     ig_password: str | None = None

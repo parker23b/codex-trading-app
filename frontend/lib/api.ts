@@ -4,6 +4,7 @@ import {
   Execution,
   MarketCategory,
   MarketCategoryOverviewResponse,
+  OperatorSummaryReview,
   Position,
   StrategyDefinition,
   StreamHealthStatus,
@@ -135,5 +136,11 @@ export async function stopStrategy(params: { instrument?: string; strategyName?:
       instrument: params.instrument,
       strategy_name: params.strategyName,
     }),
+  });
+}
+
+export async function getOperatorSummaryReview(): Promise<OperatorSummaryReview> {
+  return request<OperatorSummaryReview>("/reviews/operator-summary", {
+    timeoutMs: 3000,
   });
 }
