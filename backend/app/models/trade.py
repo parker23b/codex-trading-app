@@ -86,6 +86,7 @@ class Execution(SQLModel, table=True):
     instrument: str = Field(index=True)
     phase: str = Field(index=True)
     status: str = Field(index=True)
+    client_request_id: str | None = Field(default=None, index=True)
     broker_reference: str | None = Field(default=None, index=True)
     local_position_id: int | None = Field(default=None, index=True)
     local_trade_id: int | None = Field(default=None, index=True)

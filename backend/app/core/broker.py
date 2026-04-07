@@ -32,6 +32,7 @@ class OrderRequest:
     size: float
     price: float
     strategy_name: str
+    client_request_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -52,6 +53,7 @@ class BrokerOrderResult:
     size: float
     price: float
     executed_at: datetime
+    client_request_id: str | None = None
     status: BrokerOrderStatus = BrokerOrderStatus.FILLED
     requested_size: float | None = None
     filled_size: float | None = None
@@ -105,7 +107,13 @@ class Broker(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def close_position(self, instrument: str, *, broker_reference: str | None = None) -> BrokerOrderResult:
+    def close_position(
+        self,
+        instrument: str,
+        *,
+        broker_reference: str | None = None,
+        client_request_id: str | None = None,
+    ) -> BrokerOrderResult:
         raise NotImplementedError
 
     @abstractmethod

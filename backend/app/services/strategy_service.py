@@ -1,5 +1,6 @@
 from collections import defaultdict
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from sqlmodel import Session
 
@@ -20,6 +21,21 @@ logger = get_logger(__name__)
 
 
 class StrategyService:
+    RETRYABLE_EXECUTION_STATUSES = {
+        ExecutionStatus.SIGNAL_GENERATED.value,
+        ExecutionStatus.RISK_APPROVED.value,
+        ExecutionStatus.CLOSE_REQUESTED.value,
+        ExecutionStatus.ORDER_SUBMITTED.value,
+        ExecutionStatus.ORDER_ACKNOWLEDGED.value,
+        ExecutionStatus.FILL_PARTIAL.value,
+        ExecutionStatus.FAILED.value,
+        ExecutionStatus.NEEDS_MANUAL_REVIEW.value,
+    }
+    SAFE_CLOSE_RETRY_STATUSES = {
+        ExecutionStatus.SIGNAL_GENERATED.value,
+        ExecutionStatus.CLOSE_REQUESTED.value,
+    }
+
     def __init__(self, session: Session | None = None):
         self.session = session
         self.settings = get_settings()
@@ -243,23 +259,24 @@ class StrategyService:
             signal = update_result.signal
 
             if isinstance(signal, EntrySignal):
-                execution = trade_service.create_execution(
-                    Execution(
-                        strategy_name=signal.strategy_name,
-                        instrument=signal.instrument,
-                        phase=ExecutionPhase.ENTRY.value,
-                        status=ExecutionStatus.SIGNAL_GENERATED.value,
-                        signal_time=signal.signal_at,
-                        requested_size=signal.size,
-                        requested_price=signal.observed_price,
-                        reason="Entry signal generated",
-                        details={
-                            "direction": signal.direction.value,
-                            "market_status": signal.market_status,
-                            "tradable": signal.tradable,
-                        },
-                    )
+                execution, should_submit = self._prepare_execution(
+                    trade_service=trade_service,
+                    strategy_name=signal.strategy_name,
+                    instrument=signal.instrument,
+                    phase=ExecutionPhase.ENTRY.value,
+                    signal_time=signal.signal_at,
+                    requested_size=signal.size,
+                    requested_price=signal.observed_price,
+                    reason="Entry signal generated",
+                    details={
+                        "action_key": self._entry_action_key(signal),
+                        "direction": signal.direction.value,
+                        "market_status": signal.market_status,
+                        "tradable": signal.tradable,
+                    },
                 )
+                if not should_submit:
+                    continue
                 signal.risk_percent = metadata.risk_per_trade if metadata else 0.0
                 signal = self.risk_service.assess_entry(
                     signal,
@@ -270,6 +287,7 @@ class StrategyService:
                     trade_service.transition_execution(
                         execution,
                         status=ExecutionStatus.RISK_APPROVED,
+                        client_request_id=execution.client_request_id,
                         reason=signal.reason or "Risk approved",
                         details={
                             "risk_percent": signal.risk_percent,
@@ -322,6 +340,7 @@ class StrategyService:
                     trade_service.transition_execution(
                         execution,
                         status=ExecutionStatus.RISK_REJECTED,
+                        client_request_id=execution.client_request_id,
                         reason=signal.reason or "Risk rejected",
                         requires_manual_review=False,
                         details={
@@ -382,24 +401,25 @@ class StrategyService:
                 )
 
             if isinstance(signal, ExitSignal):
-                execution = trade_service.create_execution(
-                    Execution(
-                        strategy_name=signal.strategy_name,
-                        instrument=signal.instrument,
-                        phase=ExecutionPhase.CLOSE.value,
-                        status=ExecutionStatus.SIGNAL_GENERATED.value,
-                        signal_time=signal.signal_at,
-                        broker_reference=signal.position.broker_reference if signal.position is not None else None,
-                        local_position_id=signal.position.id if signal.position is not None else None,
-                        requested_size=signal.position.size if signal.position is not None else None,
-                        requested_price=signal.observed_price,
-                        reason="Exit signal generated",
-                        details={
-                            "market_status": signal.market_status,
-                            "tradable": signal.tradable,
-                        },
-                    )
+                execution, should_submit = self._prepare_execution(
+                    trade_service=trade_service,
+                    strategy_name=signal.strategy_name,
+                    instrument=signal.instrument,
+                    phase=ExecutionPhase.CLOSE.value,
+                    signal_time=signal.signal_at,
+                    requested_size=signal.position.size if signal.position is not None else None,
+                    requested_price=signal.observed_price,
+                    reason="Exit signal generated",
+                    broker_reference=signal.position.broker_reference if signal.position is not None else None,
+                    local_position_id=signal.position.id if signal.position is not None else None,
+                    details={
+                        "action_key": self._close_action_key(signal),
+                        "market_status": signal.market_status,
+                        "tradable": signal.tradable,
+                    },
                 )
+                if not should_submit:
+                    continue
                 try:
                     trade = self._execute_exit_signal(
                         engine=engine,
@@ -430,6 +450,7 @@ class StrategyService:
                     trade_service.transition_execution(
                         execution,
                         status=ExecutionStatus.CLOSE_CONFIRMED,
+                        client_request_id=execution.client_request_id,
                         local_position_id=closed_position.id,
                         completed_at=trade.close_time,
                         average_fill_price=trade.close_price,
@@ -440,6 +461,7 @@ class StrategyService:
                 trade_service.transition_execution(
                     execution,
                     status=ExecutionStatus.CLOSE_CONFIRMED,
+                    client_request_id=execution.client_request_id,
                     local_trade_id=persisted_trade.id,
                     completed_at=trade.close_time,
                     average_fill_price=trade.close_price,
@@ -480,11 +502,13 @@ class StrategyService:
             size=signal.size,
             price=signal.observed_price,
             strategy_name=signal.strategy_name,
+            client_request_id=execution.client_request_id,
         )
         trade_service.transition_execution(
             execution,
             status=ExecutionStatus.ORDER_SUBMITTED,
             submitted_at=utc_now(),
+            client_request_id=execution.client_request_id,
             reason="Entry order submitted",
         )
         try:
@@ -493,6 +517,7 @@ class StrategyService:
             trade_service.transition_execution(
                 execution,
                 status=ExecutionStatus.FAILED,
+                client_request_id=execution.client_request_id,
                 error_message=str(exc),
                 reason="Entry order submission failed",
                 requires_manual_review=False,
@@ -528,6 +553,7 @@ class StrategyService:
         trade_service.transition_execution(
             execution,
             status=ExecutionStatus.POSITION_OPENED,
+            client_request_id=execution.client_request_id,
             local_position_id=persisted_position.id,
             broker_reference=persisted_position.broker_reference,
             completed_at=persisted_position.broker_open_confirmed_at or persisted_position.open_time,
@@ -546,23 +572,27 @@ class StrategyService:
         trade_service.transition_execution(
             execution,
             status=ExecutionStatus.CLOSE_REQUESTED,
+            client_request_id=execution.client_request_id,
             reason="Close requested",
         )
         trade_service.transition_execution(
             execution,
             status=ExecutionStatus.ORDER_SUBMITTED,
             submitted_at=utc_now(),
+            client_request_id=execution.client_request_id,
             reason="Close order submitted",
         )
         try:
             closed_order = engine.broker.close_position(
                 signal.instrument,
                 broker_reference=engine.current_position.broker_reference,
+                client_request_id=execution.client_request_id,
             )
         except Exception as exc:
             trade_service.transition_execution(
                 execution,
                 status=ExecutionStatus.NEEDS_MANUAL_REVIEW,
+                client_request_id=execution.client_request_id,
                 error_message=str(exc),
                 reason="Close request failed",
                 requires_manual_review=True,
@@ -580,6 +610,7 @@ class StrategyService:
             trade_service.transition_execution(
                 execution,
                 status=ExecutionStatus.NEEDS_MANUAL_REVIEW,
+                client_request_id=execution.client_request_id,
                 completed_at=closed_order.executed_at,
                 reason="Close did not complete fully",
                 requires_manual_review=True,
@@ -625,6 +656,7 @@ class StrategyService:
         trade_service.transition_execution(
             execution,
             status=ExecutionStatus.ORDER_ACKNOWLEDGED,
+            client_request_id=order.client_request_id,
             broker_reference=order.broker_reference,
             submitted_at=order.submitted_at,
             acknowledged_at=order.acknowledged_at or order.executed_at,
@@ -645,6 +677,7 @@ class StrategyService:
         trade_service.transition_execution(
             execution,
             status=fill_status,
+            client_request_id=order.client_request_id,
             broker_reference=order.broker_reference,
             completed_at=order.executed_at,
             filled_size=order.filled_size or order.size,
@@ -653,6 +686,100 @@ class StrategyService:
             error_code=order.error_code,
             error_message=order.error_message,
             requires_manual_review=order.requires_manual_review,
+        )
+
+    @classmethod
+    def _generate_client_request_id(cls, prefix: str) -> str:
+        normalized_prefix = prefix[:3].lower()
+        return f"{normalized_prefix}-{uuid4().hex[:26]}"
+
+    @staticmethod
+    def _entry_action_key(signal: EntrySignal) -> str:
+        return f"entry:{signal.strategy_name}:{signal.instrument}:{signal.direction.value}"
+
+    @staticmethod
+    def _close_action_key(signal: ExitSignal) -> str:
+        position_ref = signal.position.broker_reference if signal.position is not None else "unknown"
+        return f"close:{signal.strategy_name}:{signal.instrument}:{position_ref}"
+
+    @classmethod
+    def _prepare_execution(
+        cls,
+        *,
+        trade_service: TradeService,
+        strategy_name: str,
+        instrument: str,
+        phase: str,
+        signal_time: datetime,
+        requested_size: float | None,
+        requested_price: float | None,
+        reason: str,
+        details: dict[str, object],
+        broker_reference: str | None = None,
+        local_position_id: int | None = None,
+    ) -> tuple[Execution, bool]:
+        action_key = str(details["action_key"])
+        reusable_execution = trade_service.find_latest_execution_for_action(
+            strategy_name=strategy_name,
+            instrument=instrument,
+            phase=phase,
+            action_key=action_key,
+        )
+        if reusable_execution is not None and reusable_execution.status in cls.RETRYABLE_EXECUTION_STATUSES:
+            duplicate_attempt_count = int((reusable_execution.details or {}).get("duplicate_attempt_count") or 0) + 1
+            duplicate_details = {
+                **details,
+                "duplicate_action_detected": True,
+                "duplicate_attempt_count": duplicate_attempt_count,
+                "last_duplicate_detected_at": utc_now().isoformat(),
+                "last_duplicate_status": reusable_execution.status,
+            }
+            if phase == ExecutionPhase.CLOSE.value and reusable_execution.status not in cls.SAFE_CLOSE_RETRY_STATUSES:
+                return (
+                    trade_service.transition_execution(
+                        reusable_execution,
+                        status=ExecutionStatus.NEEDS_MANUAL_REVIEW,
+                        client_request_id=reusable_execution.client_request_id,
+                        broker_reference=broker_reference,
+                        local_position_id=local_position_id,
+                        reason="Duplicate close retry blocked; prior close may already have reached the broker",
+                        requires_manual_review=True,
+                        details={**duplicate_details, "duplicate_retry_blocked": True},
+                    ),
+                    False,
+                )
+            return (
+                trade_service.transition_execution(
+                    reusable_execution,
+                    status=reusable_execution.status,
+                    client_request_id=reusable_execution.client_request_id,
+                    broker_reference=broker_reference,
+                    local_position_id=local_position_id,
+                    reason=f"{reason} retried with persisted client request id",
+                    details=duplicate_details,
+                ),
+                True,
+            )
+
+        client_request_id = cls._generate_client_request_id("ent" if phase == ExecutionPhase.ENTRY.value else "cls")
+        return (
+            trade_service.create_execution(
+                Execution(
+                    strategy_name=strategy_name,
+                    instrument=instrument,
+                    phase=phase,
+                    status=ExecutionStatus.SIGNAL_GENERATED.value,
+                    client_request_id=client_request_id,
+                    broker_reference=broker_reference,
+                    local_position_id=local_position_id,
+                    signal_time=signal_time,
+                    requested_size=requested_size,
+                    requested_price=requested_price,
+                    reason=reason,
+                    details={**details, "duplicate_attempt_count": 0},
+                )
+            ),
+            True,
         )
 
     @staticmethod

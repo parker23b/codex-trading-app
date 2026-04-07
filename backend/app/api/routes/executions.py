@@ -17,6 +17,7 @@ class ExecutionResponse(BaseModel):
     instrument: str
     phase: str
     status: str
+    client_request_id: str | None
     broker_reference: str | None
     local_position_id: int | None
     local_trade_id: int | None
@@ -45,6 +46,7 @@ def _serialize_execution(execution: Execution) -> ExecutionResponse:
         instrument=execution.instrument,
         phase=execution.phase,
         status=execution.status,
+        client_request_id=execution.client_request_id,
         broker_reference=execution.broker_reference,
         local_position_id=execution.local_position_id,
         local_trade_id=execution.local_trade_id,

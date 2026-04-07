@@ -17,6 +17,7 @@ def initialize_database() -> None:
     _ensure_sqlite_column("position", "last_reconciled_at", "TIMESTAMP")
     _ensure_sqlite_column("trade", "broker_reference", "VARCHAR")
     _ensure_sqlite_column("trade", "close_broker_reference", "VARCHAR")
+    _ensure_sqlite_column("execution", "client_request_id", "VARCHAR")
     _ensure_sqlite_column("execution", "broker_reference", "VARCHAR")
     _ensure_sqlite_column("execution", "local_position_id", "INTEGER")
     _ensure_sqlite_column("execution", "local_trade_id", "INTEGER")

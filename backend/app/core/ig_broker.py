@@ -105,7 +105,11 @@ class IGBroker(Broker):
         if not self._trading_enabled:
             logger.info(
                 "IG trading disabled; using local simulated fill",
-                extra={"instrument": order.instrument, "direction": order.direction.value},
+                extra={
+                    "instrument": order.instrument,
+                    "direction": order.direction.value,
+                    "client_request_id": order.client_request_id,
+                },
             )
             return self._simulate_place_order(order, submitted_at=submitted_at)
 
@@ -125,6 +129,7 @@ class IGBroker(Broker):
             )
         payload = {
             "currencyCode": order_currency,
+            "dealReference": order.client_request_id,
             "direction": order.direction.value,
             "epic": order.instrument,
             "expiry": "-",
@@ -148,6 +153,7 @@ class IGBroker(Broker):
                 "min_normal_stop_or_limit_distance": market_details.min_normal_stop_or_limit_distance,
                 "account_id": account_summary.account_id,
                 "account_type": account_summary.account_type.value,
+                "client_request_id": order.client_request_id,
                 "account_available": account_summary.available,
                 "account_balance": account_summary.balance,
                 "account_currency": self._get_account_currency(),
@@ -161,6 +167,7 @@ class IGBroker(Broker):
             extra={
                 "instrument": order.instrument,
                 "strategy": order.strategy_name,
+                "client_request_id": order.client_request_id,
                 "response": response,
             },
         )
@@ -197,6 +204,7 @@ class IGBroker(Broker):
             size=order.size,
             price=executed_price,
             executed_at=executed_at,
+            client_request_id=order.client_request_id,
             status=BrokerOrderStatus.FILLED,
             requested_size=order.size,
             filled_size=order.size,
@@ -205,16 +213,27 @@ class IGBroker(Broker):
             acknowledged_at=executed_at,
         )
 
-    def close_position(self, instrument: str, *, broker_reference: str | None = None) -> BrokerOrderResult:
+    def close_position(
+        self,
+        instrument: str,
+        *,
+        broker_reference: str | None = None,
+        client_request_id: str | None = None,
+    ) -> BrokerOrderResult:
         submitted_at = now_utc()
         if not self._trading_enabled:
             logger.info(
                 "IG trading disabled; using local simulated close",
-                extra={"instrument": instrument, "broker_reference": broker_reference},
+                extra={
+                    "instrument": instrument,
+                    "broker_reference": broker_reference,
+                    "client_request_id": client_request_id,
+                },
             )
             return self._simulate_close_position(
                 instrument,
                 broker_reference=broker_reference,
+                client_request_id=client_request_id,
                 submitted_at=submitted_at,
             )
 
@@ -250,6 +269,7 @@ class IGBroker(Broker):
                 "broker_reference": open_position.broker_reference,
                 "direction": opposite_direction.value,
                 "size": open_position.size,
+                "client_request_id": client_request_id,
                 "payload": payload,
             },
         )
@@ -259,6 +279,7 @@ class IGBroker(Broker):
             extra={
                 "instrument": open_position.instrument,
                 "broker_reference": open_position.broker_reference,
+                "client_request_id": client_request_id,
                 "response": response,
             },
         )
@@ -286,6 +307,7 @@ class IGBroker(Broker):
             size=open_position.size,
             price=executed_price,
             executed_at=executed_at,
+            client_request_id=client_request_id,
             status=BrokerOrderStatus.FILLED,
             requested_size=open_position.size,
             filled_size=open_position.size,
@@ -432,7 +454,11 @@ class IGBroker(Broker):
     def _simulate_place_order(self, order: OrderRequest, *, submitted_at: datetime | None = None) -> BrokerOrderResult:
         logger.info(
             "Stub order placed via IG broker",
-            extra={"instrument": order.instrument, "direction": order.direction.value},
+            extra={
+                "instrument": order.instrument,
+                "direction": order.direction.value,
+                "client_request_id": order.client_request_id,
+            },
         )
         executed_at = now_utc()
         broker_reference = f"ig-{uuid4()}"
@@ -451,6 +477,7 @@ class IGBroker(Broker):
             size=order.size,
             price=order.price,
             executed_at=executed_at,
+            client_request_id=order.client_request_id,
             status=BrokerOrderStatus.FILLED,
             requested_size=order.size,
             filled_size=order.size,
@@ -464,6 +491,7 @@ class IGBroker(Broker):
         instrument: str,
         *,
         broker_reference: str | None = None,
+        client_request_id: str | None = None,
         submitted_at: datetime | None = None,
     ) -> BrokerOrderResult:
         position: BrokerPosition | None = None
@@ -481,7 +509,11 @@ class IGBroker(Broker):
 
         logger.info(
             "Stub position closed via IG broker",
-            extra={"instrument": instrument, "broker_reference": position.broker_reference},
+            extra={
+                "instrument": instrument,
+                "broker_reference": position.broker_reference,
+                "client_request_id": client_request_id,
+            },
         )
         return BrokerOrderResult(
             broker_reference=f"ig-{uuid4()}",
@@ -490,6 +522,7 @@ class IGBroker(Broker):
             size=position.size,
             price=position.open_price,
             executed_at=now_utc(),
+            client_request_id=client_request_id,
             status=BrokerOrderStatus.FILLED,
             requested_size=position.size,
             filled_size=position.size,

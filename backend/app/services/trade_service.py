@@ -83,11 +83,37 @@ class TradeService:
         self.session.refresh(execution)
         return execution
 
+    def find_execution_by_client_request_id(self, client_request_id: str) -> Execution | None:
+        statement = select(Execution).where(Execution.client_request_id == client_request_id)
+        return self.session.exec(statement).first()
+
+    def find_latest_execution_for_action(
+        self,
+        *,
+        strategy_name: str,
+        instrument: str,
+        phase: str,
+        action_key: str,
+    ) -> Execution | None:
+        statement = (
+            select(Execution)
+            .where(Execution.strategy_name == strategy_name)
+            .where(Execution.instrument == instrument)
+            .where(Execution.phase == phase)
+            .order_by(desc(Execution.created_at))
+        )
+        executions = self.session.exec(statement).all()
+        for execution in executions:
+            if (execution.details or {}).get("action_key") == action_key:
+                return execution
+        return None
+
     def transition_execution(
         self,
         execution: Execution,
         *,
         status: ExecutionStatus | str,
+        client_request_id: str | None = None,
         broker_reference: str | None = None,
         local_position_id: int | None = None,
         local_trade_id: int | None = None,
@@ -105,6 +131,8 @@ class TradeService:
         execution.status = status.value if isinstance(status, ExecutionStatus) else status
         execution.last_transition_at = completed_at or acknowledged_at or submitted_at or utc_now()
         execution.updated_at = utc_now()
+        if client_request_id is not None:
+            execution.client_request_id = client_request_id
         if broker_reference is not None:
             execution.broker_reference = broker_reference
         if local_position_id is not None:
