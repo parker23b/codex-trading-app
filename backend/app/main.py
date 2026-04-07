@@ -14,6 +14,8 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.db.init_db import initialize_database
 from app.db.session import engine
+from app.services.domain_event_service import domain_event_service
+from app.services.health_service import get_health_service
 from app.services.ig_streaming_service import get_ig_streaming_service
 from app.services.market_data_service import MarketDataService
 from app.services.runtime_recovery_service import RuntimeRecoveryService
@@ -27,6 +29,7 @@ NOISY_POLLING_PATHS = {
     "/dashboard",
     "/executions",
     "/health/stream",
+    "/system/health",
     "/trades",
     "/trades/positions",
 }
@@ -40,12 +43,17 @@ async def lifespan(_: FastAPI):
     with Session(engine) as session:
         RuntimeRecoveryService(session).recover()
     streaming_service = get_ig_streaming_service()
+    get_health_service().heartbeat()
     streaming_enabled = streaming_service.is_enabled()
     market_data_task = asyncio.create_task(MarketDataService(poll_prices=not streaming_enabled).run())
+    heartbeat_task = asyncio.create_task(_health_heartbeat_loop())
     streaming_task: asyncio.Task[None] | None = None
     if streaming_enabled:
         streaming_task = asyncio.create_task(streaming_service.run())
     yield
+    heartbeat_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await heartbeat_task
     if streaming_task is not None:
         streaming_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -54,6 +62,14 @@ async def lifespan(_: FastAPI):
     with contextlib.suppress(asyncio.CancelledError):
         await market_data_task
     logger.info("Shutting down application")
+
+
+async def _health_heartbeat_loop() -> None:
+    interval = get_settings().system_health_heartbeat_interval_seconds
+    health_service = get_health_service()
+    while True:
+        health_service.heartbeat()
+        await asyncio.sleep(interval)
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -75,6 +91,19 @@ async def log_requests(request: Request, call_next):
         response = await call_next(request)
     except Exception:
         duration_ms = round((perf_counter() - started_at) * 1000, 2)
+        domain_event_service.record_error(
+            error_type="UnhandledRequestException",
+            source="main.log_requests",
+            event_type="api.request_failed",
+            title="Unhandled API request exception",
+            message=f"{request.method} {request.url.path} failed with an unhandled exception.",
+            payload_json={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": 500,
+                "duration_ms": duration_ms,
+            },
+        )
         logger.exception(
             "API request failed",
             extra={
@@ -86,6 +115,20 @@ async def log_requests(request: Request, call_next):
         )
         raise
     duration_ms = round((perf_counter() - started_at) * 1000, 2)
+    if response.status_code >= 500:
+        domain_event_service.record_error(
+            error_type=f"HTTP{response.status_code}",
+            source="main.log_requests",
+            event_type="api.request_failed",
+            title="API request returned server error",
+            message=f"{request.method} {request.url.path} returned {response.status_code}.",
+            payload_json={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "duration_ms": duration_ms,
+            },
+        )
     log_level = _classify_request_log_level(request=request, response=response, duration_ms=duration_ms)
     logger.log(
         log_level,

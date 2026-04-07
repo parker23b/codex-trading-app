@@ -1,5 +1,5 @@
 import { StatusBadge } from "@/components/ui/status-badge";
-import { formatCurrency, formatInstrumentLabel, formatSignedCurrency } from "@/lib/format";
+import { formatInstrumentLabel, formatSignedCurrency } from "@/lib/format";
 import { Trade } from "@/lib/types";
 
 type RecentTradesTableProps = {
@@ -42,4 +42,3 @@ export function RecentTradesTable({ trades }: RecentTradesTableProps) {
     </div>
   );
 }
-

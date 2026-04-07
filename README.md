@@ -244,7 +244,7 @@ IG_CA_BUNDLE_PATH=
 - `DATABASE_URL`
   Example: `sqlite:///./trading_platform.db`
   Meaning: SQLModel/SQLAlchemy connection string.
-  Local default: SQLite file inside `backend/`.
+  Local default: SQLite file inside `backend/`, with relative SQLite paths resolved against `backend/.env` so startup cwd does not fork state.
   Production-style example: `postgresql+psycopg://user:password@localhost:5432/trading_platform`
   Change it when: Moving from local development to a real database.
 

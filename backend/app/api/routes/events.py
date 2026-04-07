@@ -15,6 +15,7 @@ class DomainEventResponse(BaseModel):
     event_type: str
     category: str
     severity: str
+    error_type: str | None
     source: str
     correlation_id: str | None
     runtime_id: str | None
@@ -37,6 +38,7 @@ def _serialize_event(event: DomainEvent) -> DomainEventResponse:
         event_type=event.event_type,
         category=event.category,
         severity=event.severity,
+        error_type=event.error_type,
         source=event.source,
         correlation_id=event.correlation_id,
         runtime_id=event.runtime_id,
@@ -57,6 +59,7 @@ def _serialize_event(event: DomainEvent) -> DomainEventResponse:
 def list_events(
     limit: int = Query(default=100, ge=1, le=500),
     event_type: str | None = Query(default=None),
+    error_type: str | None = Query(default=None),
     category: str | None = Query(default=None),
     severity: str | None = Query(default=None),
     strategy_name: str | None = Query(default=None),
@@ -68,6 +71,7 @@ def list_events(
     events = domain_event_service.list_events(
         limit=limit,
         event_type=event_type,
+        error_type=error_type,
         category=category,
         severity=severity,
         strategy_name=strategy_name,

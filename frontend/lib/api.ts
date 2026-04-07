@@ -146,6 +146,7 @@ export async function withFallback<T>(loader: () => Promise<T>, fallback: T): Pr
 export async function getDomainEvents(params?: {
   limit?: number;
   eventType?: string;
+  errorType?: string;
   category?: string;
   severity?: string;
   strategyName?: string;
@@ -160,6 +161,9 @@ export async function getDomainEvents(params?: {
   }
   if (params?.eventType) {
     query.set("event_type", params.eventType);
+  }
+  if (params?.errorType) {
+    query.set("error_type", params.errorType);
   }
   if (params?.category) {
     query.set("category", params.category);

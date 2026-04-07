@@ -4,12 +4,15 @@ from datetime import timedelta
 
 import pytest
 from app.core.broker import BrokerMarketDetails, OrderDirection
+from app.core.config import get_settings
 from app.core.runtime import runtime_manager
 from sqlmodel import select
 
 from app.core.broker import BrokerOrderResult, BrokerOrderStatus
 from app.models.runtime import StrategyRuntimeState
 from app.models.trade import Execution, ExecutionPhase, ExecutionStatus
+from app.services.health_service import get_health_service
+from app.services.market_status_service import get_market_status_service
 from app.services.strategy_service import StrategyService
 from app.services.trade_service import TradeService
 from tests.fakes import make_order_result
@@ -246,6 +249,127 @@ def test_entry_below_broker_minimum_is_risk_rejected_before_submission(session, 
     assert executions[0].reason == "Requested size 0.6 is below broker minimum deal size 1.0 for CS.D.EURUSD.CFD.IP."
     assert executions[0].details["risk_rejection_layer"] == "broker_constraints"
     assert executions[0].details["risk_audit_summary"]["min_deal_size"] == 1.0
+
+
+def test_entry_is_blocked_when_market_quote_is_stale(session, broker, fixed_now):
+    service = StrategyService(session)
+    trade_service = TradeService(session)
+    service.start_strategy(STRATEGY, INSTRUMENT)
+    market_status_service = get_market_status_service()
+    original_get_status = market_status_service.get_status
+
+    def stale_get_status(instrument: str, *, broker=None, now=None):
+        status = original_get_status(instrument, broker=broker, now=now)
+        return status.model_copy(update={"is_ok": False, "reason": "Latest quote is stale at 2000.0ms old.", "quote_fresh": False})
+
+    market_status_service.get_status = stale_get_status
+    try:
+        service.process_price_update(
+            INSTRUMENT,
+            100.0,
+            bid=99.99,
+            ask=100.01,
+            market_status="TRADEABLE",
+            tradable=True,
+            received_at=fixed_now,
+        )
+        service.process_price_update(
+            INSTRUMENT,
+            100.5,
+            bid=100.49,
+            ask=100.51,
+            market_status="TRADEABLE",
+            tradable=True,
+            received_at=fixed_now + timedelta(seconds=1),
+        )
+    finally:
+        market_status_service.get_status = original_get_status
+
+    executions = trade_service.list_executions(limit=10)
+    assert broker.placed_orders == []
+    assert len(trade_service.list_positions()) == 0
+    assert executions[0].status == ExecutionStatus.RISK_REJECTED.value
+    assert executions[0].details["risk_rejection_layer"] == "market_status"
+    assert "stale" in executions[0].reason.lower()
+
+
+def test_entry_is_blocked_when_spread_exceeds_threshold(session, broker, fixed_now):
+    service = StrategyService(session)
+    trade_service = TradeService(session)
+    settings = get_settings()
+    settings.max_spread_pips = 0.00005
+    broker.market_details_by_instrument[INSTRUMENT] = BrokerMarketDetails(
+        instrument=INSTRUMENT,
+        name=INSTRUMENT,
+        bid=1.10000,
+        offer=1.10020,
+        high=1.10100,
+        low=1.09900,
+        percentage_change=0.0,
+        net_change=0.0,
+        market_status="TRADEABLE",
+        update_time=fixed_now.isoformat(),
+        tradable=True,
+    )
+    service.start_strategy(STRATEGY, INSTRUMENT)
+
+    service.process_price_update(INSTRUMENT, 1.10010, bid=1.10000, ask=1.10020, market_status="TRADEABLE", tradable=True, received_at=fixed_now)
+    get_market_status_service().reset()
+    service.process_price_update(
+        INSTRUMENT,
+        1.10010,
+        bid=1.10000,
+        ask=1.10020,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
+
+    executions = trade_service.list_executions(limit=10)
+    assert broker.placed_orders == []
+    assert executions[0].status == ExecutionStatus.RISK_REJECTED.value
+    assert "spread" in executions[0].reason.lower()
+
+
+def test_execution_rechecks_market_status_before_order_submission(session, broker, fixed_now):
+    service = StrategyService(session)
+    trade_service = TradeService(session)
+    service.start_strategy(STRATEGY, INSTRUMENT)
+    broker.place_order_outcomes.append(
+        make_order_result(
+            broker_reference="entry-guarded",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=101.0,
+            average_fill_price=101.0,
+            executed_at=fixed_now + timedelta(seconds=1),
+        )
+    )
+
+    market_status_service = get_market_status_service()
+    original_get_status = market_status_service.get_status
+    calls = {"count": 0}
+
+    def guarded_get_status(instrument: str, *, broker=None, now=None):
+        calls["count"] += 1
+        status = original_get_status(instrument, broker=broker, now=now)
+        if calls["count"] >= 2:
+            return status.model_copy(update={"is_ok": False, "reason": "Quote turned stale before execution.", "quote_fresh": False})
+        return status
+
+    market_status_service.get_status = guarded_get_status
+    try:
+        service.process_price_update(INSTRUMENT, 100.0, bid=99.99, ask=100.01, market_status="TRADEABLE", tradable=True, received_at=fixed_now)
+        service.process_price_update(INSTRUMENT, 100.5, bid=100.49, ask=100.51, market_status="TRADEABLE", tradable=True, received_at=fixed_now + timedelta(seconds=1))
+    finally:
+        market_status_service.get_status = original_get_status
+
+    executions = trade_service.list_executions(limit=10)
+    assert broker.placed_orders == []
+    assert executions[0].status == ExecutionStatus.FAILED.value
+    assert "execution blocked by market status" in executions[0].reason.lower()
+    assert get_health_service().get_health_report()["details"].order_failures_last_5m == 0
 
 
 def test_close_failure_keeps_position_open_and_flags_manual_review(session, broker, fixed_now):

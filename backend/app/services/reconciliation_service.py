@@ -5,6 +5,7 @@ from app.core.logging import get_logger
 from app.core.runtime import runtime_manager
 from app.models.trade import Position, clone_position, utc_now
 from app.services.domain_event_service import domain_event_service
+from app.services.health_service import get_health_service
 from app.services.runtime_state_service import RuntimeStateService
 from app.services.trade_service import TradeService
 
@@ -234,6 +235,7 @@ class ReconciliationService:
                 )
 
         changed_count = adopted_count + corrected_count + unmatched_local_count
+        get_health_service().record_reconciliation(mismatches=changed_count, when=utc_now())
         log_level = logger.info if changed_count else logger.debug
         log_level(
             "Broker reconciliation complete",
@@ -243,6 +245,7 @@ class ReconciliationService:
                 "adopted_positions": adopted_count,
                 "corrected_positions": corrected_count,
                 "closed_unmatched_local_positions": unmatched_local_count,
+                "event": "reconciliation_completed",
             },
         )
         return self.trade_service.list_positions()

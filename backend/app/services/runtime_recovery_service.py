@@ -38,7 +38,16 @@ class RuntimeRecoveryService:
             remote_positions = self.broker.get_positions()
         except Exception as exc:  # pragma: no cover - defensive recovery path
             broker_error = str(exc)
-            logger.warning("Runtime recovery could not query broker positions", extra={"error": broker_error})
+            logger.error(
+                "Runtime recovery could not query broker positions",
+                extra={
+                    "error": broker_error,
+                    "error_type": type(exc).__name__,
+                    "event_category": "health",
+                    "event_type": "health.runtime_recovery_failed",
+                    "event_title": "Runtime recovery broker query failed",
+                },
+            )
 
         remote_by_broker_reference = {position.broker_reference: position for position in remote_positions}
         outcomes: list[dict[str, str]] = []
@@ -99,11 +108,10 @@ class RuntimeRecoveryService:
                     }
                 )
                 if "auth" in broker_error.lower():
-                    domain_event_service.record_event(
-                        event_type="health.broker_auth_failed",
-                        category="health",
-                        severity="warning",
+                    domain_event_service.record_error(
+                        error_type="BrokerAuthenticationFailed",
                         source="runtime_recovery_service.recover",
+                        event_type="health.broker_auth_failed",
                         title="Broker authentication failed during recovery",
                         message=f"Runtime recovery could not verify broker state for {runtime.strategy_name} on {runtime.instrument}.",
                         runtime_id=runtime.runtime_id,

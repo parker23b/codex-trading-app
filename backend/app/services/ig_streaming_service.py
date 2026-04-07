@@ -13,6 +13,7 @@ from app.core.ig_broker import IGBroker, IGBrokerError, IGStreamingCredentials
 from app.core.logging import get_logger
 from app.core.runtime import runtime_manager
 from app.db.session import engine
+from app.services.health_service import get_health_service
 from app.services.strategy_service import StrategyService
 
 try:
@@ -68,10 +69,12 @@ class _StreamClientListener(ClientListener):
     def onStatusChange(self, status: str) -> None:  # noqa: N802 - SDK callback shape
         self._service._health.connected = status.startswith("CONNECTED:")
         self._service._health.last_status = status
+        get_health_service().set_stream_connected(self._service._health.connected)
         logger.info("IG Lightstreamer status changed", extra={"status": status})
 
     def onServerError(self, code: int, message: str) -> None:  # noqa: N802 - SDK callback shape
         self._service._health.last_error = f"{code}: {message}"
+        get_health_service().set_stream_connected(False)
         logger.error("IG Lightstreamer server error", extra={"code": code, "message": message})
 
 
@@ -221,7 +224,16 @@ class IGStreamingService:
                     raise
                 except IGBrokerError as exc:
                     self._health.last_error = str(exc)
-                    logger.warning("IG streaming loop encountered a broker error", extra={"error": str(exc)})
+                    logger.error(
+                        "IG streaming loop encountered a broker error",
+                        extra={
+                            "error": str(exc),
+                            "error_type": type(exc).__name__,
+                            "event_category": "health",
+                            "event_type": "health.streaming_broker_error",
+                            "event_title": "Streaming loop broker error",
+                        },
+                    )
                     await asyncio.sleep(self.settings.ig_streaming_watch_interval_seconds)
                 except Exception as exc:  # pragma: no cover - defensive runtime protection
                     self._health.last_error = str(exc)
@@ -236,6 +248,7 @@ class IGStreamingService:
         self._latest_prices[update.instrument] = update.price
         self._health.last_tick_at = datetime.now(UTC)
         self._health.last_error = None
+        get_health_service().record_price_update(when=self._health.last_tick_at, stream_connected=True)
         self._loop.call_soon_threadsafe(self._queue.put_nowait, update)
 
     async def _reconcile_subscription(self) -> None:
@@ -365,6 +378,7 @@ class IGStreamingService:
         self._client_listener = None
         self._credentials = None
         self._health.connected = False
+        get_health_service().set_stream_connected(False)
 
     @staticmethod
     def _coerce_float(raw_value: str | None) -> float | None:

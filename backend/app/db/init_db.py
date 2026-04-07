@@ -89,6 +89,12 @@ def initialize_database() -> None:
         "domain_events",
         "correlation_id, created_at DESC",
     )
+    _ensure_sqlite_column("domain_events", "error_type", "VARCHAR")
+    _ensure_index(
+        "ix_domain_events_error_type_created_at",
+        "domain_events",
+        "error_type, created_at DESC",
+    )
 
 
 def _ensure_sqlite_column(table_name: str, column_name: str, column_sql: str) -> None:

@@ -1,6 +1,7 @@
 from collections import defaultdict
 from dataclasses import replace
 from datetime import UTC, datetime
+from time import perf_counter
 from uuid import uuid4
 
 from sqlmodel import Session
@@ -15,6 +16,8 @@ from app.core.runtime import runtime_manager
 from app.models.trade import Execution, ExecutionPhase, ExecutionStatus, Position, Trade, clone_position, utc_now
 from app.strategies.registry import strategy_registry
 from app.services.domain_event_service import domain_event_service
+from app.services.health_service import get_health_service
+from app.services.market_status_service import MarketStatus, get_market_status_service
 from app.services.portfolio_risk_service import PortfolioRiskService
 from app.services.runtime_state_service import RuntimeStateService
 from app.services.trade_service import TradeService
@@ -42,6 +45,8 @@ class StrategyService:
         self.session = session
         self.settings = get_settings()
         self.event_service = domain_event_service
+        self.health_service = get_health_service()
+        self.market_status_service = get_market_status_service()
         self.risk_service = PortfolioRiskService(session)
         self.runtime_state_service = RuntimeStateService(session) if session is not None else None
 
@@ -210,6 +215,7 @@ class StrategyService:
             instrument=instrument,
             payload_json={"status": "RUNNING"},
         )
+        self._refresh_paused_strategy_count()
 
     def stop_strategy(self, instrument: str | None = None, strategy_name: str | None = None) -> None:
         stopped_engines = runtime_manager.stop(instrument=instrument, strategy_name=strategy_name)
@@ -229,6 +235,20 @@ class StrategyService:
                 instrument=engine.instrument,
                 payload_json={"status": "STOPPED"},
             )
+        self._refresh_paused_strategy_count()
+
+    def _refresh_paused_strategy_count(self) -> None:
+        if self.runtime_state_service is None:
+            self.health_service.set_paused_strategies(0)
+            return
+        paused_count = len(
+            [
+                runtime
+                for runtime in self.runtime_state_service.list_runtimes()
+                if runtime.status == "RUNNING" and runtime.recovery_state != "RUNNING"
+            ]
+        )
+        self.health_service.set_paused_strategies(paused_count)
 
     def process_price_update(
         self,
@@ -326,11 +346,13 @@ class StrategyService:
                     created_at=signal.signal_at,
                 )
                 signal.risk_percent = metadata.risk_per_trade if metadata else 0.0
-                signal = self.risk_service.assess_entry(
-                    signal,
-                    open_positions=open_positions,
-                    trades=trades,
-                )
+                signal = self._apply_market_status_gate(engine=engine, signal=signal)
+                if signal.status is not SignalStatus.REJECTED:
+                    signal = self.risk_service.assess_entry(
+                        signal,
+                        open_positions=open_positions,
+                        trades=trades,
+                    )
                 if signal.status is SignalStatus.APPROVED:
                     signal = self._apply_broker_entry_constraints(engine=engine, signal=signal)
                 if signal.status is SignalStatus.APPROVED:
@@ -550,6 +572,7 @@ class StrategyService:
                     )
                 open_positions = trade_service.list_positions()
                 trades = trade_service.list_trades()
+        self._refresh_paused_strategy_count()
 
     @staticmethod
     def _apply_broker_entry_constraints(*, engine, signal: EntrySignal) -> EntrySignal:
@@ -609,6 +632,58 @@ class StrategyService:
             audit_summary=audit_summary,
         )
 
+    def _apply_market_status_gate(self, *, engine, signal: EntrySignal) -> EntrySignal:
+        status = self.market_status_service.get_status(signal.instrument, broker=engine.broker, now=signal.signal_at)
+        if status.is_ok:
+            audit_summary = dict(signal.audit_summary)
+            audit_summary["market_status"] = status.model_dump(mode="json")
+            return replace(signal, audit_summary=audit_summary)
+
+        logger.warning(
+            "Entry blocked by market status",
+            extra={
+                "event": "market_status_blocked",
+                "strategy": signal.strategy_name,
+                "instrument": signal.instrument,
+                "phase": "entry_gate",
+                "reason": status.reason,
+                "market_status": status.model_dump(mode="json"),
+            },
+        )
+        audit_trail = list(signal.audit_trail)
+        audit_trail.append(
+            {
+                "layer": "market_status",
+                "status": "REJECTED",
+                "passed": False,
+                "reason": status.reason,
+                "checks": [
+                    {
+                        "code": "market_status_ok",
+                        "passed": False,
+                        "reason": status.reason,
+                        "actual": status.model_dump(mode="json"),
+                    }
+                ],
+            }
+        )
+        audit_summary = dict(signal.audit_summary)
+        audit_summary.update(
+            {
+                "approved": False,
+                "rejection_layer": "market_status",
+                "market_status": status.model_dump(mode="json"),
+            }
+        )
+        return replace(
+            signal,
+            status=SignalStatus.REJECTED,
+            reason=status.reason or "Market status check failed.",
+            rejection_layer="market_status",
+            audit_trail=audit_trail,
+            audit_summary=audit_summary,
+        )
+
     @staticmethod
     def _calculate_open_pnl(*, direction: str, open_price: float, current_price: float, size: float) -> float:
         multiplier = 1 if direction == "BUY" else -1
@@ -624,6 +699,13 @@ class StrategyService:
 
     @staticmethod
     def _execute_entry_signal(*, engine, signal: EntrySignal, trade_service: TradeService, execution: Execution) -> Position:
+        status = StrategyService._assert_market_status_allows_execution(
+            engine=engine,
+            instrument=signal.instrument,
+            execution=execution,
+            trade_service=trade_service,
+            phase="entry_execution",
+        )
         order_request = OrderRequest(
             instrument=signal.instrument,
             direction=signal.direction,
@@ -638,10 +720,31 @@ class StrategyService:
             submitted_at=utc_now(),
             client_request_id=execution.client_request_id,
             reason="Entry order submitted",
+            details={"market_status_execution_check": status.model_dump(mode="json")},
         )
+        started_at = perf_counter()
         try:
             order = engine.broker.place_order(order_request)
         except Exception as exc:
+            get_health_service().update_broker_state(connected=False, latency_ms=(perf_counter() - started_at) * 1000)
+            get_health_service().record_order_failure()
+            logger.error(
+                "Entry order failed",
+                extra={
+                    "event": "order_failed",
+                    "strategy": signal.strategy_name,
+                    "strategy_name": signal.strategy_name,
+                    "instrument": signal.instrument,
+                    "phase": "entry",
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "event_category": "execution",
+                    "event_type": "execution.order_failed",
+                    "event_title": "Entry order failed",
+                    "correlation_id": execution.client_request_id,
+                    "execution_id": execution.id,
+                },
+            )
             trade_service.transition_execution(
                 execution,
                 status=ExecutionStatus.FAILED,
@@ -651,6 +754,8 @@ class StrategyService:
                 requires_manual_review=False,
             )
             raise
+        get_health_service().update_broker_state(connected=True, latency_ms=(perf_counter() - started_at) * 1000)
+        StrategyService._record_order_health(order.status)
 
         StrategyService._transition_execution_from_broker_result(
             trade_service=trade_service,
@@ -697,6 +802,13 @@ class StrategyService:
     def _execute_exit_signal(*, engine, signal: ExitSignal, trade_service: TradeService, execution: Execution) -> Trade:
         if engine.current_position is None:
             raise ValueError(f"No active engine position for {signal.strategy_name} on {signal.instrument}.")
+        status = StrategyService._assert_market_status_allows_execution(
+            engine=engine,
+            instrument=signal.instrument,
+            execution=execution,
+            trade_service=trade_service,
+            phase="exit_execution",
+        )
         trade_service.transition_execution(
             execution,
             status=ExecutionStatus.CLOSE_REQUESTED,
@@ -709,7 +821,9 @@ class StrategyService:
             submitted_at=utc_now(),
             client_request_id=execution.client_request_id,
             reason="Close order submitted",
+            details={"market_status_execution_check": status.model_dump(mode="json")},
         )
+        started_at = perf_counter()
         try:
             closed_order = engine.broker.close_position(
                 signal.instrument,
@@ -717,6 +831,25 @@ class StrategyService:
                 client_request_id=execution.client_request_id,
             )
         except Exception as exc:
+            get_health_service().update_broker_state(connected=False, latency_ms=(perf_counter() - started_at) * 1000)
+            get_health_service().record_order_failure()
+            logger.error(
+                "Close order failed",
+                extra={
+                    "event": "order_failed",
+                    "strategy": signal.strategy_name,
+                    "strategy_name": signal.strategy_name,
+                    "instrument": signal.instrument,
+                    "phase": "exit",
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "event_category": "execution",
+                    "event_type": "execution.order_failed",
+                    "event_title": "Close order failed",
+                    "correlation_id": execution.client_request_id,
+                    "execution_id": execution.id,
+                },
+            )
             trade_service.transition_execution(
                 execution,
                 status=ExecutionStatus.NEEDS_MANUAL_REVIEW,
@@ -726,6 +859,8 @@ class StrategyService:
                 requires_manual_review=True,
             )
             raise
+        get_health_service().update_broker_state(connected=True, latency_ms=(perf_counter() - started_at) * 1000)
+        StrategyService._record_order_health(closed_order.status)
 
         StrategyService._transition_execution_from_broker_result(
             trade_service=trade_service,
@@ -771,6 +906,54 @@ class StrategyService:
         engine.strategy.on_position_closed()
         engine.current_position = None
         return trade
+
+    @staticmethod
+    def _assert_market_status_allows_execution(
+        *,
+        engine,
+        instrument: str,
+        execution: Execution,
+        trade_service: TradeService,
+        phase: str,
+    ) -> MarketStatus:
+        status = get_market_status_service().get_status(
+            instrument,
+            broker=engine.broker,
+            now=execution.last_transition_at or execution.signal_time or utc_now(),
+        )
+        if status.is_ok:
+            return status
+
+        logger.warning(
+            "Execution blocked by market status",
+            extra={
+                "event": "market_status_blocked",
+                "strategy": execution.strategy_name,
+                "instrument": instrument,
+                "phase": phase,
+                "reason": status.reason,
+                "market_status": status.model_dump(mode="json"),
+                "client_request_id": execution.client_request_id,
+            },
+        )
+        trade_service.transition_execution(
+            execution,
+            status=ExecutionStatus.FAILED,
+            client_request_id=execution.client_request_id,
+            reason=f"Execution blocked by market status: {status.reason}",
+            error_message=status.reason,
+            requires_manual_review=False,
+            details={"market_status_execution_check": status.model_dump(mode="json")},
+        )
+        raise RuntimeError(status.reason or "Execution blocked by market status.")
+
+    @staticmethod
+    def _record_order_health(order_status: BrokerOrderStatus) -> None:
+        health_service = get_health_service()
+        if order_status is BrokerOrderStatus.REJECTED:
+            health_service.record_order_rejection()
+        elif order_status in {BrokerOrderStatus.FAILED, BrokerOrderStatus.CANCELLED}:
+            health_service.record_order_failure()
 
     @staticmethod
     def _transition_execution_from_broker_result(

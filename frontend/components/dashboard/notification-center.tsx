@@ -261,9 +261,10 @@ export function NotificationCenter({ executions, brokerAuth, streamHealth }: Not
   }, [dismissedIds, notifications]);
 
   useEffect(() => {
+    const toastTimeouts = toastTimeoutsRef.current;
     return () => {
-      toastTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
-      toastTimeoutsRef.current.clear();
+      toastTimeouts.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      toastTimeouts.clear();
     };
   }, []);
 

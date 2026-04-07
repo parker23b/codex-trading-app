@@ -1,16 +1,23 @@
 from datetime import datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response, status
 from pydantic import BaseModel
 
+from app.services.health_service import SystemHealth, get_health_service
 from app.services.ig_streaming_service import get_ig_streaming_service
 
 router = APIRouter()
 
 
 @router.get("/health")
-def health_check() -> dict[str, str]:
-    return {"status": "ok"}
+def health_check(response: Response) -> dict[str, str]:
+    current_status = str(get_health_service().get_health_report()["status"])
+    response.status_code = (
+        status.HTTP_503_SERVICE_UNAVAILABLE
+        if current_status == "critical"
+        else status.HTTP_200_OK
+    )
+    return {"status": current_status}
 
 
 class StreamHealthResponse(BaseModel):
@@ -35,3 +42,14 @@ def stream_health_check() -> StreamHealthResponse:
         last_status=health.last_status,
         last_error=health.last_error,
     )
+
+
+class SystemHealthResponse(BaseModel):
+    status: str
+    details: SystemHealth
+
+
+@router.get("/system/health", response_model=SystemHealthResponse)
+def system_health_check() -> SystemHealthResponse:
+    report = get_health_service().get_health_report()
+    return SystemHealthResponse(status=str(report["status"]), details=report["details"])

@@ -10,6 +10,9 @@ from app.strategies.fx_micro_pullback import FxMicroPullbackStrategy
 from app.strategies.base import Strategy
 from app.strategies.mean_reversion import MeanReversionStrategy
 from app.strategies.smoke_test_hold import SmokeTestHoldStrategy
+from app.strategies.volatility_adjusted_pullback_continuation import (
+    VolatilityAdjustedPullbackContinuationStrategy,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +118,22 @@ strategy_registry.register(
         ),
     ),
     factory=FxMicroPullbackStrategy,
+)
+strategy_registry.register(
+    metadata=StrategyMetadata(
+        name=VolatilityAdjustedPullbackContinuationStrategy.name,
+        description="Trades FX pullback continuation only when higher-timeframe trend, structure, and volatility re-acceleration align.",
+        default_instrument="CS.D.EURUSD.MINI.IP",
+        position_size=0.4,
+        risk_per_trade=0.5,
+        parameters=(
+            StrategyParameterDefinition(key="htf_fast_window", label="HTF Fast SMA", value=20, step=1),
+            StrategyParameterDefinition(key="htf_slow_window", label="HTF Slow SMA", value=50, step=1),
+            StrategyParameterDefinition(key="pullback_threshold", label="Pullback Depth", value=0.0015, step=0.0001),
+            StrategyParameterDefinition(key="max_spread_threshold", label="Max Spread", value=0.00012, step=0.00001),
+        ),
+    ),
+    factory=VolatilityAdjustedPullbackContinuationStrategy,
 )
 strategy_registry.register(
     metadata=StrategyMetadata(

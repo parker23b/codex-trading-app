@@ -350,7 +350,7 @@ class TradeService:
             ExecutionStatus.FAILED.value: {
                 "event_type": "execution.order_rejected",
                 "category": "execution",
-                "severity": "warning",
+                "severity": "error",
                 "title": "Order failed",
             },
             ExecutionStatus.CANCELLED.value: {
@@ -373,6 +373,11 @@ class TradeService:
             event_type=str(event_metadata["event_type"]),
             category=str(event_metadata["category"]),
             severity=str(event_metadata["severity"]),
+            error_type=(
+                execution.error_code
+                or ("ManualReviewRequired" if execution.status == ExecutionStatus.NEEDS_MANUAL_REVIEW.value else None)
+                or ("ExecutionFailed" if execution.status == ExecutionStatus.FAILED.value else None)
+            ),
             source="trade_service.transition_execution",
             title=str(event_metadata["title"]),
             message=execution.error_message or execution.reason,

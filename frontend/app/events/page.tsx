@@ -60,11 +60,33 @@ function payloadPreview(payload: Record<string, unknown>) {
   return text === "{}" ? "No payload" : text;
 }
 
+function makeTabHref(
+  current: Record<string, string | string[] | undefined>,
+  tab: "all" | "errors",
+): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(current)) {
+    const normalized = readParam(value);
+    if (!normalized || key === "tab" || key === "severity") {
+      continue;
+    }
+    query.set(key, normalized);
+  }
+  query.set("tab", tab);
+  if (tab === "errors") {
+    query.set("severity", "error");
+  }
+  const suffix = query.toString();
+  return `/events${suffix ? `?${suffix}` : ""}`;
+}
+
 export default async function EventsPage({ searchParams }: EventsPageProps) {
   const resolvedParams = (await searchParams) ?? {};
+  const tab = readParam(resolvedParams.tab) === "errors" ? "errors" : "all";
   const eventType = readParam(resolvedParams.event_type);
+  const errorType = readParam(resolvedParams.error_type);
   const category = readParam(resolvedParams.category);
-  const severity = readParam(resolvedParams.severity);
+  const severity = tab === "errors" ? "error" : readParam(resolvedParams.severity);
   const strategyName = readParam(resolvedParams.strategy_name);
   const instrument = readParam(resolvedParams.instrument);
   const correlationId = readParam(resolvedParams.correlation_id);
@@ -74,6 +96,7 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
   const events = await getDomainEvents({
     limit: Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 500) : 150,
     eventType: eventType || undefined,
+    errorType: errorType || undefined,
     category: category || undefined,
     severity: severity || undefined,
     strategyName: strategyName || undefined,
@@ -97,8 +120,8 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
             <strong>{events.length}</strong>
           </div>
           <div className="events-hero__stat">
-            <span className="eyebrow">Event Type</span>
-            <strong>{eventType || "All"}</strong>
+            <span className="eyebrow">{tab === "errors" ? "Error Type" : "Event Type"}</span>
+            <strong>{tab === "errors" ? errorType || "All" : eventType || "All"}</strong>
           </div>
           <div className="events-hero__stat">
             <span className="eyebrow">Correlation</span>
@@ -108,25 +131,42 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
       </section>
 
       <section className="page-grid">
+        <div className="events-tabs">
+          <Link href={makeTabHref(resolvedParams, "all")} className={`nav-link ${tab === "all" ? "is-active" : ""}`.trim()}>
+            All Events
+          </Link>
+          <Link href={makeTabHref(resolvedParams, "errors")} className={`nav-link ${tab === "errors" ? "is-active" : ""}`.trim()}>
+            Errors
+          </Link>
+        </div>
         <Card
           title="Filters"
-          subtitle="Use exact event type filters for execution milestones like position opened, order rejected, or runtime transitions."
+          subtitle={
+            tab === "errors"
+              ? "Errors are journaled with explicit error types so broker, runtime, and execution failures can be isolated quickly."
+              : "Use exact event type filters for execution milestones like position opened, order rejected, or runtime transitions."
+          }
         >
           <div className="status-note status-note--inline">
             Testing reset clears persisted history without removing strategy definitions. Running runtimes and open positions are kept.
           </div>
           <ResetHistoryButton />
           <form className="events-filters" method="get">
+            <input type="hidden" name="tab" value={tab} />
             <label>
-              <span className="eyebrow">Event Type</span>
-              <select name="event_type" defaultValue={eventType}>
-                <option value="">All event types</option>
-                {EVENT_TYPE_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
+              <span className="eyebrow">{tab === "errors" ? "Error Type" : "Event Type"}</span>
+              {tab === "errors" ? (
+                <input name="error_type" defaultValue={errorType} placeholder="IGBrokerError" />
+              ) : (
+                <select name="event_type" defaultValue={eventType}>
+                  <option value="">All event types</option>
+                  {EVENT_TYPE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              )}
             </label>
 
             <label>
@@ -143,7 +183,7 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
 
             <label>
               <span className="eyebrow">Severity</span>
-              <select name="severity" defaultValue={severity}>
+              <select name="severity" defaultValue={severity} disabled={tab === "errors"}>
                 <option value="">All severities</option>
                 {SEVERITY_OPTIONS.map((option) => (
                   <option key={option} value={option}>
@@ -151,6 +191,7 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
                   </option>
                 ))}
               </select>
+              {tab === "errors" ? <input type="hidden" name="severity" value="error" /> : null}
             </label>
 
             <label>
@@ -188,7 +229,11 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
       <section className="page-grid">
         <Card
           title="Recent Events"
-          subtitle="Newest first. Expand payload to inspect structured context for each event."
+          subtitle={
+            tab === "errors"
+              ? "Newest errors first. Error type is shown explicitly and payload can be expanded for raw context."
+              : "Newest first. Expand payload to inspect structured context for each event."
+          }
         >
           {events.length === 0 ? (
             <div className="empty-state">No events matched the current filters.</div>
@@ -215,6 +260,7 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
                       <td>
                         <strong>{event.title}</strong>
                         <div className="muted">{event.event_type}</div>
+                        {event.error_type ? <div className="muted">Error Type: {event.error_type}</div> : null}
                         <div className="muted">{event.category}</div>
                       </td>
                       <td>

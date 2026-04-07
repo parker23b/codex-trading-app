@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 
 import { StatusBadge } from "@/components/ui/status-badge";
-import { formatCurrency, formatInstrumentLabel, formatPercent, formatPrice, formatRelativeDuration, formatSignedCurrency } from "@/lib/format";
+import { formatInstrumentLabel, formatPercent, formatPrice, formatRelativeDuration, formatSignedCurrency } from "@/lib/format";
 import { Position } from "@/lib/types";
 
 type OpenPositionsTableProps = {

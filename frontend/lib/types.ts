@@ -156,6 +156,7 @@ export type DomainEvent = {
   event_type: string;
   category: "strategy" | "risk" | "execution" | "reconciliation" | "operator" | "health";
   severity: "info" | "warning" | "error";
+  error_type?: string | null;
   source: string;
   correlation_id?: string | null;
   runtime_id?: string | null;

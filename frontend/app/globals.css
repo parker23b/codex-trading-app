@@ -345,6 +345,12 @@ p {
   overflow-wrap: anywhere;
 }
 
+.events-tabs {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .reviewer-hero {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.9fr);
@@ -1629,25 +1635,145 @@ p {
   color: var(--text-secondary);
 }
 
-.strategy-workspace {
+.strategy-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  min-width: 0;
+  overflow-x: clip;
+}
+
+.strategy-rail,
+.strategy-detail,
+.strategy-panel {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 24px;
+  border: 1px solid var(--glassBorder);
+  background: color-mix(in srgb, var(--glassSolid) 82%, transparent);
+  box-shadow: 0 18px 40px var(--shadow);
+  backdrop-filter: blur(18px);
+}
+
+.strategy-rail {
+  position: sticky;
+  top: 24px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  padding: 20px;
 }
 
-.strategy-grid {
+.strategy-rail__header h3,
+.strategy-detail__hero h3,
+.strategy-panel__header h4 {
+  margin-bottom: 6px;
+}
+
+.strategy-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.strategy-list-item {
+  width: 100%;
+  min-width: 0;
+  padding: 16px;
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface-muted) 72%, transparent);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.strategy-list-item:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border) 64%);
+  background: color-mix(in srgb, var(--surface-strong) 84%, transparent);
+}
+
+.strategy-list-item--active {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border) 42%);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent 62%),
+    color-mix(in srgb, var(--surface-strong) 88%, transparent);
+  box-shadow: 0 14px 28px color-mix(in srgb, var(--shadow) 88%, transparent);
+}
+
+.strategy-list-item p {
+  margin-bottom: 12px;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.strategy-list-item__topline,
+.strategy-detail__hero,
+.strategy-panel__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.strategy-list-item__topline strong,
+.strategy-list-item__metrics span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.strategy-list-item__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  min-width: 0;
+}
+
+.strategy-list-item__metrics span {
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-muted) 84%, transparent);
+}
+
+.strategy-detail {
+  display: flex;
+  flex-direction: column;
   gap: 18px;
-  align-items: start;
+  padding: 22px;
 }
 
-.strategy-grid > * {
-  min-width: 0;
+.strategy-detail__hero-badges,
+.strategy-detail__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
-.strategy-card {
-  min-width: 0;
+.strategy-detail__metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.strategy-detail__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 16px;
+}
+
+.strategy-panel {
+  padding: 18px;
 }
 
 .strategy-card__meta {
@@ -1676,10 +1802,10 @@ p {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 16px;
   min-width: 0;
 }
 
+.strategy-card__instrument select,
 .strategy-card__instrument input,
 .config-grid input {
   width: 100%;
@@ -1690,16 +1816,10 @@ p {
   color: var(--text-primary);
 }
 
-.strategy-card__actions {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
 .strategy-runtime-list {
   display: grid;
   gap: 10px;
-  margin-bottom: 16px;
+  margin-top: 14px;
 }
 
 .strategy-runtime-row {
@@ -1764,47 +1884,30 @@ p {
   }
 }
 
-@media (max-width: 560px) {
-  .strategy-card__meta {
-    grid-template-columns: 1fr;
-  }
-}
-
-.config-drawer-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 30;
-  background: rgba(8, 17, 26, 0.42);
-  display: flex;
-  justify-content: flex-end;
-}
-
-.config-drawer {
-  width: min(440px, 100%);
-  height: 100%;
-  padding: 24px;
-  background: color-mix(in srgb, var(--page-bg-2) 84%, var(--glass) 16%);
-  border-left: 1px solid var(--border);
-  box-shadow: 0 12px 40px var(--shadow);
-  overflow-y: auto;
-}
-
-.config-drawer__header {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 20px;
-}
-
 .config-grid {
   display: grid;
-  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.config-grid label {
+.config-field {
+  padding: 14px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface-muted) 72%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glassBorder);
+}
+
+.strategy-callout {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface-muted) 82%, transparent);
+}
+
+.strategy-callout--warning {
+  border: 1px solid color-mix(in srgb, var(--warning) 36%, var(--border) 64%);
 }
 
 .status-note {
@@ -1895,7 +1998,10 @@ p {
   .hero-grid,
   .insight-grid,
   .kpi-bar,
+  .strategy-detail__grid,
   .strategy-card__meta,
+  .strategy-detail__metrics,
+  .config-grid,
   .allocation-summary,
   .markets-summary-strip,
   .market-status-card__metrics,
@@ -1945,12 +2051,30 @@ p {
     justify-content: flex-start;
   }
 
-  .config-drawer {
-    width: 100%;
+  .strategy-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .strategy-rail {
+    position: static;
   }
 
   .theme-toggle {
     right: 16px;
     bottom: 16px;
+  }
+}
+
+@media (max-width: 560px) {
+  .strategy-list-item__topline,
+  .strategy-detail__hero,
+  .strategy-panel__header {
+    flex-direction: column;
+  }
+
+  .strategy-card__meta,
+  .strategy-detail__metrics,
+  .config-grid {
+    grid-template-columns: 1fr;
   }
 }

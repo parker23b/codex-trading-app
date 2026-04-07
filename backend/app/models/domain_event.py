@@ -20,6 +20,7 @@ class DomainEvent(SQLModel, table=True):
     event_type: str = Field(index=True)
     category: str = Field(index=True)
     severity: str = Field(default="info", index=True)
+    error_type: str | None = Field(default=None, index=True)
     source: str = Field(index=True)
     correlation_id: str | None = Field(default=None, index=True)
     runtime_id: str | None = Field(default=None, index=True)
