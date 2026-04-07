@@ -2,36 +2,55 @@
 
 import { useEffect, useState } from "react";
 
+import { NotificationCenter } from "@/components/dashboard/notification-center";
 import { StrategyControlPanel } from "@/components/strategy/strategy-control-panel";
 import { ModeIndicator } from "@/components/ui/mode-indicator";
 import { Card } from "@/components/ui/card";
-import { getStrategies, getStreamHealth } from "@/lib/api";
-import { StrategyDefinition, StreamHealthStatus } from "@/lib/types";
+import { getBrokerAuthStatus, getExecutions, getStrategies, getStreamHealth } from "@/lib/api";
+import { BrokerAuthStatus, Execution, StrategyDefinition, StreamHealthStatus } from "@/lib/types";
 
 type StrategyLiveProps = {
   initialStrategies: StrategyDefinition[];
+  initialExecutions: Execution[];
+  initialBrokerAuth: BrokerAuthStatus;
   initialStreamHealth: StreamHealthStatus;
 };
 
-export function StrategyLive({ initialStrategies, initialStreamHealth }: StrategyLiveProps) {
+export function StrategyLive({
+  initialStrategies,
+  initialExecutions,
+  initialBrokerAuth,
+  initialStreamHealth,
+}: StrategyLiveProps) {
   const [strategies, setStrategies] = useState(initialStrategies);
+  const [executions, setExecutions] = useState(initialExecutions);
+  const [brokerAuth, setBrokerAuth] = useState(initialBrokerAuth);
   const [streamHealth, setStreamHealth] = useState(initialStreamHealth);
 
   useEffect(() => {
     setStrategies(initialStrategies);
+    setExecutions(initialExecutions);
+    setBrokerAuth(initialBrokerAuth);
     setStreamHealth(initialStreamHealth);
-  }, [initialStrategies, initialStreamHealth]);
+  }, [initialStrategies, initialExecutions, initialBrokerAuth, initialStreamHealth]);
 
   useEffect(() => {
     let cancelled = false;
 
     const refresh = async () => {
       try {
-        const [nextStrategies, nextStreamHealth] = await Promise.all([getStrategies(), getStreamHealth()]);
+        const [nextStrategies, nextExecutions, nextBrokerAuth, nextStreamHealth] = await Promise.all([
+          getStrategies(),
+          getExecutions(),
+          getBrokerAuthStatus(),
+          getStreamHealth(),
+        ]);
         if (cancelled) {
           return;
         }
         setStrategies(nextStrategies);
+        setExecutions(nextExecutions);
+        setBrokerAuth(nextBrokerAuth);
         setStreamHealth(nextStreamHealth);
       } catch {
         // Preserve the last good payload on transient errors.
@@ -50,6 +69,7 @@ export function StrategyLive({ initialStrategies, initialStreamHealth }: Strateg
 
   return (
     <main className="page-grid">
+      <NotificationCenter executions={executions} brokerAuth={brokerAuth} streamHealth={streamHealth} />
       <section className="top-command-bar">
         <ModeIndicator mode={mode} streamHealth={streamHealth} />
       </section>

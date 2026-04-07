@@ -1,6 +1,7 @@
 import {
   BrokerAuthStatus,
   DashboardSnapshot,
+  Execution,
   MarketCategory,
   MarketCategoryOverviewResponse,
   Position,
@@ -67,6 +68,10 @@ export async function getBackendMode(): Promise<BackendMode> {
 
 export async function getTrades(): Promise<Trade[]> {
   return request<Trade[]>("/trades");
+}
+
+export async function getExecutions(limit = 100): Promise<Execution[]> {
+  return request<Execution[]>(`/executions?limit=${limit}`);
 }
 
 export async function getOpenPositions(): Promise<Position[]> {

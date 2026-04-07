@@ -136,6 +136,14 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
                 ? `${strategy.active_runtime_count} runtime${strategy.active_runtime_count === 1 ? "" : "s"} active across ${strategy.active_instruments?.length ?? 0} instrument${(strategy.active_instruments?.length ?? 0) === 1 ? "" : "s"}.`
                 : "Stopped. Launch one or more instruments to start scanning."}
             </div>
+            {strategy.warning_message ? (
+              <div className="status-note status-note--inline">
+                <StatusBadge label="Warning" tone="warning" />
+                {" "}
+                {strategy.warning_instrument ? `${formatInstrumentLabel(strategy.warning_instrument)}: ` : ""}
+                {strategy.warning_message}
+              </div>
+            ) : null}
             <label className="strategy-card__instrument">
               <span className="eyebrow">Launch Another Runtime</span>
               <select

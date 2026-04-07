@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { EquityPanel } from "@/components/dashboard/equity-panel";
 import { KpiBar } from "@/components/dashboard/kpi-bar";
+import { NotificationCenter } from "@/components/dashboard/notification-center";
 import { OpenPositionsTable } from "@/components/dashboard/open-positions-table";
 import { RecentTradesTable } from "@/components/dashboard/recent-trades-table";
 import { RiskAllocationPanel } from "@/components/dashboard/risk-allocation-panel";
@@ -11,12 +12,13 @@ import { RiskPanel } from "@/components/dashboard/risk-panel";
 import { StrategyTapePanel } from "@/components/dashboard/strategy-tape-panel";
 import { ModeIndicator } from "@/components/ui/mode-indicator";
 import { Card } from "@/components/ui/card";
-import { getBrokerAuthStatus, getDashboardSnapshot, getOpenPositions, getStreamHealth, getTrades } from "@/lib/api";
-import { BrokerAuthStatus, DashboardSnapshot, Position, StreamHealthStatus, Trade } from "@/lib/types";
+import { getBrokerAuthStatus, getDashboardSnapshot, getExecutions, getOpenPositions, getStreamHealth, getTrades } from "@/lib/api";
+import { BrokerAuthStatus, DashboardSnapshot, Execution, Position, StreamHealthStatus, Trade } from "@/lib/types";
 
 type DashboardLiveProps = {
   initialPositions: Position[];
   initialTrades: Trade[];
+  initialExecutions: Execution[];
   initialBrokerAuth: BrokerAuthStatus;
   initialDashboard: DashboardSnapshot;
   initialStreamHealth: StreamHealthStatus;
@@ -25,12 +27,14 @@ type DashboardLiveProps = {
 export function DashboardLive({
   initialPositions,
   initialTrades,
+  initialExecutions,
   initialBrokerAuth,
   initialDashboard,
   initialStreamHealth,
 }: DashboardLiveProps) {
   const [positions, setPositions] = useState(initialPositions);
   const [trades, setTrades] = useState(initialTrades);
+  const [executions, setExecutions] = useState(initialExecutions);
   const [brokerAuth, setBrokerAuth] = useState(initialBrokerAuth);
   const [dashboard, setDashboard] = useState(initialDashboard);
   const [streamHealth, setStreamHealth] = useState(initialStreamHealth);
@@ -38,19 +42,21 @@ export function DashboardLive({
   useEffect(() => {
     setPositions(initialPositions);
     setTrades(initialTrades);
+    setExecutions(initialExecutions);
     setBrokerAuth(initialBrokerAuth);
     setDashboard(initialDashboard);
     setStreamHealth(initialStreamHealth);
-  }, [initialPositions, initialTrades, initialBrokerAuth, initialDashboard, initialStreamHealth]);
+  }, [initialPositions, initialTrades, initialExecutions, initialBrokerAuth, initialDashboard, initialStreamHealth]);
 
   useEffect(() => {
     let cancelled = false;
 
     const refresh = async () => {
       try {
-        const [nextPositions, nextTrades, nextBrokerAuth, nextDashboard, nextStreamHealth] = await Promise.all([
+        const [nextPositions, nextTrades, nextExecutions, nextBrokerAuth, nextDashboard, nextStreamHealth] = await Promise.all([
           getOpenPositions(),
           getTrades(),
+          getExecutions(),
           getBrokerAuthStatus(),
           getDashboardSnapshot(),
           getStreamHealth(),
@@ -60,6 +66,7 @@ export function DashboardLive({
         }
         setPositions(nextPositions);
         setTrades(nextTrades);
+        setExecutions(nextExecutions);
         setBrokerAuth(nextBrokerAuth);
         setDashboard(nextDashboard);
         setStreamHealth(nextStreamHealth);
@@ -219,6 +226,7 @@ export function DashboardLive({
           <StrategyTapePanel rows={dashboard.runningStrategies ?? []} />
         </div>
       </section>
+      <NotificationCenter executions={executions} brokerAuth={brokerAuth} streamHealth={streamHealth} />
       <section className="page-grid">
         <Card title="Open Positions" subtitle="Current exposure and execution state." className="card--table card--full-width">
           <div className="status-note status-note--inline">

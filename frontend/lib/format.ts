@@ -89,3 +89,14 @@ export function formatRelativeDuration(fromIso: string, toDate = new Date()) {
   const minutes = totalMinutes % 60;
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
+
+export function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date(value));
+}

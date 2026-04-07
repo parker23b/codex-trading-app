@@ -1,7 +1,19 @@
 import { StrategyLive } from "@/components/strategy/strategy-live";
-import { getStrategies, getStreamHealth } from "@/lib/api";
+import { getBrokerAuthStatus, getExecutions, getStrategies, getStreamHealth } from "@/lib/api";
 
 export default async function StrategiesPage() {
-  const [strategies, streamHealth] = await Promise.all([getStrategies(), getStreamHealth()]);
-  return <StrategyLive initialStrategies={strategies} initialStreamHealth={streamHealth} />;
+  const [strategies, executions, brokerAuth, streamHealth] = await Promise.all([
+    getStrategies(),
+    getExecutions(),
+    getBrokerAuthStatus(),
+    getStreamHealth(),
+  ]);
+  return (
+    <StrategyLive
+      initialStrategies={strategies}
+      initialExecutions={executions}
+      initialBrokerAuth={brokerAuth}
+      initialStreamHealth={streamHealth}
+    />
+  );
 }

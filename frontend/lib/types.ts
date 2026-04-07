@@ -16,6 +16,46 @@ export type Trade = {
   reason?: string | null;
 };
 
+export type Execution = {
+  id: number;
+  strategy_name: string;
+  instrument: string;
+  phase: "ENTRY" | "CLOSE";
+  status:
+    | "SIGNAL_GENERATED"
+    | "RISK_APPROVED"
+    | "RISK_REJECTED"
+    | "ORDER_SUBMITTED"
+    | "ORDER_ACKNOWLEDGED"
+    | "FILL_PARTIAL"
+    | "FILL_FULL"
+    | "POSITION_OPENED"
+    | "CLOSE_REQUESTED"
+    | "CLOSE_CONFIRMED"
+    | "FAILED"
+    | "CANCELLED"
+    | "NEEDS_MANUAL_REVIEW";
+  broker_reference?: string | null;
+  local_position_id?: number | null;
+  local_trade_id?: number | null;
+  signal_time: string;
+  submitted_at?: string | null;
+  acknowledged_at?: string | null;
+  completed_at?: string | null;
+  last_transition_at: string;
+  requested_size?: number | null;
+  filled_size?: number | null;
+  requested_price?: number | null;
+  average_fill_price?: number | null;
+  reason?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  requires_manual_review: boolean;
+  details: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Position = {
   id: number;
   strategy_name: string;
@@ -84,6 +124,9 @@ export type StrategyDefinition = {
   active_instruments?: string[];
   active_runtime_count?: number;
   open_position_count?: number;
+  warning_message?: string | null;
+  warning_instrument?: string | null;
+  warning_status?: string | null;
   active_runtimes?: StrategyRuntime[];
   open_positions?: StrategyPositionSummary[];
   instrument_options?: { epic: string; label: string; category: string }[];
