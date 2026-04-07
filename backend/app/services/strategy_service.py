@@ -1,4 +1,5 @@
 from collections import defaultdict
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -331,6 +332,8 @@ class StrategyService:
                     trades=trades,
                 )
                 if signal.status is SignalStatus.APPROVED:
+                    signal = self._apply_broker_entry_constraints(engine=engine, signal=signal)
+                if signal.status is SignalStatus.APPROVED:
                     trade_service.transition_execution(
                         execution,
                         status=ExecutionStatus.RISK_APPROVED,
@@ -547,6 +550,64 @@ class StrategyService:
                     )
                 open_positions = trade_service.list_positions()
                 trades = trade_service.list_trades()
+
+    @staticmethod
+    def _apply_broker_entry_constraints(*, engine, signal: EntrySignal) -> EntrySignal:
+        try:
+            market_details = engine.broker.get_market_details(signal.instrument)
+        except Exception as exc:
+            logger.warning(
+                "Unable to load broker market details during entry validation",
+                extra={
+                    "strategy": signal.strategy_name,
+                    "instrument": signal.instrument,
+                    "error": str(exc),
+                },
+            )
+            return signal
+
+        min_deal_size = market_details.min_deal_size
+        if min_deal_size is None or signal.size >= min_deal_size:
+            return signal
+
+        reason = (
+            f"Requested size {signal.size} is below broker minimum deal size "
+            f"{min_deal_size} for {signal.instrument}."
+        )
+        audit_trail = list(signal.audit_trail)
+        audit_trail.append(
+            {
+                "layer": "broker_constraints",
+                "status": "REJECTED",
+                "passed": False,
+                "reason": reason,
+                "checks": [
+                    {
+                        "code": "min_deal_size",
+                        "passed": False,
+                        "reason": reason,
+                        "actual": signal.size,
+                        "limit": min_deal_size,
+                    }
+                ],
+            }
+        )
+        audit_summary = dict(signal.audit_summary)
+        audit_summary.update(
+            {
+                "approved": False,
+                "rejection_layer": "broker_constraints",
+                "min_deal_size": min_deal_size,
+            }
+        )
+        return replace(
+            signal,
+            status=SignalStatus.REJECTED,
+            reason=reason,
+            rejection_layer="broker_constraints",
+            audit_trail=audit_trail,
+            audit_summary=audit_summary,
+        )
 
     @staticmethod
     def _calculate_open_pnl(*, direction: str, open_price: float, current_price: float, size: float) -> float:
