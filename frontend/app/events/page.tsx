@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { Card } from "@/components/card";
+import { ResetHistoryButton } from "@/components/testing/reset-history-button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { getDomainEvents } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
@@ -111,6 +112,10 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
           title="Filters"
           subtitle="Use exact event type filters for execution milestones like position opened, order rejected, or runtime transitions."
         >
+          <div className="status-note status-note--inline">
+            Testing reset clears persisted history without removing strategy definitions. Running runtimes and open positions are kept.
+          </div>
+          <ResetHistoryButton />
           <form className="events-filters" method="get">
             <label>
               <span className="eyebrow">Event Type</span>

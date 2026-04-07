@@ -17,6 +17,34 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8
 const REQUEST_TIMEOUT_MS = 1500;
 const MARKET_REQUEST_TIMEOUT_MS = 12000;
 
+export const EMPTY_BROKER_AUTH_STATUS: BrokerAuthStatus = {
+  state: "unavailable",
+  label: "Broker Unavailable",
+  detail: "Broker status could not be loaded.",
+  position_count: 0,
+};
+
+export const EMPTY_STREAM_HEALTH_STATUS: StreamHealthStatus = {
+  enabled: false,
+  connected: false,
+  dependency_ready: false,
+  subscribed_instruments: [],
+  last_tick_at: null,
+  last_status: "Unavailable",
+  last_error: "Stream health could not be loaded.",
+};
+
+export const EMPTY_DASHBOARD_SNAPSHOT: DashboardSnapshot = {
+  accountValue: 100000,
+  accountValuePercent: 0,
+  dailyPnl: 0,
+  dailyPnlPercent: 0,
+  openRisk: 0,
+  winRate: 0,
+  riskReward: 0,
+  runningStrategies: [],
+};
+
 type BackendMode = "live";
 
 class HttpError extends Error {
@@ -93,10 +121,10 @@ export async function getBrokerAuthStatus(): Promise<BrokerAuthStatus> {
       position_count: positions.length,
     };
   } catch (error) {
-    const detail = error instanceof HttpError ? error.detail : undefined;
+    const detail = error instanceof HttpError ? error.detail : error instanceof Error ? error.message : undefined;
     return {
-      state: "disconnected",
-      label: "IG Auth Failed",
+      state: "unavailable",
+      label: "IG Unavailable",
       detail: detail ?? "Broker authentication check failed",
       position_count: 0,
     };
@@ -105,6 +133,14 @@ export async function getBrokerAuthStatus(): Promise<BrokerAuthStatus> {
 
 export async function getStreamHealth(): Promise<StreamHealthStatus> {
   return request<StreamHealthStatus>("/health/stream");
+}
+
+export async function withFallback<T>(loader: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await loader();
+  } catch {
+    return fallback;
+  }
 }
 
 export async function getDomainEvents(params?: {
@@ -198,5 +234,14 @@ export async function getReviewHistory(reviewType?: string, limit = 8): Promise<
   query.set("limit", String(limit));
   return request<ReviewHistoryItem[]>(`/reviews/history?${query.toString()}`, {
     timeoutMs: 3000,
+  });
+}
+
+export async function resetTestHistory(): Promise<{
+  status: string;
+  summary: Record<string, number>;
+}> {
+  return request<{ status: string; summary: Record<string, number> }>("/testing/reset-history", {
+    method: "POST",
   });
 }
