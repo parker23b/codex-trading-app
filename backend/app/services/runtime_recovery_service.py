@@ -8,6 +8,7 @@ from app.core.broker_factory import get_broker
 from app.core.logging import get_logger
 from app.core.runtime import runtime_manager
 from app.models.trade import Position, clone_position, utc_now
+from app.services.domain_event_service import domain_event_service
 from app.services.runtime_state_service import RuntimeStateService
 from app.services.trade_service import TradeService
 
@@ -97,6 +98,19 @@ class RuntimeRecoveryService:
                         "outcome": "recovery_required",
                     }
                 )
+                if "auth" in broker_error.lower():
+                    domain_event_service.record_event(
+                        event_type="health.broker_auth_failed",
+                        category="health",
+                        severity="warning",
+                        source="runtime_recovery_service.recover",
+                        title="Broker authentication failed during recovery",
+                        message=f"Runtime recovery could not verify broker state for {runtime.strategy_name} on {runtime.instrument}.",
+                        runtime_id=runtime.runtime_id,
+                        strategy_name=runtime.strategy_name,
+                        instrument=runtime.instrument,
+                        payload_json={"reason": broker_error},
+                    )
                 continue
 
             if runtime.current_position_broker_reference and remote_position is None:
@@ -121,6 +135,21 @@ class RuntimeRecoveryService:
                         "instrument": runtime.instrument,
                         "outcome": "recovery_required",
                     }
+                )
+                domain_event_service.record_event(
+                    event_type="reconciliation.mismatch_detected",
+                    category="reconciliation",
+                    severity="warning",
+                    source="runtime_recovery_service.recover",
+                    title="Persisted runtime position was not confirmed by broker",
+                    message=f"Startup recovery found no broker confirmation for {runtime.strategy_name} on {runtime.instrument}.",
+                    runtime_id=runtime.runtime_id,
+                    strategy_name=runtime.strategy_name,
+                    instrument=runtime.instrument,
+                    payload_json={
+                        "broker_reference": runtime.current_position_broker_reference,
+                        "reason": "Persisted runtime references an open position that the broker did not confirm.",
+                    },
                 )
                 continue
 
@@ -157,6 +186,23 @@ class RuntimeRecoveryService:
                     "instrument": runtime.instrument,
                     "outcome": "resumed" if current_position is not None else "running",
                 }
+            )
+            domain_event_service.record_event(
+                event_type="strategy.runtime_started",
+                category="strategy",
+                severity="info",
+                source="runtime_recovery_service.recover",
+                title="Persisted strategy runtime resumed",
+                message=f"{runtime.strategy_name} resumed on {runtime.instrument} during startup recovery.",
+                runtime_id=engine.runtime_id,
+                strategy_name=runtime.strategy_name,
+                instrument=runtime.instrument,
+                position_id=current_position.id if current_position is not None else None,
+                payload_json={
+                    "recovered": True,
+                    "has_position": current_position is not None,
+                    "recovery_outcome": outcomes[-1]["outcome"],
+                },
             )
             logger.info(
                 "Recovered persisted runtime",

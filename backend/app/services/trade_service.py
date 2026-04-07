@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlmodel import Session, desc, select
 
 from app.models.trade import Execution, ExecutionStatus, Position, ReconciliationEvent, Trade, utc_now
+from app.services.domain_event_service import domain_event_service
 
 
 class TradeService:
@@ -128,6 +129,7 @@ class TradeService:
         requires_manual_review: bool | None = None,
         details: dict[str, object] | None = None,
     ) -> Execution:
+        previous_status = execution.status
         execution.status = status.value if isinstance(status, ExecutionStatus) else status
         execution.last_transition_at = completed_at or acknowledged_at or submitted_at or utc_now()
         execution.updated_at = utc_now()
@@ -162,6 +164,7 @@ class TradeService:
         self.session.add(execution)
         self.session.commit()
         self.session.refresh(execution)
+        self._record_execution_domain_event(execution, previous_status=previous_status)
         return execution
 
     def record_broker_position(self, position: Position) -> Position:
@@ -283,3 +286,115 @@ class TradeService:
         self.session.commit()
         self.session.refresh(event)
         return event
+
+    @staticmethod
+    def _record_execution_domain_event(execution: Execution, *, previous_status: str | None) -> None:
+        if previous_status == execution.status:
+            return
+
+        event_metadata = {
+            ExecutionStatus.RISK_APPROVED.value: {
+                "event_type": "risk.entry_approved",
+                "category": "risk",
+                "severity": "info",
+                "title": "Risk approved entry",
+            },
+            ExecutionStatus.RISK_REJECTED.value: {
+                "event_type": "risk.entry_rejected",
+                "category": "risk",
+                "severity": "warning",
+                "title": "Risk rejected entry",
+            },
+            ExecutionStatus.ORDER_SUBMITTED.value: {
+                "event_type": "execution.order_submitted",
+                "category": "execution",
+                "severity": "info",
+                "title": "Order submitted",
+            },
+            ExecutionStatus.ORDER_ACKNOWLEDGED.value: {
+                "event_type": "execution.order_acknowledged",
+                "category": "execution",
+                "severity": "info",
+                "title": "Broker acknowledged order",
+            },
+            ExecutionStatus.FILL_PARTIAL.value: {
+                "event_type": "execution.fill_received",
+                "category": "execution",
+                "severity": "warning",
+                "title": "Partial fill received",
+            },
+            ExecutionStatus.FILL_FULL.value: {
+                "event_type": "execution.fill_received",
+                "category": "execution",
+                "severity": "info",
+                "title": "Fill received",
+            },
+            ExecutionStatus.POSITION_OPENED.value: {
+                "event_type": "execution.position_opened",
+                "category": "execution",
+                "severity": "info",
+                "title": "Position opened",
+            },
+            ExecutionStatus.CLOSE_REQUESTED.value: {
+                "event_type": "execution.close_requested",
+                "category": "execution",
+                "severity": "info",
+                "title": "Close requested",
+            },
+            ExecutionStatus.CLOSE_CONFIRMED.value: {
+                "event_type": "execution.position_closed",
+                "category": "execution",
+                "severity": "info",
+                "title": "Position closed",
+            },
+            ExecutionStatus.FAILED.value: {
+                "event_type": "execution.order_rejected",
+                "category": "execution",
+                "severity": "warning",
+                "title": "Order failed",
+            },
+            ExecutionStatus.CANCELLED.value: {
+                "event_type": "execution.order_rejected",
+                "category": "execution",
+                "severity": "warning",
+                "title": "Order cancelled",
+            },
+            ExecutionStatus.NEEDS_MANUAL_REVIEW.value: {
+                "event_type": "execution.order_rejected",
+                "category": "execution",
+                "severity": "error",
+                "title": "Execution needs manual review",
+            },
+        }.get(execution.status)
+        if event_metadata is None:
+            return
+
+        domain_event_service.record_event(
+            event_type=str(event_metadata["event_type"]),
+            category=str(event_metadata["category"]),
+            severity=str(event_metadata["severity"]),
+            source="trade_service.transition_execution",
+            title=str(event_metadata["title"]),
+            message=execution.error_message or execution.reason,
+            correlation_id=execution.client_request_id,
+            strategy_name=execution.strategy_name,
+            instrument=execution.instrument,
+            position_id=execution.local_position_id,
+            trade_id=execution.local_trade_id,
+            execution_id=execution.id,
+            payload_json={
+                "phase": execution.phase,
+                "status": execution.status,
+                "reason": execution.reason,
+                "error_code": execution.error_code,
+                "error_message": execution.error_message,
+                "broker_reference": execution.broker_reference,
+                "requested_size": execution.requested_size,
+                "filled_size": execution.filled_size,
+                "requested_price": execution.requested_price,
+                "average_fill_price": execution.average_fill_price,
+                "requires_manual_review": execution.requires_manual_review,
+                "details": execution.details or {},
+            },
+            created_at=execution.last_transition_at,
+        )

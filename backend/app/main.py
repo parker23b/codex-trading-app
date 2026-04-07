@@ -1,10 +1,12 @@
 import asyncio
 import contextlib
 from contextlib import asynccontextmanager
+import logging
 from time import perf_counter
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import Response
 from sqlmodel import Session
 
 from app.api.router import api_router
@@ -19,6 +21,16 @@ from app.services.runtime_recovery_service import RuntimeRecoveryService
 settings = get_settings()
 configure_logging(settings.log_level)
 logger = get_logger(__name__)
+
+NOISY_POLLING_PATHS = {
+    "/broker/positions",
+    "/dashboard",
+    "/executions",
+    "/health/stream",
+    "/trades",
+    "/trades/positions",
+}
+SLOW_REQUEST_THRESHOLD_MS = 750.0
 
 
 @asynccontextmanager
@@ -59,9 +71,24 @@ app.add_middleware(
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     started_at = perf_counter()
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = round((perf_counter() - started_at) * 1000, 2)
+        logger.exception(
+            "API request failed",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": 500,
+                "duration_ms": duration_ms,
+            },
+        )
+        raise
     duration_ms = round((perf_counter() - started_at) * 1000, 2)
-    logger.info(
+    log_level = _classify_request_log_level(request=request, response=response, duration_ms=duration_ms)
+    logger.log(
+        log_level,
         "API request handled",
         extra={
             "method": request.method,
@@ -71,6 +98,20 @@ async def log_requests(request: Request, call_next):
         },
     )
     return response
+
+
+def _classify_request_log_level(*, request: Request, response: Response, duration_ms: float) -> int:
+    if response.status_code >= 500:
+        return logging.ERROR
+    if response.status_code >= 400:
+        return logging.WARNING
+    if duration_ms >= SLOW_REQUEST_THRESHOLD_MS:
+        return logging.INFO
+    if request.method == "OPTIONS":
+        return logging.DEBUG
+    if request.method == "GET" and request.url.path in NOISY_POLLING_PATHS:
+        return logging.DEBUG
+    return logging.INFO
 
 
 app.include_router(api_router)

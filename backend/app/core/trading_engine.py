@@ -114,7 +114,7 @@ class TradingEngine:
                 tradable=update.tradable,
             )
 
-        logger.info(
+        logger.debug(
             "Strategy evaluated with no trade action",
             extra={
                 "strategy": self.strategy.name,

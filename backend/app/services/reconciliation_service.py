@@ -4,6 +4,7 @@ from app.core.broker_factory import get_broker
 from app.core.logging import get_logger
 from app.core.runtime import runtime_manager
 from app.models.trade import Position, clone_position, utc_now
+from app.services.domain_event_service import domain_event_service
 from app.services.runtime_state_service import RuntimeStateService
 from app.services.trade_service import TradeService
 
@@ -19,6 +20,9 @@ class ReconciliationService:
         self.runtime_state_service = RuntimeStateService(trade_service.session)
 
     def reconcile_open_positions(self) -> list[Position]:
+        adopted_count = 0
+        corrected_count = 0
+        unmatched_local_count = 0
         remote_positions = self.broker.get_positions()
         local_positions = self.trade_service.list_all_open_positions()
         local_by_broker_reference = {
@@ -87,20 +91,58 @@ class ReconciliationService:
                 broker_open_confirmed_at=remote_position.opened_at,
                 last_reconciled_at=utc_now(),
             )
+            is_adopted = local_position is None
+            needs_update = is_adopted or self._position_needs_reconciliation(local_position, synced_position)
             persisted = self.trade_service.record_broker_position(synced_position)
-            self.trade_service.record_reconciliation_event(
-                event_type="POSITION_SYNCED_FROM_BROKER" if local_position is not None else "POSITION_ADOPTED_FROM_BROKER",
-                strategy_name=strategy_name,
-                instrument=instrument,
-                broker_reference=remote_position.broker_reference,
-                local_position_id=persisted.id,
-                details={
+            if needs_update:
+                details = {
                     "matched_local_position": local_position is not None,
                     "matched_runtime_engine": matching_engine is not None,
                     "size": remote_position.size,
                     "open_price": remote_position.open_price,
-                },
-            )
+                }
+                self.trade_service.record_reconciliation_event(
+                    event_type="POSITION_SYNCED_FROM_BROKER" if local_position is not None else "POSITION_ADOPTED_FROM_BROKER",
+                    strategy_name=strategy_name,
+                    instrument=instrument,
+                    broker_reference=remote_position.broker_reference,
+                    local_position_id=persisted.id,
+                    details=details,
+                )
+                if is_adopted:
+                    adopted_count += 1
+                    domain_event_service.record_event(
+                        event_type="reconciliation.unmatched_remote_position",
+                        category="reconciliation",
+                        severity="warning",
+                        source="reconciliation_service.reconcile_open_positions",
+                        title="Broker position had no local match",
+                        message=f"Broker position for {instrument} was adopted into local state.",
+                        strategy_name=strategy_name,
+                        instrument=instrument,
+                        position_id=persisted.id,
+                        payload_json={
+                            **details,
+                            "broker_reference": remote_position.broker_reference,
+                        },
+                    )
+                else:
+                    corrected_count += 1
+                    domain_event_service.record_event(
+                        event_type="reconciliation.position_corrected",
+                        category="reconciliation",
+                        severity="info",
+                        source="reconciliation_service.reconcile_open_positions",
+                        title="Local position corrected from broker state",
+                        message=f"Local position for {instrument} was updated to broker truth.",
+                        strategy_name=strategy_name,
+                        instrument=instrument,
+                        position_id=persisted.id,
+                        payload_json={
+                            **details,
+                            "broker_reference": remote_position.broker_reference,
+                        },
+                    )
             if matching_engine is not None:
                 matching_engine.current_position = clone_position(persisted)
                 self.runtime_state_service.sync_engine_state(
@@ -130,15 +172,48 @@ class ReconciliationService:
                 broker_sync_status="MISSING_AT_BROKER",
                 close_reason="Closed locally after broker reconciliation found no matching open broker position.",
             )
+            unmatched_local_count += 1
+            details = {
+                "had_broker_reference": local_position.broker_reference is not None,
+                "close_price": local_position.current_price or local_position.open_price,
+            }
             self.trade_service.record_reconciliation_event(
                 event_type="LOCAL_POSITION_CLOSED_AFTER_BROKER_MISS",
                 strategy_name=local_position.strategy_name,
                 instrument=local_position.instrument,
                 broker_reference=local_position.broker_reference,
                 local_position_id=local_position.id,
-                details={
-                    "had_broker_reference": local_position.broker_reference is not None,
-                    "close_price": local_position.current_price or local_position.open_price,
+                details=details,
+            )
+            domain_event_service.record_event(
+                event_type="reconciliation.unmatched_local_position",
+                category="reconciliation",
+                severity="warning",
+                source="reconciliation_service.reconcile_open_positions",
+                title="Local position missing at broker",
+                message=f"Local position for {local_position.instrument} was not found remotely and was closed.",
+                strategy_name=local_position.strategy_name,
+                instrument=local_position.instrument,
+                position_id=local_position.id,
+                payload_json={
+                    **details,
+                    "broker_reference": local_position.broker_reference,
+                },
+            )
+            domain_event_service.record_event(
+                event_type="reconciliation.position_corrected",
+                category="reconciliation",
+                severity="info",
+                source="reconciliation_service.reconcile_open_positions",
+                title="Position corrected after reconciliation",
+                message=f"Reconciliation closed a mismatched local position for {local_position.instrument}.",
+                strategy_name=local_position.strategy_name,
+                instrument=local_position.instrument,
+                position_id=local_position.id,
+                payload_json={
+                    **details,
+                    "broker_reference": local_position.broker_reference,
+                    "correction": "closed_local_position",
                 },
             )
             runtime_engine = runtime_manager.get_engine(local_position.strategy_name, local_position.instrument)
@@ -158,8 +233,30 @@ class ReconciliationService:
                     current_position_broker_reference=None,
                 )
 
-        logger.info(
+        changed_count = adopted_count + corrected_count + unmatched_local_count
+        log_level = logger.info if changed_count else logger.debug
+        log_level(
             "Broker reconciliation complete",
-            extra={"remote_positions": len(remote_positions), "local_positions": len(local_positions)},
+            extra={
+                "remote_positions": len(remote_positions),
+                "local_positions": len(local_positions),
+                "adopted_positions": adopted_count,
+                "corrected_positions": corrected_count,
+                "closed_unmatched_local_positions": unmatched_local_count,
+            },
         )
         return self.trade_service.list_positions()
+
+    @staticmethod
+    def _position_needs_reconciliation(local_position: Position | None, remote_position: Position) -> bool:
+        if local_position is None:
+            return True
+        return any(
+            (
+                local_position.broker_reference != remote_position.broker_reference,
+                local_position.direction != remote_position.direction,
+                float(local_position.size) != float(remote_position.size),
+                float(local_position.open_price) != float(remote_position.open_price),
+                local_position.broker_sync_status != "CONFIRMED",
+            )
+        )

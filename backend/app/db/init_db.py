@@ -1,6 +1,7 @@
 from sqlalchemy import text
 from sqlmodel import SQLModel
 
+from app.models.domain_event import DomainEvent
 from app.models.review import GeneratedReviewRecord
 from app.db.session import engine
 from app.models.runtime import StrategyRuntimeState
@@ -8,7 +9,7 @@ from app.models.trade import Execution, Position, ReconciliationEvent, Trade
 
 
 def initialize_database() -> None:
-    _ = (Trade, Position, StrategyRuntimeState, ReconciliationEvent, Execution, GeneratedReviewRecord)
+    _ = (Trade, Position, StrategyRuntimeState, ReconciliationEvent, Execution, GeneratedReviewRecord, DomainEvent)
     SQLModel.metadata.create_all(engine)
     _ensure_sqlite_column("position", "broker_reference", "VARCHAR")
     _ensure_sqlite_column("position", "broker_sync_status", "VARCHAR DEFAULT 'PENDING'")
@@ -58,6 +59,36 @@ def initialize_database() -> None:
     _ensure_sqlite_column("generatedreviewrecord", "model", "VARCHAR")
     _ensure_sqlite_column("generatedreviewrecord", "raw_model_response", "TEXT")
     _ensure_sqlite_column("generatedreviewrecord", "generation_mode", "VARCHAR DEFAULT 'deterministic_only'")
+    _ensure_index(
+        "ix_domain_events_created_at_desc",
+        "domain_events",
+        "created_at DESC",
+    )
+    _ensure_index(
+        "ix_domain_events_category_created_at",
+        "domain_events",
+        "category, created_at DESC",
+    )
+    _ensure_index(
+        "ix_domain_events_strategy_created_at",
+        "domain_events",
+        "strategy_name, created_at DESC",
+    )
+    _ensure_index(
+        "ix_domain_events_instrument_created_at",
+        "domain_events",
+        "instrument, created_at DESC",
+    )
+    _ensure_index(
+        "ix_domain_events_severity_created_at",
+        "domain_events",
+        "severity, created_at DESC",
+    )
+    _ensure_index(
+        "ix_domain_events_correlation_created_at",
+        "domain_events",
+        "correlation_id, created_at DESC",
+    )
 
 
 def _ensure_sqlite_column(table_name: str, column_name: str, column_sql: str) -> None:
@@ -69,3 +100,8 @@ def _ensure_sqlite_column(table_name: str, column_name: str, column_sql: str) ->
         if column_name in existing_columns:
             return
         connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"))
+
+
+def _ensure_index(index_name: str, table_name: str, columns_sql: str) -> None:
+    with engine.begin() as connection:
+        connection.execute(text(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({columns_sql})"))

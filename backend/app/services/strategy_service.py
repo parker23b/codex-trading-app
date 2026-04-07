@@ -13,6 +13,7 @@ from app.core.instrument_catalog import list_instruments
 from app.core.runtime import runtime_manager
 from app.models.trade import Execution, ExecutionPhase, ExecutionStatus, Position, Trade, clone_position, utc_now
 from app.strategies.registry import strategy_registry
+from app.services.domain_event_service import domain_event_service
 from app.services.portfolio_risk_service import PortfolioRiskService
 from app.services.runtime_state_service import RuntimeStateService
 from app.services.trade_service import TradeService
@@ -39,6 +40,7 @@ class StrategyService:
     def __init__(self, session: Session | None = None):
         self.session = session
         self.settings = get_settings()
+        self.event_service = domain_event_service
         self.risk_service = PortfolioRiskService(session)
         self.runtime_state_service = RuntimeStateService(session) if session is not None else None
 
@@ -195,12 +197,37 @@ class StrategyService:
                 last_price_seen_at=runtime_manager.get_last_price_updated_at(instrument),
                 current_position=engine.current_position,
             )
+        self.event_service.record_event(
+            event_type="strategy.runtime_started",
+            category="strategy",
+            severity="info",
+            source="strategy_service.start_strategy",
+            title="Strategy runtime started",
+            message=f"{strategy_name} started on {instrument}.",
+            runtime_id=engine.runtime_id,
+            strategy_name=strategy_name,
+            instrument=instrument,
+            payload_json={"status": "RUNNING"},
+        )
 
     def stop_strategy(self, instrument: str | None = None, strategy_name: str | None = None) -> None:
         stopped_engines = runtime_manager.stop(instrument=instrument, strategy_name=strategy_name)
         if self.runtime_state_service is not None:
             for engine in stopped_engines:
                 self.runtime_state_service.mark_stopped(engine.runtime_id)
+        for engine in stopped_engines:
+            self.event_service.record_event(
+                event_type="strategy.runtime_stopped",
+                category="strategy",
+                severity="info",
+                source="strategy_service.stop_strategy",
+                title="Strategy runtime stopped",
+                message=f"{engine.strategy.name} stopped on {engine.instrument}.",
+                runtime_id=engine.runtime_id,
+                strategy_name=engine.strategy.name,
+                instrument=engine.instrument,
+                payload_json={"status": "STOPPED"},
+            )
 
     def process_price_update(
         self,
@@ -277,6 +304,26 @@ class StrategyService:
                 )
                 if not should_submit:
                     continue
+                self.event_service.record_event(
+                    event_type="strategy.entry_candidate",
+                    category="strategy",
+                    severity="info",
+                    source="strategy_service.process_price_update",
+                    title="Strategy produced entry candidate",
+                    message=f"{signal.strategy_name} proposed an entry on {signal.instrument}.",
+                    correlation_id=execution.client_request_id,
+                    strategy_name=signal.strategy_name,
+                    instrument=signal.instrument,
+                    execution_id=execution.id,
+                    payload_json={
+                        "direction": signal.direction.value,
+                        "observed_price": signal.observed_price,
+                        "size": signal.size,
+                        "market_status": signal.market_status,
+                        "tradable": signal.tradable,
+                    },
+                    created_at=signal.signal_at,
+                )
                 signal.risk_percent = metadata.risk_per_trade if metadata else 0.0
                 signal = self.risk_service.assess_entry(
                     signal,
@@ -420,6 +467,26 @@ class StrategyService:
                 )
                 if not should_submit:
                     continue
+                self.event_service.record_event(
+                    event_type="strategy.exit_candidate",
+                    category="strategy",
+                    severity="info",
+                    source="strategy_service.process_price_update",
+                    title="Strategy produced exit candidate",
+                    message=f"{signal.strategy_name} proposed an exit on {signal.instrument}.",
+                    correlation_id=execution.client_request_id,
+                    strategy_name=signal.strategy_name,
+                    instrument=signal.instrument,
+                    position_id=signal.position.id if signal.position is not None else None,
+                    execution_id=execution.id,
+                    payload_json={
+                        "observed_price": signal.observed_price,
+                        "market_status": signal.market_status,
+                        "tradable": signal.tradable,
+                        "broker_reference": signal.position.broker_reference if signal.position is not None else None,
+                    },
+                    created_at=signal.signal_at,
+                )
                 try:
                     trade = self._execute_exit_signal(
                         engine=engine,
@@ -735,6 +802,20 @@ class StrategyService:
                 "last_duplicate_status": reusable_execution.status,
             }
             if phase == ExecutionPhase.CLOSE.value and reusable_execution.status not in cls.SAFE_CLOSE_RETRY_STATUSES:
+                domain_event_service.record_event(
+                    event_type="execution.retry_suppressed",
+                    category="execution",
+                    severity="warning",
+                    source="strategy_service.prepare_execution",
+                    title="Duplicate close retry suppressed",
+                    message="A duplicate close request was blocked because the prior close may already have reached the broker.",
+                    correlation_id=reusable_execution.client_request_id,
+                    strategy_name=strategy_name,
+                    instrument=instrument,
+                    position_id=local_position_id,
+                    execution_id=reusable_execution.id,
+                    payload_json=duplicate_details,
+                )
                 return (
                     trade_service.transition_execution(
                         reusable_execution,

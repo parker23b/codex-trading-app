@@ -1,6 +1,7 @@
 import {
   BrokerAuthStatus,
   DashboardSnapshot,
+  DomainEvent,
   Execution,
   MarketCategory,
   MarketCategoryOverviewResponse,
@@ -104,6 +105,49 @@ export async function getBrokerAuthStatus(): Promise<BrokerAuthStatus> {
 
 export async function getStreamHealth(): Promise<StreamHealthStatus> {
   return request<StreamHealthStatus>("/health/stream");
+}
+
+export async function getDomainEvents(params?: {
+  limit?: number;
+  eventType?: string;
+  category?: string;
+  severity?: string;
+  strategyName?: string;
+  instrument?: string;
+  correlationId?: string;
+  since?: string;
+  until?: string;
+}): Promise<DomainEvent[]> {
+  const query = new URLSearchParams();
+  if (params?.limit) {
+    query.set("limit", String(params.limit));
+  }
+  if (params?.eventType) {
+    query.set("event_type", params.eventType);
+  }
+  if (params?.category) {
+    query.set("category", params.category);
+  }
+  if (params?.severity) {
+    query.set("severity", params.severity);
+  }
+  if (params?.strategyName) {
+    query.set("strategy_name", params.strategyName);
+  }
+  if (params?.instrument) {
+    query.set("instrument", params.instrument);
+  }
+  if (params?.correlationId) {
+    query.set("correlation_id", params.correlationId);
+  }
+  if (params?.since) {
+    query.set("since", params.since);
+  }
+  if (params?.until) {
+    query.set("until", params.until);
+  }
+  const suffix = query.toString();
+  return request<DomainEvent[]>(`/events${suffix ? `?${suffix}` : ""}`);
 }
 
 export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {

@@ -150,6 +150,27 @@ export type StreamHealthStatus = {
   last_error?: string | null;
 };
 
+export type DomainEvent = {
+  id: number;
+  created_at: string;
+  event_type: string;
+  category: "strategy" | "risk" | "execution" | "reconciliation" | "operator" | "health";
+  severity: "info" | "warning" | "error";
+  source: string;
+  correlation_id?: string | null;
+  runtime_id?: string | null;
+  strategy_name?: string | null;
+  instrument?: string | null;
+  position_id?: number | null;
+  trade_id?: number | null;
+  execution_id?: number | null;
+  actor_type?: string | null;
+  actor_id?: string | null;
+  title: string;
+  message?: string | null;
+  payload_json: Record<string, unknown>;
+};
+
 export type DashboardSnapshot = {
   accountValue: number;
   accountValuePercent: number;

@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
+from app.core.runtime import runtime_manager
 from app.db.session import get_session
+from app.services.domain_event_service import domain_event_service
 from app.services.broker_service import BrokerService
 from app.services.strategy_service import StrategyService
 
@@ -46,6 +48,20 @@ def start_strategy(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+    engine = runtime_manager.get_engine(payload.strategy_name, payload.instrument)
+    domain_event_service.record_event(
+        event_type="operator.runtime_started",
+        category="operator",
+        severity="info",
+        source="api.strategy.start",
+        title="Operator started strategy runtime",
+        message=f"Operator started {payload.strategy_name} on {payload.instrument}.",
+        runtime_id=engine.runtime_id if engine is not None else None,
+        strategy_name=payload.strategy_name,
+        instrument=payload.instrument,
+        actor_type="operator",
+        actor_id="api",
+    )
 
     return {"status": "started"}
 
@@ -65,6 +81,19 @@ def stop_strategy(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
+    domain_event_service.record_event(
+        event_type="operator.runtime_stopped",
+        category="operator",
+        severity="info",
+        source="api.strategy.stop",
+        title="Operator stopped strategy runtime",
+        message="Operator stopped one or more strategy runtimes.",
+        strategy_name=payload.strategy_name,
+        instrument=payload.instrument,
+        actor_type="operator",
+        actor_id="api",
+        payload_json={"strategy_name": payload.strategy_name, "instrument": payload.instrument},
+    )
 
     return {"status": "stopped"}
 
@@ -85,6 +114,20 @@ def start_strategy_by_name(
         service.start_strategy(strategy_name=name, instrument=instrument)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    engine = runtime_manager.get_engine(name, instrument)
+    domain_event_service.record_event(
+        event_type="operator.runtime_started",
+        category="operator",
+        severity="info",
+        source="api.strategies.start_by_name",
+        title="Operator started strategy runtime",
+        message=f"Operator started {name} on {instrument}.",
+        runtime_id=engine.runtime_id if engine is not None else None,
+        strategy_name=name,
+        instrument=instrument,
+        actor_type="operator",
+        actor_id="api",
+    )
     return StrategyControlResponse(status="started", strategy=name, instrument=instrument)
 
 
@@ -104,4 +147,16 @@ def stop_strategy_by_name(
         service.stop_strategy(strategy_name=name)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    domain_event_service.record_event(
+        event_type="operator.runtime_stopped",
+        category="operator",
+        severity="info",
+        source="api.strategies.stop_by_name",
+        title="Operator stopped strategy runtime",
+        message=f"Operator stopped {name} on {instrument}.",
+        strategy_name=name,
+        instrument=instrument,
+        actor_type="operator",
+        actor_id="api",
+    )
     return StrategyControlResponse(status="stopped", strategy=name, instrument=instrument)
