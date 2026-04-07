@@ -369,3 +369,19 @@ export type OperatorSummaryReview = {
     raw_response?: string | null;
   } | null;
 };
+
+export type ReviewHistoryItem = {
+  review_id: number;
+  review_type:
+    | "operator_summary"
+    | "daily_review"
+    | "strategy_review"
+    | "runtime_health_review"
+    | "trade_postmortem"
+    | "operational_question";
+  generated_at: string;
+  scope: Record<string, unknown>;
+  generation_mode: "deterministic_only" | "deterministic_plus_llm";
+  provider?: string | null;
+  model?: string | null;
+};

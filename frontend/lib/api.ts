@@ -6,6 +6,7 @@ import {
   MarketCategoryOverviewResponse,
   OperatorSummaryReview,
   Position,
+  ReviewHistoryItem,
   StrategyDefinition,
   StreamHealthStatus,
   Trade,
@@ -141,6 +142,17 @@ export async function stopStrategy(params: { instrument?: string; strategyName?:
 
 export async function getOperatorSummaryReview(): Promise<OperatorSummaryReview> {
   return request<OperatorSummaryReview>("/reviews/operator-summary", {
+    timeoutMs: 3000,
+  });
+}
+
+export async function getReviewHistory(reviewType?: string, limit = 8): Promise<ReviewHistoryItem[]> {
+  const query = new URLSearchParams();
+  if (reviewType) {
+    query.set("review_type", reviewType);
+  }
+  query.set("limit", String(limit));
+  return request<ReviewHistoryItem[]>(`/reviews/history?${query.toString()}`, {
     timeoutMs: 3000,
   });
 }

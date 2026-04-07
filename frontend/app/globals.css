@@ -299,6 +299,61 @@ p {
   gap: 24px;
 }
 
+.reviewer-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.9fr);
+  gap: 24px;
+  align-items: stretch;
+}
+
+.reviewer-hero__copy,
+.reviewer-hero__stats {
+  border: 1px solid var(--glassBorder);
+  background: var(--glass);
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: 0 12px 40px var(--shadow);
+  backdrop-filter: blur(10px);
+}
+
+.reviewer-hero__copy h2 {
+  margin-bottom: 10px;
+  font-size: clamp(1.5rem, 2.6vw, 2.3rem);
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+}
+
+.reviewer-hero__stats {
+  display: grid;
+  gap: 12px;
+}
+
+.reviewer-hero__stat {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--background) 88%, white 12%);
+  box-shadow: inset 0 0 0 1px var(--glassBorder);
+}
+
+.reviewer-hero__stat strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 1.2rem;
+  letter-spacing: -0.03em;
+}
+
+.reviewer-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.8fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.reviewer-layout__main,
+.reviewer-layout__rail {
+  min-width: 0;
+}
+
 .top-command-bar {
   display: grid;
   grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
@@ -483,6 +538,33 @@ p {
 
 .reviewer-page .review-metrics-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.review-history-list {
+  display: grid;
+  gap: 10px;
+}
+
+.review-history-item {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--background) 88%, white 12%);
+  box-shadow: inset 0 0 0 1px var(--glassBorder);
+}
+
+.review-history-item__top,
+.review-history-item__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.review-history-item__meta {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
 }
 
 .review-panel__label {
