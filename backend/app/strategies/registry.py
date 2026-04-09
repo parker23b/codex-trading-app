@@ -67,8 +67,8 @@ strategy_registry.register(
         risk_per_trade=0.8,
         parameters=(
             StrategyParameterDefinition(key="window", label="Window", value=20, step=1),
-            StrategyParameterDefinition(key="entry_threshold", label="Entry Threshold", value=1.2, step=0.1),
-            StrategyParameterDefinition(key="exit_threshold", label="Exit Threshold", value=0.3, step=0.1),
+            StrategyParameterDefinition(key="entry_threshold", label="Entry Threshold", value=0.0015, step=0.0001),
+            StrategyParameterDefinition(key="exit_threshold", label="Exit Threshold", value=0.0004, step=0.0001),
         ),
     ),
     factory=MeanReversionStrategy,

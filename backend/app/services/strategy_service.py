@@ -1117,7 +1117,7 @@ class StrategyService:
                 "price": streamed_price,
                 "status": "LIVE",
                 "error": None,
-                "updated_at": get_ig_streaming_service().get_health().last_tick_at,
+                "updated_at": get_ig_streaming_service().get_last_tick_at(instrument),
             }
 
         last_price = runtime_manager.get_last_price(instrument)

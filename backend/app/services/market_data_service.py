@@ -31,6 +31,8 @@ class MarketDataService:
         self.health_service = get_health_service()
         self._fallback_active_instruments: set[str] = set()
         self._stale_stream_instruments: set[str] = set()
+        self._fallback_reason_first_seen_at: dict[str, datetime] = {}
+        self._healthy_first_seen_at: dict[str, datetime] = {}
 
     async def run(self) -> None:
         logger.info(
@@ -109,12 +111,16 @@ class MarketDataService:
             return "stream_unavailable"
         if instrument not in health.subscribed_instruments:
             return "instrument_not_subscribed"
-        if health.last_tick_at is None:
+        last_tick_at = stream_service.get_last_tick_at(instrument)
+        if last_tick_at is None:
             self.health_service.set_stream_connected(False)
             return "no_ticks_seen"
 
-        seconds_since_last_tick = (datetime.now(UTC) - health.last_tick_at.astimezone(UTC)).total_seconds()
-        stale_after_seconds = max(self.settings.market_data_poll_interval_seconds * 2, 5.0)
+        seconds_since_last_tick = (self._now() - last_tick_at.astimezone(UTC)).total_seconds()
+        stale_after_seconds = max(
+            self.settings.market_data_poll_interval_seconds * 3,
+            self.settings.ig_streaming_stale_after_seconds,
+        )
         if seconds_since_last_tick > stale_after_seconds:
             self.health_service.set_stream_connected(False)
             return "stale_stream"
@@ -128,13 +134,34 @@ class MarketDataService:
         stream_service = get_ig_streaming_service()
         health = stream_service.get_health()
         reason = self._polling_fallback_reason(instrument)
+        now = self._now()
+        instrument_last_tick_at = stream_service.get_last_tick_at(instrument)
         payload = {
             "reason": reason,
             "stream_enabled": health.enabled,
             "stream_connected": health.connected,
             "subscribed_instruments": list(health.subscribed_instruments),
             "last_tick_at": health.last_tick_at.isoformat() if health.last_tick_at is not None else None,
+            "instrument_last_tick_at": (
+                instrument_last_tick_at.isoformat() if instrument_last_tick_at is not None else None
+            ),
         }
+        debounce_window = self.settings.ig_streaming_transition_debounce_seconds
+
+        if reason is not None:
+            self._healthy_first_seen_at.pop(instrument, None)
+            first_seen_at = self._fallback_reason_first_seen_at.setdefault(instrument, now)
+            if (now - first_seen_at).total_seconds() < debounce_window:
+                return
+        else:
+            self._fallback_reason_first_seen_at.pop(instrument, None)
+            if instrument in self._fallback_active_instruments or instrument in self._stale_stream_instruments:
+                healthy_since = self._healthy_first_seen_at.setdefault(instrument, now)
+                if (now - healthy_since).total_seconds() < debounce_window:
+                    return
+            else:
+                self._healthy_first_seen_at.pop(instrument, None)
+
         if reason is not None and instrument not in self._fallback_active_instruments:
             self._fallback_active_instruments.add(instrument)
             domain_event_service.record_event(
@@ -149,6 +176,7 @@ class MarketDataService:
             )
         if reason is None and instrument in self._fallback_active_instruments:
             self._fallback_active_instruments.remove(instrument)
+            self._healthy_first_seen_at.pop(instrument, None)
             domain_event_service.record_event(
                 event_type="health.polling_fallback_stopped",
                 category="health",
@@ -173,6 +201,7 @@ class MarketDataService:
             )
         if reason != "stale_stream" and instrument in self._stale_stream_instruments:
             self._stale_stream_instruments.remove(instrument)
+            self._healthy_first_seen_at.pop(instrument, None)
             domain_event_service.record_event(
                 event_type="health.stream_recovered",
                 category="health",
@@ -183,6 +212,10 @@ class MarketDataService:
                 instrument=instrument,
                 payload_json=payload,
             )
+
+    @staticmethod
+    def _now() -> datetime:
+        return datetime.now(UTC)
 
     @staticmethod
     def _select_price(instrument: str, details: BrokerMarketDetails) -> float:

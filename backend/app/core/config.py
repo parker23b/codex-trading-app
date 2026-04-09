@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     ig_trading_enabled: bool = False
     ig_streaming_enabled: bool = True
     ig_streaming_watch_interval_seconds: float = 1.0
+    ig_streaming_stale_after_seconds: float = 20.0
+    ig_streaming_transition_debounce_seconds: float = 10.0
     ig_market_cache_ttl_seconds: float = 30.0
     ig_market_cache_stale_ttl_seconds: float = 300.0
     ig_verify_ssl: bool = True
@@ -100,7 +102,12 @@ class Settings(BaseSettings):
             raise ValueError("BROKER_PROVIDER must currently be IG.")
         return normalized
 
-    @field_validator("market_data_poll_interval_seconds", "ig_streaming_watch_interval_seconds")
+    @field_validator(
+        "market_data_poll_interval_seconds",
+        "ig_streaming_watch_interval_seconds",
+        "ig_streaming_stale_after_seconds",
+        "ig_streaming_transition_debounce_seconds",
+    )
     @classmethod
     def validate_positive_poll_intervals(cls, value: float) -> float:
         if value <= 0:

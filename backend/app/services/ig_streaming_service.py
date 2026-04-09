@@ -57,6 +57,7 @@ class StreamHealthState:
     connected: bool = False
     subscribed_instruments: tuple[str, ...] = ()
     last_tick_at: datetime | None = None
+    last_tick_at_by_instrument: dict[str, datetime] | None = None
     last_status: str | None = None
     last_error: str | None = None
     dependency_ready: bool = False
@@ -170,6 +171,7 @@ class IGStreamingService:
         self._credentials: IGStreamingCredentials | None = None
         self._subscribed_instruments: tuple[str, ...] = ()
         self._latest_prices: dict[str, float] = {}
+        self._last_tick_at_by_instrument: dict[str, datetime] = {}
         self._missing_dependency_logged = False
         self._health = StreamHealthState()
 
@@ -201,6 +203,7 @@ class IGStreamingService:
             connected=self._health.connected,
             subscribed_instruments=self._health.subscribed_instruments,
             last_tick_at=self._health.last_tick_at,
+            last_tick_at_by_instrument=dict(self._last_tick_at_by_instrument),
             last_status=self._health.last_status,
             last_error=self._health.last_error,
             dependency_ready=self._health.dependency_ready,
@@ -208,6 +211,9 @@ class IGStreamingService:
 
     def get_last_price(self, instrument: str) -> float | None:
         return self._latest_prices.get(instrument)
+
+    def get_last_tick_at(self, instrument: str) -> datetime | None:
+        return self._last_tick_at_by_instrument.get(instrument)
 
     async def run(self) -> None:
         self._loop = asyncio.get_running_loop()
@@ -246,9 +252,11 @@ class IGStreamingService:
         if self._loop is None:
             return
         self._latest_prices[update.instrument] = update.price
-        self._health.last_tick_at = datetime.now(UTC)
+        tick_time = datetime.now(UTC)
+        self._health.last_tick_at = tick_time
+        self._last_tick_at_by_instrument[update.instrument] = tick_time
         self._health.last_error = None
-        get_health_service().record_price_update(when=self._health.last_tick_at, stream_connected=True)
+        get_health_service().record_price_update(when=tick_time, stream_connected=True)
         self._loop.call_soon_threadsafe(self._queue.put_nowait, update)
 
     async def _reconcile_subscription(self) -> None:
@@ -346,6 +354,11 @@ class IGStreamingService:
         self._market_subscription = market_subscription
         self._market_subscription_listener = market_listener
         self._subscribed_instruments = instruments
+        self._last_tick_at_by_instrument = {
+            instrument: tick_at
+            for instrument, tick_at in self._last_tick_at_by_instrument.items()
+            if instrument in instruments
+        }
         self._health.subscribed_instruments = instruments
         logger.info("IG Lightstreamer subscriptions requested", extra={"instruments": list(instruments)})
 
@@ -365,6 +378,7 @@ class IGStreamingService:
         self._market_subscription = None
         self._market_subscription_listener = None
         self._subscribed_instruments = ()
+        self._last_tick_at_by_instrument = {}
         self._health.subscribed_instruments = ()
 
     def _teardown_client(self) -> None:

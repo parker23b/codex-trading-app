@@ -26,6 +26,7 @@ class StreamHealthResponse(BaseModel):
     dependency_ready: bool
     subscribed_instruments: list[str]
     last_tick_at: datetime | None
+    last_tick_at_by_instrument: dict[str, datetime]
     last_status: str | None
     last_error: str | None
 
@@ -39,6 +40,7 @@ def stream_health_check() -> StreamHealthResponse:
         dependency_ready=health.dependency_ready,
         subscribed_instruments=list(health.subscribed_instruments),
         last_tick_at=health.last_tick_at,
+        last_tick_at_by_instrument=health.last_tick_at_by_instrument or {},
         last_status=health.last_status,
         last_error=health.last_error,
     )

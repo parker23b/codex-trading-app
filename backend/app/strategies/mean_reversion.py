@@ -10,7 +10,7 @@ from app.strategies.base import PriceUpdate, Strategy
 class MeanReversionStrategy(Strategy):
     name = "mean_reversion"
 
-    def __init__(self, window_size: int = 20, entry_threshold: float = 0.01, exit_threshold: float = 0.002):
+    def __init__(self, window_size: int = 20, entry_threshold: float = 0.0015, exit_threshold: float = 0.0004):
         self.window_size = window_size
         self.entry_threshold = entry_threshold
         self.exit_threshold = exit_threshold
