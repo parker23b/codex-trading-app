@@ -2,11 +2,9 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 
-import { InstrumentsTable } from "@/components/markets/instruments-table";
-import { MarketSelector } from "@/components/markets/market-selector";
-import { MarketStatusCard } from "@/components/markets/market-status-card";
-import { Card } from "@/components/ui/card";
+import { CompactTable, Panel, SplitPanel, StatusPill, StickyToolbar } from "@/components/console/primitives";
 import { getMarketOverview } from "@/lib/api";
+import { formatSignedPercent } from "@/lib/format";
 import { MarketCategory, MarketCategoryOverviewResponse, MarketSummary } from "@/lib/types";
 
 type MarketOverviewDashboardProps = {
@@ -23,11 +21,11 @@ const MARKET_LABELS: Record<MarketCategory, string> = {
   crypto: "Crypto",
 };
 const MARKET_DESCRIPTIONS: Record<MarketCategory, string> = {
-  forex: "Global currency pairs with session-aware strategy routing.",
-  indices: "Major benchmark contracts where directional and mean-reversion systems run.",
-  commodities: "Metals and energy products with tighter session maintenance windows.",
-  stocks: "Cash equities focused on the primary U.S. session.",
-  crypto: "Always-on digital assets with hourly risk throttles.",
+  forex: "Session-aware currency routing.",
+  indices: "Benchmark contracts and venue state.",
+  commodities: "Metals and energy venue windows.",
+  stocks: "Primary cash-equity session coverage.",
+  crypto: "Always-on assets with tighter guardrails.",
 };
 
 function formatCountdown(targetIso: string) {
@@ -38,35 +36,40 @@ function formatCountdown(targetIso: string) {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
+function buildPlaceholderSummary(category: MarketCategory): MarketSummary {
+  return {
+    category,
+    label: MARKET_LABELS[category],
+    description: MARKET_DESCRIPTIONS[category],
+    status: "LIMITED",
+    headline: "Load on demand",
+    detail: "This market snapshot will load when selected.",
+    nextTransitionAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    nextTransitionLabel: "Refreshes",
+    tradableCount: 0,
+    activeCount: 0,
+    totalCount: 0,
+  };
+}
+
 export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashboardProps) {
   const [selectedCategory, setSelectedCategory] = useState<MarketCategory>("forex");
+  const [selectedInstrumentId, setSelectedInstrumentId] = useState<string>(initialOverview.instruments[0]?.id ?? "");
   const [search, setSearch] = useState("");
   const [showTradableOnly, setShowTradableOnly] = useState(false);
   const [showActiveOnly, setShowActiveOnly] = useState(false);
   const [starredIds, setStarredIds] = useState<string[]>([]);
-  const [now, setNow] = useState(() => Date.now());
   const [isPending, startTransition] = useTransition();
   const [loadedMarkets, setLoadedMarkets] = useState<Partial<Record<MarketCategory, MarketCategoryOverviewResponse>>>({
     forex: initialOverview,
   });
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const refreshSelectedMarket = async () => {
-    try {
-      const overview = await getMarketOverview(selectedCategory);
-      setLoadedMarkets((current) => ({ ...current, [selectedCategory]: overview }));
-      setLoadError(null);
-    } catch (error: unknown) {
-      setLoadError(error instanceof Error ? error.message : "Failed to refresh market data.");
-    }
-  };
-
   useEffect(() => {
     const stored = window.localStorage.getItem(WATCHLIST_STORAGE_KEY);
     if (stored) {
       try {
-        const parsed = JSON.parse(stored) as string[];
-        setStarredIds(parsed);
+        setStarredIds(JSON.parse(stored) as string[]);
       } catch {
         window.localStorage.removeItem(WATCHLIST_STORAGE_KEY);
       }
@@ -76,11 +79,6 @@ export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashb
   useEffect(() => {
     window.localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(starredIds));
   }, [starredIds]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     if (loadedMarkets[selectedCategory]) {
@@ -125,10 +123,8 @@ export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashb
         );
       })
       .sort((left, right) => {
-        // Watchlist items stay pinned first so repeat-check instruments are always visible without extra filtering.
         const leftStarred = starredIds.includes(left.id) ? 1 : 0;
         const rightStarred = starredIds.includes(right.id) ? 1 : 0;
-
         if (leftStarred !== rightStarred) {
           return rightStarred - leftStarred;
         }
@@ -139,134 +135,200 @@ export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashb
       });
   }, [search, selectedMarket?.instruments, showActiveOnly, showTradableOnly, starredIds]);
 
-  const handleToggleStar = (instrumentId: string) => {
+  useEffect(() => {
+    if (filteredInstruments.some((instrument) => instrument.id === selectedInstrumentId)) {
+      return;
+    }
+    setSelectedInstrumentId(filteredInstruments[0]?.id ?? "");
+  }, [filteredInstruments, selectedInstrumentId]);
+
+  const selectedInstrument = filteredInstruments.find((instrument) => instrument.id === selectedInstrumentId) ?? null;
+
+  const refreshSelectedMarket = async () => {
+    try {
+      const overview = await getMarketOverview(selectedCategory);
+      setLoadedMarkets((current) => ({ ...current, [selectedCategory]: overview }));
+      setLoadError(null);
+    } catch (error: unknown) {
+      setLoadError(error instanceof Error ? error.message : "Failed to refresh market data.");
+    }
+  };
+
+  const toggleStar = (instrumentId: string) => {
     setStarredIds((current) =>
       current.includes(instrumentId) ? current.filter((id) => id !== instrumentId) : [...current, instrumentId],
     );
   };
 
-  const countdownLabel = selectedSummary
-    ? `${selectedSummary.nextTransitionLabel} in ${formatCountdown(selectedSummary.nextTransitionAt)}`
-    : "Awaiting session data";
+  const selectedInstrumentTone = !selectedInstrument
+    ? "inactive"
+    : !selectedInstrument.tradable
+      ? "negative"
+      : selectedInstrument.status !== "OPEN"
+        ? "warning"
+        : "positive";
 
   return (
-    <main className="dashboard-layout">
-      <section className="page-grid">
-        <Card
-          title="Investigate Market State"
-          subtitle="Inspect deployability, venue restrictions, and strategy fit on demand so market checks stay useful without aggressive IG polling."
-          action={<MarketSelector categories={MARKET_CATEGORIES} selectedCategory={selectedCategory} onSelect={setSelectedCategory} />}
-        >
-          {/* The strip gives an at-a-glance scan across categories before the operator commits to one table view. */}
-          <div className="markets-summary-strip">
-            {summaries.map((summary) => (
-              <button
-                type="button"
-                key={summary.category}
-                className={`market-chip ${summary.category === selectedCategory ? "is-active" : ""}`.trim()}
-                onClick={() => setSelectedCategory(summary.category)}
-              >
-                <span>{summary.label}</span>
-                <strong>{loadedMarkets[summary.category] ? `${summary.tradableCount} tradable` : "Load on demand"}</strong>
-              </button>
-            ))}
-          </div>
-        </Card>
-      </section>
-
-      {selectedSummary ? (
-        <section className="hero-grid market-hero-grid">
-          <div className="hero-grid__main">
-            <MarketStatusCard summary={selectedSummary} countdownLabel={countdownLabel} />
-          </div>
-          <div className="hero-grid__side">
-            <Card
-              title="Investigation Controls"
-              subtitle="Load one market slice at a time, filter the rows, and refresh only when you need a newer snapshot."
-              className="card--compact"
+    <main className="console-page">
+      <StickyToolbar>
+        <div className="toolbar-group">
+          {summaries.map((summary) => (
+            <button
+              key={summary.category}
+              type="button"
+              className={`console-chip${summary.category === selectedCategory ? " is-active" : ""}`}
+              onClick={() => setSelectedCategory(summary.category)}
             >
-              <div className="markets-controls">
-                <label className="markets-search">
-                  <span className="eyebrow">Search</span>
-                  <input
-                    type="search"
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder={`Search ${selectedSummary.label.toLowerCase()} instruments or strategies`}
-                  />
-                </label>
-                <label className="markets-toggle">
-                  <input
-                    type="checkbox"
-                    checked={showTradableOnly}
-                    onChange={() => setShowTradableOnly((current) => !current)}
-                  />
-                  <span>Show tradable only</span>
-                </label>
-                <label className="markets-toggle">
-                  <input
-                    type="checkbox"
-                    checked={showActiveOnly}
-                    onChange={() => setShowActiveOnly((current) => !current)}
-                  />
-                  <span>Show active only</span>
-                </label>
-                <button
-                  type="button"
-                  className="button secondary"
-                  disabled={isPending}
-                  onClick={() => {
-                    startTransition(() => {
-                      void refreshSelectedMarket();
-                    });
-                  }}
-                >
-                  Refresh Snapshot
-                </button>
-                <div className="status-note status-note--inline">
-                  Stars are local-only investigation pins. They do not write to the backend or affect autonomous routing.
-                </div>
-                {isPending && !selectedMarket ? <div className="status-note status-note--inline">Loading {selectedSummary.label} market data…</div> : null}
-                {loadError ? <div className="status-note status-note--inline">{loadError}</div> : null}
-              </div>
-            </Card>
-          </div>
-        </section>
-      ) : null}
+              {summary.label}
+            </button>
+          ))}
+        </div>
+        <div className="toolbar-group">
+          <input
+            type="search"
+            className="console-input"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search instruments or strategy fit"
+          />
+          <label className="console-toggle">
+            <input type="checkbox" checked={showTradableOnly} onChange={() => setShowTradableOnly((current) => !current)} />
+            Tradable
+          </label>
+          <label className="console-toggle">
+            <input type="checkbox" checked={showActiveOnly} onChange={() => setShowActiveOnly((current) => !current)} />
+            Active
+          </label>
+          <button
+            type="button"
+            className="console-button console-button--ghost"
+            disabled={isPending}
+            onClick={() => startTransition(() => void refreshSelectedMarket())}
+          >
+            Refresh
+          </button>
+        </div>
+      </StickyToolbar>
 
-      <section className="page-grid">
-        <Card
-          title={`${selectedSummary?.label ?? "Market"} Investigation List`}
-          subtitle="The table prioritizes deployability and relevance so blocked or marginal instruments can be explained quickly."
-          className="card--table"
-        >
-          {selectedMarket ? (
-            <InstrumentsTable instruments={filteredInstruments} starredIds={starredIds} onToggleStar={handleToggleStar} />
-          ) : (
-            <div className="empty-state">Loading {selectedSummary.label.toLowerCase()} instruments…</div>
-          )}
-          <div className="status-note">
-            Snapshot loaded from {new Date((selectedMarket ?? initialOverview).generatedAt).toLocaleString("en-GB")} and page clock updated at{" "}
-            {new Date(now).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}.
+      <SplitPanel
+        left={
+          <Panel title="Instrument List" priority="secondary" tone="neutral" compact>
+            <div className="list-panel">
+              {filteredInstruments.length ? (
+                filteredInstruments.map((instrument) => {
+                  const isActive = instrument.id === selectedInstrumentId;
+                  const tone = !instrument.tradable ? "negative" : instrument.status !== "OPEN" ? "warning" : "positive";
+                  return (
+                    <button
+                      key={instrument.id}
+                      type="button"
+                      className={`list-item${isActive ? " is-active" : ""}`}
+                      onClick={() => setSelectedInstrumentId(instrument.id)}
+                    >
+                      <div className="list-item__main">
+                        <strong>{instrument.name}</strong>
+                        <span>{instrument.symbol}</span>
+                      </div>
+                      <div className="list-item__meta">
+                        <StatusPill label={instrument.status.toLowerCase()} tone={tone} quiet />
+                        <span>{instrument.tradable ? "tradable" : "blocked"}</span>
+                      </div>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="console-empty">No instruments match the current filters.</div>
+              )}
+            </div>
+          </Panel>
+        }
+        center={
+          <Panel title="Selected Instrument" priority="primary" tone={selectedInstrumentTone}>
+            {selectedInstrument ? (
+              <div className="detail-stack">
+                <div className="summary-bar">
+                  <div className="summary-bar__item">
+                    <span>Venue</span>
+                    <strong>{selectedInstrument.status}</strong>
+                    <em>{selectedSummary.label}</em>
+                  </div>
+                  <div className="summary-bar__item">
+                    <span>Tradable</span>
+                    <strong>{selectedInstrument.tradable ? "Yes" : "No"}</strong>
+                    <em>{selectedInstrument.active ? "active" : "inactive"}</em>
+                  </div>
+                  <div className="summary-bar__item">
+                    <span>Next transition</span>
+                    <strong>{formatCountdown(selectedSummary.nextTransitionAt)}</strong>
+                    <em>{selectedSummary.nextTransitionLabel}</em>
+                  </div>
+                </div>
+
+                <CompactTable
+                  rows={[selectedInstrument]}
+                  emptyLabel="No instrument selected."
+                  columns={[
+                    { key: "instrument", header: "Instrument", render: (row) => `${row.name} (${row.symbol})` },
+                    {
+                      key: "state",
+                      header: "State",
+                      render: (row) => <StatusPill label={row.status.toLowerCase()} tone={!row.tradable ? "negative" : row.status !== "OPEN" ? "warning" : "positive"} />,
+                    },
+                    { key: "activity", header: "Activity", render: (row) => row.activityLevel },
+                    { key: "price", header: "Price", render: (row) => row.price.toFixed(4) },
+                    { key: "change", header: "Change", render: (row) => formatSignedPercent(row.changePercent, 2) },
+                  ]}
+                />
+
+                <Panel title="Strategy Fit" priority="secondary" tone="neutral" compact>
+                  <CompactTable
+                    dense
+                    rows={(selectedInstrument.strategyCompatibility ?? []).map((strategy) => ({ strategy }))}
+                    emptyLabel="No compatible strategies."
+                    columns={[{ key: "strategy", header: "Strategy", render: (row) => row.strategy }]}
+                  />
+                </Panel>
+              </div>
+            ) : (
+              <div className="console-empty">Select an instrument from the list.</div>
+            )}
+          </Panel>
+        }
+        right={
+          <div className="stack-layout">
+            <Panel title="Market State" priority="secondary" tone={selectedSummary.status === "OPEN" ? "positive" : selectedSummary.status === "LIMITED" ? "warning" : "inactive"} compact>
+              <div className="metric-stack">
+                <div className="metric-stack__row">
+                  <span>Status</span>
+                  <strong>{selectedSummary.status}</strong>
+                </div>
+                <div className="metric-stack__row">
+                  <span>Tradable</span>
+                  <strong>{selectedSummary.tradableCount}/{selectedSummary.totalCount}</strong>
+                </div>
+                <div className="metric-stack__row">
+                  <span>Active</span>
+                  <strong>{selectedSummary.activeCount}</strong>
+                </div>
+              </div>
+            </Panel>
+
+            <Panel title="Local Actions" priority="passive" tone="inactive" compact>
+              {selectedInstrument ? (
+                <div className="detail-stack">
+                  <StatusPill label={starredIds.includes(selectedInstrument.id) ? "pinned" : "not pinned"} tone={starredIds.includes(selectedInstrument.id) ? "positive" : "inactive"} />
+                  <button type="button" className="console-button console-button--ghost" onClick={() => toggleStar(selectedInstrument.id)}>
+                    {starredIds.includes(selectedInstrument.id) ? "Remove Pin" : "Pin Instrument"}
+                  </button>
+                  {loadError ? <div className="console-alert console-alert--warning">{loadError}</div> : null}
+                </div>
+              ) : (
+                <div className="console-empty">No instrument selected.</div>
+              )}
+            </Panel>
           </div>
-        </Card>
-      </section>
+        }
+      />
     </main>
   );
-}
-
-function buildPlaceholderSummary(category: MarketCategory): MarketSummary {
-  return {
-    category,
-    label: MARKET_LABELS[category],
-    description: MARKET_DESCRIPTIONS[category],
-    status: "LIMITED",
-    headline: "Load on demand",
-    detail: "This market will be fetched when selected.",
-    nextTransitionAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-    nextTransitionLabel: "Opens",
-    tradableCount: 0,
-    activeCount: 0,
-    totalCount: 0,
-  };
 }

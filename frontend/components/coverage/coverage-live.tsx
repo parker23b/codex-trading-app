@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { CoverageControlPanel } from "@/components/dashboard/coverage-control-panel";
-import { Card } from "@/components/ui/card";
+import { CompactTable, Panel, SplitPanel, StatusPill, StatusStrip } from "@/components/console/primitives";
 import { getCoverageSummary, getOperationalTelemetry, getSystemOperatingLimits } from "@/lib/api";
+import { formatRelativeDuration } from "@/lib/format";
 import { CoverageSummary, OperationalTelemetry, SystemOperatingLimits } from "@/lib/types";
 
 type CoverageLiveProps = {
@@ -14,7 +14,7 @@ type CoverageLiveProps = {
 };
 
 function formatAge(ms?: number | null) {
-  if (ms === null || ms === undefined) {
+  if (ms == null) {
     return "n/a";
   }
   if (ms < 1000) {
@@ -38,15 +38,18 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
     let cancelled = false;
     const refresh = async () => {
       try {
-        const [nextCoverage, nextTelemetry, nextOperatingLimits] = await Promise.all([getCoverageSummary(), getOperationalTelemetry(), getSystemOperatingLimits()]);
-        if (cancelled) {
-          return;
+        const [nextCoverage, nextTelemetry, nextOperatingLimits] = await Promise.all([
+          getCoverageSummary(),
+          getOperationalTelemetry(),
+          getSystemOperatingLimits(),
+        ]);
+        if (!cancelled) {
+          setCoverage(nextCoverage);
+          setTelemetry(nextTelemetry);
+          setOperatingLimits(nextOperatingLimits);
         }
-        setCoverage(nextCoverage);
-        setTelemetry(nextTelemetry);
-        setOperatingLimits(nextOperatingLimits);
       } catch {
-        // Keep the last successful snapshot visible if refresh fails.
+        // Keep last visible state.
       }
     };
     const intervalId = window.setInterval(refresh, 5000);
@@ -56,128 +59,161 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
     };
   }, []);
 
+  const blockedReadiness = coverage.streaming.execution_readiness.filter((row) => !row.is_ok);
+  const topRejectionReason = useMemo(
+    () => Object.entries(coverage.trade_allocator.reason_counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "n/a",
+    [coverage.trade_allocator.reason_counts],
+  );
+  const activeUniverseRows = coverage.streaming.active_instruments.slice().sort((a, b) => {
+    if (a.streamed !== b.streamed) {
+      return Number(b.streamed) - Number(a.streamed);
+    }
+    return a.instrument.localeCompare(b.instrument);
+  });
+
   return (
-    <main className="page-grid">
-      <CoverageControlPanel coverage={coverage} operatingLimits={operatingLimits} />
+    <main className="console-page">
+      <StatusStrip
+        items={[
+          {
+            label: "Tier 1 Live",
+            value: coverage.streaming.active_instruments.length,
+            tone: "positive",
+            emphasis: "strong",
+          },
+          {
+            label: "Readiness Blocked",
+            value: blockedReadiness.length,
+            tone: blockedReadiness.length ? "warning" : "positive",
+            emphasis: "strong",
+          },
+          {
+            label: "Promotions",
+            value: coverage.promotions.pending_count,
+            tone: coverage.promotions.pending_count ? "warning" : "neutral",
+            meta: "pending",
+          },
+          {
+            label: "Allocator",
+            value: coverage.trade_allocator.rejected_count,
+            tone: coverage.trade_allocator.rejected_count ? "warning" : "positive",
+            meta: "recent rejects",
+          },
+          {
+            label: "Telemetry",
+            value: telemetry.status,
+            tone: telemetry.status === "healthy" ? "positive" : "warning",
+          },
+        ]}
+      />
 
-      <section className="page-grid">
-        <Card title="Operating Limits" subtitle="Backend config that currently shapes promotion, risk, and execution decisions.">
-          <div className="summary-grid">
-            <div className="summary-grid__item">
-              <span className="eyebrow">Risk Budget</span>
-              <strong>{operatingLimits.risk.max_open_risk_percent.toFixed(1)}%</strong>
-            </div>
-            <div className="summary-grid__item">
-              <span className="eyebrow">Tier 1 Cap</span>
-              <strong>{operatingLimits.coverage.max_instruments}</strong>
-            </div>
-            <div className="summary-grid__item">
-              <span className="eyebrow">Quote Freshness</span>
-              <strong>{operatingLimits.execution.max_price_age_ms.toFixed(0)}ms</strong>
-            </div>
-            <div className="summary-grid__item">
-              <span className="eyebrow">Max Spread</span>
-              <strong>{operatingLimits.execution.max_spread_pips.toFixed(1)} pips</strong>
-            </div>
-          </div>
-          <div className="review-stack">
-            <div className="status-note status-note--inline">
-              Runtime policy: {operatingLimits.risk.max_open_positions} total positions, {operatingLimits.risk.max_positions_per_strategy} per strategy, daily loss guard at {operatingLimits.risk.daily_loss_limit.toFixed(0)}, kill switch {operatingLimits.risk.global_entry_kill_switch ? "on" : "off"}.
-            </div>
-            <div className="status-note status-note--inline">
-              Execution policy: allocator {operatingLimits.execution.allocator_enabled ? "enabled" : "disabled"}, {operatingLimits.execution.allocator_max_decisions_per_cycle} decisions per cycle, stale signal cutoff {operatingLimits.execution.allocator_signal_stale_after_seconds.toFixed(0)}s, burst limit {operatingLimits.execution.entry_burst_limit} in {operatingLimits.execution.entry_burst_window_seconds}s.
-            </div>
-            <div className="status-note status-note--inline">
-              Coverage policy: Tier 2 refresh {operatingLimits.coverage.tier2_refresh_batch_size} instruments every {operatingLimits.coverage.tier2_refresh_interval_seconds.toFixed(0)}s, promotion threshold {operatingLimits.coverage.tier2_promotion_score_threshold.toFixed(2)}, promotion TTL {operatingLimits.coverage.tier2_promotion_ttl_seconds}s, churn cap {operatingLimits.coverage.max_subscription_churn_per_minute}/min.
-            </div>
-            <div className="status-note status-note--inline">
-              Screeners: {operatingLimits.screening.length ? operatingLimits.screening.map((screening) => `${screening.name} -> ${screening.refresh_tier} at ${screening.promotion_threshold.toFixed(2)}+`).join(" | ") : "No screening thresholds published."}
-            </div>
-          </div>
-        </Card>
-      </section>
+      <SplitPanel
+        left={
+          <Panel title="Monitored Universe" subtitle="Primary watch state." priority="primary" tone={blockedReadiness.length ? "warning" : "positive"}>
+            <CompactTable
+              rows={activeUniverseRows}
+              emptyLabel="No active Tier 1 instruments."
+              getRowTone={(row) => (!row.streamed ? "inactive" : row.status !== "ACTIVE" ? "warning" : "positive")}
+              columns={[
+                { key: "instrument", header: "Instrument", render: (row) => row.instrument },
+                { key: "tier", header: "Tier", render: (row) => row.tier },
+                {
+                  key: "state",
+                  header: "State",
+                  render: (row) => (
+                    <StatusPill
+                      label={row.streamed ? row.status.toLowerCase() : "not streaming"}
+                      tone={!row.streamed ? "inactive" : row.status !== "ACTIVE" ? "warning" : "positive"}
+                    />
+                  ),
+                },
+                {
+                  key: "age",
+                  header: "Last Stream",
+                  render: (row) => (row.last_streamed_at ? `${formatRelativeDuration(row.last_streamed_at)} ago` : "never"),
+                },
+              ]}
+            />
+          </Panel>
+        }
+        center={
+          <Panel title="Readiness" subtitle="What is blocked right now." priority="critical" tone={blockedReadiness.length ? "warning" : "positive"}>
+            <CompactTable
+              rows={coverage.streaming.execution_readiness}
+              emptyLabel="No readiness records available."
+              getRowTone={(row) => (row.is_ok ? "positive" : "warning")}
+              columns={[
+                { key: "instrument", header: "Instrument", render: (row) => row.instrument },
+                {
+                  key: "ready",
+                  header: "State",
+                  render: (row) => <StatusPill label={row.is_ok ? "ready" : "blocked"} tone={row.is_ok ? "positive" : "warning"} />,
+                },
+                { key: "quote", header: "Quote", render: (row) => `${row.last_price_age_ms.toFixed(0)}ms` },
+                { key: "reason", header: "Reason", render: (row) => row.reason ?? "All gates clear." },
+              ]}
+            />
+          </Panel>
+        }
+        right={
+          <div className="stack-layout">
+            <Panel title="Promotions" priority="secondary" tone={coverage.promotions.pending_count ? "warning" : "neutral"} compact>
+              <CompactTable
+                dense
+                rows={coverage.promotions.recent_requests.slice(0, 8)}
+                emptyLabel="No recent promotions."
+                getRowTone={(row) => (row.status === "PENDING" ? "warning" : row.status === "ACCEPTED" ? "positive" : "inactive")}
+                columns={[
+                  { key: "instrument", header: "Instrument", render: (row) => row.instrument },
+                  { key: "score", header: "Score", render: (row) => row.score.toFixed(2) },
+                  { key: "status", header: "Status", render: (row) => row.status },
+                ]}
+              />
+            </Panel>
 
-      <section className="page-grid">
-        <Card title="Trade Allocator" subtitle="What advanced toward risk and execution, and what was filtered first.">
-          <div className="summary-grid">
-            <div className="summary-grid__item">
-              <span className="eyebrow">Selected</span>
-              <strong>{coverage.trade_allocator.selected_count}</strong>
-            </div>
-            <div className="summary-grid__item">
-              <span className="eyebrow">Rejected</span>
-              <strong>{coverage.trade_allocator.rejected_count}</strong>
-            </div>
-            <div className="summary-grid__item">
-              <span className="eyebrow">Top Filter</span>
-              <strong>
-                {Object.entries(coverage.trade_allocator.reason_counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "n/a"}
-              </strong>
-            </div>
-          </div>
-          <div className="review-stack">
-            {coverage.trade_allocator.recent_decisions.length ? (
-              coverage.trade_allocator.recent_decisions.map((decision) => (
-                <div className="status-note status-note--inline" key={`${decision.event_type}-${decision.id ?? decision.created_at}`}>
-                  {decision.selected ? "selected" : "rejected"} · {decision.strategy_name ?? "unknown strategy"} · {decision.instrument ?? "unknown instrument"}
-                  {decision.direction ? ` · ${decision.direction}` : ""}
-                  {decision.score !== null && decision.score !== undefined ? ` · score ${decision.score.toFixed(3)}` : ""}
-                  {decision.reason_code ? ` · ${decision.reason_code}` : ""}
-                  {decision.reason ? ` · ${decision.reason}` : ""}
+            <Panel title="Telemetry" priority="passive" tone="inactive" compact>
+              <div className="metric-stack">
+                <div className="metric-stack__row">
+                  <span>Heartbeat</span>
+                  <strong>{formatAge(telemetry.heartbeat_age_ms)}</strong>
                 </div>
-              ))
-            ) : (
-              <div className="status-note status-note--inline">No allocator decisions have been recorded yet.</div>
-            )}
-          </div>
-        </Card>
-      </section>
-
-      <section className="page-grid">
-        <Card title="Execution Readiness" subtitle="Deep market-status checks used by runtime entry and execution gates.">
-          <div className="review-stack">
-            {coverage.streaming.execution_readiness.length ? (
-              coverage.streaming.execution_readiness.map((item) => (
-                <div className="status-note status-note--inline" key={item.instrument}>
-                  {item.instrument} · {item.is_ok ? "ready" : "blocked"} · open {String(item.market_open)} · tradable {String(item.tradable)} · fresh {String(item.quote_fresh)} · spread {String(item.spread_ok)} · session {String(item.session_valid)} · dealing {String(item.dealing_allowed)}
-                  {item.reason ? ` · ${item.reason}` : ""}
+                <div className="metric-stack__row">
+                  <span>Price age</span>
+                  <strong>{formatAge(telemetry.last_price_age_ms)}</strong>
                 </div>
-              ))
-            ) : (
-              <div className="status-note status-note--inline">No Tier 1 instruments are currently being checked for execution readiness.</div>
-            )}
+                <div className="metric-stack__row">
+                  <span>Stale runtimes</span>
+                  <strong>{telemetry.stale_runtime_count}</strong>
+                </div>
+                <div className="metric-stack__row">
+                  <span>Top reject</span>
+                  <strong>{topRejectionReason}</strong>
+                </div>
+                <div className="metric-stack__row">
+                  <span>Tier 1 cap</span>
+                  <strong>{operatingLimits.coverage.max_instruments}</strong>
+                </div>
+              </div>
+            </Panel>
           </div>
-        </Card>
-      </section>
+        }
+      />
 
-      <section className="page-grid">
-        <Card title="Operational Telemetry" subtitle="Runtime, stream, broker, reconciliation, and order-path health.">
-          <div className="summary-grid">
-            <div className="summary-grid__item">
-              <span className="eyebrow">Health</span>
-              <strong>{telemetry.status}</strong>
-            </div>
-            <div className="summary-grid__item">
-              <span className="eyebrow">Runtimes</span>
-              <strong>{telemetry.active_runtime_count}/{telemetry.runtime_count}</strong>
-            </div>
-            <div className="summary-grid__item">
-              <span className="eyebrow">Stream</span>
-              <strong>{telemetry.stream_connected ? "connected" : "down"}</strong>
-            </div>
-            <div className="summary-grid__item">
-              <span className="eyebrow">Broker Latency</span>
-              <strong>{telemetry.broker_latency_ms?.toFixed(1) ?? "n/a"}ms</strong>
-            </div>
-          </div>
-          <div className="review-stack">
-            <div className="status-note status-note--inline">Heartbeat age: {formatAge(telemetry.heartbeat_age_ms)} · Last price age: {formatAge(telemetry.last_price_age_ms)} · Stream tick age: {formatAge(telemetry.stream_last_tick_age_ms)}</div>
-            <div className="status-note status-note--inline">Stale runtimes: {telemetry.stale_runtime_count} · Stale price runtimes: {telemetry.stale_price_runtime_count} · Paused by health: {telemetry.strategies_paused_by_health}</div>
-            <div className="status-note status-note--inline">Reconciliation mismatches: {telemetry.reconciliation_mismatches} · Order failures 5m: {telemetry.order_failures_last_5m} · Risk rejections 5m: {telemetry.rejected_orders_last_5m}</div>
-            <div className="status-note status-note--inline">Desired streams: {telemetry.desired_instrument_count} · Subscribed: {telemetry.subscribed_instrument_count} · Broker connected: {String(telemetry.broker_connected)}</div>
-          </div>
-        </Card>
-      </section>
+      <Panel title="Allocator Decisions" priority="passive" tone="inactive" compact>
+        <CompactTable
+          dense
+          rows={coverage.trade_allocator.recent_decisions.slice(0, 10)}
+          emptyLabel="No allocator decisions recorded."
+          getRowTone={(row) => (row.selected ? "positive" : "warning")}
+          columns={[
+            { key: "age", header: "Age", render: (row) => formatRelativeDuration(row.created_at) },
+            { key: "strategy", header: "Strategy", render: (row) => row.strategy_name ?? "unknown" },
+            { key: "instrument", header: "Instrument", render: (row) => row.instrument ?? "unknown" },
+            { key: "result", header: "Result", render: (row) => (row.selected ? "selected" : "rejected") },
+            { key: "reason", header: "Reason", render: (row) => row.reason_code ?? row.reason ?? "n/a" },
+          ]}
+        />
+      </Panel>
     </main>
   );
 }

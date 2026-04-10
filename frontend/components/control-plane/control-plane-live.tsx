@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { Card } from "@/components/ui/card";
+import { CompactTable, Panel, SplitPanel, StatusPill, StatusStrip } from "@/components/console/primitives";
 import { getControlPlaneSummary, updateOperatorControlState, updateStrategyGovernance } from "@/lib/api";
 import { ControlPlaneFamily, ControlPlaneSummary } from "@/lib/types";
 
@@ -14,28 +14,29 @@ function formatTime(value?: string | null) {
   if (!value) {
     return "n/a";
   }
+
   return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
     hour: "2-digit",
     minute: "2-digit",
-    day: "numeric",
-    month: "short",
   }).format(new Date(value));
 }
 
-function needsAttention(summary: ControlPlaneSummary, family: ControlPlaneFamily) {
-  const state = family.deployment?.state;
-  return (
-    !summary.effective_autonomous_control_enabled ||
-    family.alignment.status !== "ALIGNED" ||
-    family.governance.emergency_stop ||
-    state === "BLOCKED" ||
-    state === "DEGRADED" ||
-    state === "EMERGENCY_STOPPED"
-  );
+function familyTone(summary: ControlPlaneSummary, family: ControlPlaneFamily) {
+  const deploymentState = family.deployment?.state;
+  if (!summary.effective_autonomous_control_enabled || family.governance.emergency_stop || deploymentState === "BLOCKED" || deploymentState === "EMERGENCY_STOPPED") {
+    return "negative" as const;
+  }
+  if (family.alignment.status !== "ALIGNED" || deploymentState === "DEGRADED") {
+    return "warning" as const;
+  }
+  return "positive" as const;
 }
 
 export function ControlPlaneLive({ initialSummary }: ControlPlaneLiveProps) {
   const [summary, setSummary] = useState(initialSummary);
+  const [selectedStrategyName, setSelectedStrategyName] = useState<string | null>(null);
   const [pendingGlobalAction, setPendingGlobalAction] = useState<"enable" | "disable" | null>(null);
   const [pendingFamily, setPendingFamily] = useState<string | null>(null);
 
@@ -48,12 +49,11 @@ export function ControlPlaneLive({ initialSummary }: ControlPlaneLiveProps) {
     const refresh = async () => {
       try {
         const nextSummary = await getControlPlaneSummary();
-        if (cancelled) {
-          return;
+        if (!cancelled) {
+          setSummary(nextSummary);
         }
-        setSummary(nextSummary);
       } catch {
-        // Keep last good snapshot.
+        // Keep last snapshot visible.
       }
     };
     const intervalId = window.setInterval(refresh, 5000);
@@ -62,6 +62,27 @@ export function ControlPlaneLive({ initialSummary }: ControlPlaneLiveProps) {
       window.clearInterval(intervalId);
     };
   }, []);
+
+  const exceptionFamilies = useMemo(
+    () => summary.families.filter((family) => familyTone(summary, family) !== "positive"),
+    [summary],
+  );
+  const healthyFamilies = useMemo(
+    () => summary.families.filter((family) => familyTone(summary, family) === "positive"),
+    [summary],
+  );
+
+  useEffect(() => {
+    const selectedStillExists = summary.families.some((family) => family.strategy_name === selectedStrategyName);
+    if (selectedStrategyName && selectedStillExists) {
+      return;
+    }
+    setSelectedStrategyName((exceptionFamilies[0] ?? summary.families[0])?.strategy_name ?? null);
+  }, [exceptionFamilies, selectedStrategyName, summary.families]);
+
+  const selectedFamily =
+    summary.families.find((family) => family.strategy_name === selectedStrategyName) ?? exceptionFamilies[0] ?? null;
+  const selectedTone = selectedFamily ? familyTone(summary, selectedFamily) : "inactive";
 
   const refreshSummary = async () => {
     const nextSummary = await getControlPlaneSummary();
@@ -73,7 +94,9 @@ export function ControlPlaneLive({ initialSummary }: ControlPlaneLiveProps) {
       setPendingGlobalAction(enabled ? "enable" : "disable");
       await updateOperatorControlState({
         autonomous_control_enabled: enabled,
-        reason: enabled ? "Operator armed governed autonomy from control-plane UI." : "Operator paused governed autonomy from control-plane UI.",
+        reason: enabled
+          ? "Operator re-armed governed autonomy from the control plane."
+          : "Operator paused governed autonomy from the control plane.",
       });
       await refreshSummary();
     } finally {
@@ -93,208 +116,223 @@ export function ControlPlaneLive({ initialSummary }: ControlPlaneLiveProps) {
     }
   };
 
-  const exceptionFamilies = summary.families.filter((family) => needsAttention(summary, family));
-  const stableFamilies = summary.families.filter((family) => !needsAttention(summary, family));
-
   return (
-    <main className="page-grid">
-      <Card title="Control Plane Oversight" subtitle="Exception-first view of governed autonomy, with intervention kept secondary to context and reasoning.">
-        <div className="summary-grid">
-          <div className="summary-grid__item">
-            <span className="eyebrow">Autonomy</span>
-            <strong>{summary.effective_autonomous_control_enabled ? "enabled" : "disabled"}</strong>
-          </div>
-          <div className="summary-grid__item">
-            <span className="eyebrow">Families</span>
-            <strong>{summary.families.length}</strong>
-          </div>
-          <div className="summary-grid__item">
-            <span className="eyebrow">Needs Attention</span>
-            <strong>{exceptionFamilies.length}</strong>
-          </div>
-          <div className="summary-grid__item">
-            <span className="eyebrow">Auto Deployed</span>
-            <strong>{summary.counts.AUTO_DEPLOYED ?? 0}</strong>
-          </div>
-        </div>
-        <div className="review-stack">
-          <div className="status-note status-note--inline">
-            Use this page to understand why autonomous behavior is normal or abnormal before deciding whether human intervention is justified.
-          </div>
-          <div className="status-note status-note--inline">
-            Configured autonomy: {summary.configured_autonomous_control_enabled ? "enabled" : "disabled"} · effective autonomy: {summary.effective_autonomous_control_enabled ? "enabled" : "disabled"}{summary.autonomy_override_active ? ` · operator override ${summary.autonomy_override_value ? "enabled" : "disabled"}` : ""}
-          </div>
-          {summary.autonomy_override_reason ? (
-            <div className="status-note status-note--inline">
-              Override reason: {summary.autonomy_override_reason}
-            </div>
-          ) : null}
-          <div className="review-panel__actions">
-            <button
-              type="button"
-              className="button"
-              disabled={pendingGlobalAction !== null || summary.effective_autonomous_control_enabled}
-              onClick={() => handleGlobalAutonomy(true)}
-            >
-              {pendingGlobalAction === "enable" ? "Enabling..." : "Enable Autonomy"}
-            </button>
-            <button
-              type="button"
-              className="button secondary"
-              disabled={pendingGlobalAction !== null || !summary.effective_autonomous_control_enabled}
-              onClick={() => handleGlobalAutonomy(false)}
-            >
-              {pendingGlobalAction === "disable" ? "Disabling..." : "Disable Autonomy"}
-            </button>
-          </div>
-        </div>
-      </Card>
+    <main className="console-page">
+      <StatusStrip
+        items={[
+          {
+            label: "Autonomy",
+            value: summary.effective_autonomous_control_enabled ? "Armed" : "Paused",
+            tone: summary.effective_autonomous_control_enabled ? "positive" : "negative",
+            emphasis: "strong",
+          },
+          {
+            label: "Issues",
+            value: exceptionFamilies.length,
+            tone: exceptionFamilies.length ? "warning" : "positive",
+            meta: exceptionFamilies.length ? "families need action" : "all aligned",
+            emphasis: "strong",
+          },
+          {
+            label: "Emergency Stops",
+            value: summary.families.filter((family) => family.governance.emergency_stop).length,
+            tone: summary.families.some((family) => family.governance.emergency_stop) ? "negative" : "positive",
+          },
+          {
+            label: "Auto Deployed",
+            value: summary.counts.AUTO_DEPLOYED ?? 0,
+            tone: "neutral",
+          },
+        ]}
+      />
 
-      <Card title="Attention Queue" subtitle="Families that are blocked, degraded, misaligned, emergency stopped, or otherwise need explanation.">
-        {exceptionFamilies.length ? (
-          <div className="control-plane-family-list">
-            {exceptionFamilies.map((family) => {
-              const deployment = family.deployment;
-              const runtime = family.runtime;
-              const alignment = family.alignment;
-              const operatorReason =
-                deployment?.blocked_reason ||
-                deployment?.degraded_reason ||
-                deployment?.suitability_reason ||
-                alignment.reason;
-
-              return (
-                <details key={family.strategy_name} className="control-plane-family" open={family.alignment.status !== "ALIGNED"}>
-                  <summary className="control-plane-family__summary">
-                    <div className="cell-stack">
-                      <strong>{family.strategy_name}</strong>
-                      <span className="muted">{family.description}</span>
-                    </div>
-                    <div className="control-plane-family__badges">
-                      <span className="status-badge warning">{deployment?.state ?? "UNASSIGNED"}</span>
-                      <span className={`status-badge ${alignment.status === "ALIGNED" ? "positive" : "warning"}`}>{alignment.status}</span>
-                    </div>
-                  </summary>
-
-                  <div className="control-plane-family__body">
-                    <section className="review-panel__split">
-                      <div>
-                        <div className="review-panel__label">Observed State</div>
-                        <div className="review-stack">
-                          <div className="status-note status-note--inline">Governance: {family.governance.approval_state}</div>
-                          <div className="status-note status-note--inline">Deployment: {deployment?.state ?? "UNASSIGNED"}</div>
-                          <div className="status-note status-note--inline">Runtime: {runtime.is_running ? `${runtime.control_mode ?? "UNKNOWN"} running` : "not running"}</div>
-                          <div className="status-note status-note--inline">Selected intent: {deployment?.selected_instrument ?? "n/a"} · {deployment?.selected_profile ?? "n/a"}</div>
-                          <div className="status-note status-note--inline">Runtime truth: {runtime.active_instrument ?? "n/a"} · {runtime.active_profile_name ?? "n/a"}</div>
-                        </div>
-                      </div>
-                      <div>
-                        <div className="review-panel__label">Why It Needs Attention</div>
-                        <div className="review-stack">
-                          <div className="status-note status-note--inline">Alignment: {alignment.reason}</div>
-                          <div className="status-note status-note--inline">Deployment reason: {operatorReason ?? "n/a"}</div>
-                          <div className="status-note status-note--inline">Last restart reason: {deployment?.last_restart_reason ?? "n/a"}</div>
-                          <div className="status-note status-note--inline">Last evaluated: {formatTime(deployment?.last_evaluated_at)}</div>
-                        </div>
-                      </div>
-                    </section>
-
-                    {alignment.checks.length ? (
-                      <section className="review-panel__section">
-                        <div className="review-panel__label">Alignment Checks</div>
-                        <div className="review-stack">
-                          {alignment.checks.map((check) => (
-                            <div className="status-note status-note--inline" key={`${family.strategy_name}-${check.code}`}>
-                              {check.code} · {check.passed ? "pass" : "fail"}
-                              {"expected" in check && check.expected !== undefined ? ` · expected ${JSON.stringify(check.expected)}` : ""}
-                              {"actual" in check && check.actual !== undefined ? ` · actual ${JSON.stringify(check.actual)}` : ""}
-                            </div>
-                          ))}
-                        </div>
-                      </section>
-                    ) : null}
-
-                    <section className="review-panel__section">
-                      <div className="review-panel__label">Guarded Intervention</div>
-                      <div className="review-stack">
-                        <div className="status-note status-note--inline">
-                          Intervene only if the family is persistently blocked, misaligned, or unsafe and the autonomous system is unlikely to recover by itself.
-                        </div>
-                        <div className="review-panel__actions">
-                          <button
-                            type="button"
-                            className="button"
-                            disabled={pendingFamily === family.strategy_name || family.governance.autonomous_operation_allowed}
-                            onClick={() => handleFamilyAutonomy(family.strategy_name, true)}
-                          >
-                            {pendingFamily === family.strategy_name && !family.governance.autonomous_operation_allowed ? "Updating..." : "Allow Autonomous Deployment"}
-                          </button>
-                          <button
-                            type="button"
-                            className="button secondary"
-                            disabled={pendingFamily === family.strategy_name || !family.governance.autonomous_operation_allowed}
-                            onClick={() => handleFamilyAutonomy(family.strategy_name, false)}
-                          >
-                            {pendingFamily === family.strategy_name && family.governance.autonomous_operation_allowed ? "Updating..." : "Disallow Autonomous Deployment"}
-                          </button>
-                        </div>
-                      </div>
-                    </section>
-
-                    <section className="review-panel__section">
-                      <div className="review-panel__label">Recent Lifecycle Events</div>
-                      <div className="review-stack">
-                        {family.recent_events.length ? (
-                          family.recent_events.map((event) => (
-                            <div className="status-note status-note--inline" key={`${family.strategy_name}-${event.id ?? event.created_at}`}>
-                              {formatTime(event.created_at)} · {event.event_type} · {event.title}
-                              {event.message ? ` · ${event.message}` : ""}
-                            </div>
-                          ))
-                        ) : (
-                          <div className="status-note status-note--inline">No recent lifecycle events recorded for this family.</div>
-                        )}
-                      </div>
-                    </section>
+      <SplitPanel
+        left={
+          <Panel
+            title="Intervention Queue"
+            subtitle="Highest-priority families first."
+            priority="critical"
+            tone={exceptionFamilies.length ? "warning" : "positive"}
+            actions={
+              <div className="console-inline-actions">
+                <button
+                  type="button"
+                  className="console-button"
+                  disabled={pendingGlobalAction !== null || summary.effective_autonomous_control_enabled}
+                  onClick={() => handleGlobalAutonomy(true)}
+                >
+                  {pendingGlobalAction === "enable" ? "Arming..." : "Arm"}
+                </button>
+                <button
+                  type="button"
+                  className="console-button console-button--ghost"
+                  disabled={pendingGlobalAction !== null || !summary.effective_autonomous_control_enabled}
+                  onClick={() => handleGlobalAutonomy(false)}
+                >
+                  {pendingGlobalAction === "disable" ? "Pausing..." : "Pause"}
+                </button>
+              </div>
+            }
+          >
+            <CompactTable
+              rows={exceptionFamilies}
+              emptyLabel="No intervention-required families."
+              getRowTone={(family) => familyTone(summary, family)}
+              getRowActive={(family) => family.strategy_name === selectedStrategyName}
+              columns={[
+                {
+                  key: "family",
+                  header: "Family",
+                  render: (family) => (
+                    <button
+                      type="button"
+                      className={`console-link-button${family.strategy_name === selectedStrategyName ? " is-active" : ""}`}
+                      onClick={() => setSelectedStrategyName(family.strategy_name)}
+                    >
+                      {family.strategy_name}
+                    </button>
+                  ),
+                },
+                {
+                  key: "alignment",
+                  header: "Alignment",
+                  render: (family) => <StatusPill label={family.alignment.status} tone={familyTone(summary, family)} />,
+                },
+                {
+                  key: "state",
+                  header: "State",
+                  render: (family) => family.deployment?.state ?? "UNASSIGNED",
+                },
+              ]}
+            />
+          </Panel>
+        }
+        center={
+          <Panel title="Alignment Matrix" subtitle="Full family comparison." priority="primary" tone={exceptionFamilies.length ? "warning" : "neutral"}>
+            <CompactTable
+              rows={summary.families}
+              emptyLabel="No families configured."
+              getRowTone={(family) => familyTone(summary, family)}
+              getRowActive={(family) => family.strategy_name === selectedStrategyName}
+              columns={[
+                {
+                  key: "family",
+                  header: "Family",
+                  render: (family) => (
+                    <button
+                      type="button"
+                      className={`console-link-button${family.strategy_name === selectedStrategyName ? " is-active" : ""}`}
+                      onClick={() => setSelectedStrategyName(family.strategy_name)}
+                    >
+                      {family.strategy_name}
+                    </button>
+                  ),
+                },
+                {
+                  key: "intent",
+                  header: "Selected",
+                  render: (family) => `${family.deployment?.selected_profile ?? "n/a"} · ${family.deployment?.selected_instrument ?? "n/a"}`,
+                },
+                {
+                  key: "runtime",
+                  header: "Runtime",
+                  render: (family) =>
+                    family.runtime.is_running
+                      ? `${family.runtime.active_profile_name ?? "n/a"} · ${family.runtime.active_instrument ?? "n/a"}`
+                      : "not running",
+                },
+                {
+                  key: "state",
+                  header: "Deploy",
+                  render: (family) => family.deployment?.state ?? "UNASSIGNED",
+                },
+              ]}
+            />
+          </Panel>
+        }
+        right={
+          <Panel title="Lead Inspection" subtitle="Current highest-priority target." priority="critical" tone={selectedTone}>
+            {selectedFamily ? (
+              <div className="detail-stack">
+                <div className="summary-bar">
+                  <div className="summary-bar__item">
+                    <span>Family</span>
+                    <strong>{selectedFamily.strategy_name}</strong>
+                    <em>{selectedFamily.description}</em>
                   </div>
-                </details>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="status-note status-note--inline">No families currently require intervention. Autonomous behavior appears aligned with governance and runtime truth.</div>
-        )}
-      </Card>
-
-      <Card title="Stable Families" subtitle="Healthy families remain visible, but collapsed so the page prioritizes anomalies over routine autonomous behavior.">
-        {stableFamilies.length ? (
-          <div className="control-plane-family-list">
-            {stableFamilies.map((family) => (
-              <details key={family.strategy_name} className="control-plane-family">
-                <summary className="control-plane-family__summary">
-                  <div className="cell-stack">
-                    <strong>{family.strategy_name}</strong>
-                    <span className="muted">{family.description}</span>
+                  <div className="summary-bar__item">
+                    <span>Status</span>
+                    <strong>{selectedFamily.deployment?.state ?? "UNASSIGNED"}</strong>
+                    <em>{selectedFamily.alignment.status}</em>
                   </div>
-                  <div className="control-plane-family__badges">
-                    <span className="status-badge positive">{family.deployment?.state ?? "UNASSIGNED"}</span>
-                    <span className="status-badge positive">{family.alignment.status}</span>
-                  </div>
-                </summary>
-                <div className="control-plane-family__body">
-                  <div className="review-stack">
-                    <div className="status-note status-note--inline">Selected intent: {family.deployment?.selected_instrument ?? "n/a"} · {family.deployment?.selected_profile ?? "n/a"}</div>
-                    <div className="status-note status-note--inline">Runtime truth: {family.runtime.active_instrument ?? "n/a"} · {family.runtime.active_profile_name ?? "n/a"}</div>
-                    <div className="status-note status-note--inline">Last evaluated: {formatTime(family.deployment?.last_evaluated_at)}</div>
+                  <div className="summary-bar__item">
+                    <span>Updated</span>
+                    <strong>{formatTime(selectedFamily.deployment?.last_evaluated_at)}</strong>
+                    <em>last evaluation</em>
                   </div>
                 </div>
-              </details>
-            ))}
-          </div>
-        ) : (
-          <div className="status-note status-note--inline">No stable families are visible right now.</div>
-        )}
-      </Card>
+
+                <div className="detail-block">
+                  <span className="console-kicker">Why This Is Priority</span>
+                  <p>{selectedFamily.deployment?.blocked_reason || selectedFamily.deployment?.degraded_reason || selectedFamily.alignment.reason}</p>
+                </div>
+
+                <div className="detail-block">
+                  <span className="console-kicker">Observed State</span>
+                  <p>Governance: {selectedFamily.governance.approval_state}</p>
+                  <p>Runtime: {selectedFamily.runtime.is_running ? `${selectedFamily.runtime.control_mode ?? "UNKNOWN"} active` : "not running"}</p>
+                  <p>Instrument: {selectedFamily.runtime.active_instrument ?? selectedFamily.deployment?.selected_instrument ?? "n/a"}</p>
+                </div>
+
+                <div className="console-inline-actions">
+                  <button
+                    type="button"
+                    className="console-button"
+                    disabled={pendingFamily === selectedFamily.strategy_name || selectedFamily.governance.autonomous_operation_allowed}
+                    onClick={() => handleFamilyAutonomy(selectedFamily.strategy_name, true)}
+                  >
+                    {pendingFamily === selectedFamily.strategy_name ? "Updating..." : "Allow Auto Deploy"}
+                  </button>
+                  <button
+                    type="button"
+                    className="console-button console-button--ghost"
+                    disabled={pendingFamily === selectedFamily.strategy_name || !selectedFamily.governance.autonomous_operation_allowed}
+                    onClick={() => handleFamilyAutonomy(selectedFamily.strategy_name, false)}
+                  >
+                    {pendingFamily === selectedFamily.strategy_name ? "Updating..." : "Disallow"}
+                  </button>
+                </div>
+
+                <CompactTable
+                  dense
+                  rows={selectedFamily.recent_events.slice(0, 5)}
+                  emptyLabel="No recent lifecycle events."
+                  columns={[
+                    { key: "time", header: "Time", render: (event) => formatTime(event.created_at) },
+                    { key: "event", header: "Event", render: (event) => event.event_type },
+                    { key: "title", header: "Title", render: (event) => event.title },
+                  ]}
+                />
+              </div>
+            ) : (
+              <div className="console-empty">No family selected.</div>
+            )}
+          </Panel>
+        }
+      />
+
+      <Panel title="Stable Families" priority="passive" tone="inactive" compact>
+        <CompactTable
+          dense
+          rows={healthyFamilies}
+          emptyLabel="No stable families."
+          columns={[
+            { key: "family", header: "Family", render: (family) => family.strategy_name },
+            { key: "profile", header: "Profile", render: (family) => family.deployment?.selected_profile ?? "n/a" },
+            { key: "instrument", header: "Instrument", render: (family) => family.runtime.active_instrument ?? family.deployment?.selected_instrument ?? "n/a" },
+          ]}
+        />
+      </Panel>
     </main>
   );
 }

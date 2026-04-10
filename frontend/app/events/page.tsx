@@ -1,8 +1,7 @@
 import Link from "next/link";
 
-import { Card } from "@/components/card";
+import { CompactTable, Panel, SplitPanel, StatusPill, StickyToolbar } from "@/components/console/primitives";
 import { ResetHistoryButton } from "@/components/testing/reset-history-button";
-import { StatusBadge } from "@/components/ui/status-badge";
 import { getDomainEvents } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 
@@ -45,25 +44,7 @@ function readParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? "" : value ?? "";
 }
 
-function badgeTone(severity: string): "positive" | "negative" | "warning" | "neutral" {
-  if (severity === "error") {
-    return "negative";
-  }
-  if (severity === "warning") {
-    return "warning";
-  }
-  return "neutral";
-}
-
-function payloadPreview(payload: Record<string, unknown>) {
-  const text = JSON.stringify(payload, null, 2);
-  return text === "{}" ? "No payload" : text;
-}
-
-function makeTabHref(
-  current: Record<string, string | string[] | undefined>,
-  tab: "all" | "errors",
-): string {
+function makeTabHref(current: Record<string, string | string[] | undefined>, tab: "all" | "errors"): string {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(current)) {
     const normalized = readParam(value);
@@ -78,6 +59,14 @@ function makeTabHref(
   }
   const suffix = query.toString();
   return `/events${suffix ? `?${suffix}` : ""}`;
+}
+
+function payloadPreview(payload: Record<string, unknown>) {
+  const text = JSON.stringify(payload);
+  if (text === "{}") {
+    return "No payload";
+  }
+  return text.length > 180 ? `${text.slice(0, 180)}...` : text;
 }
 
 export default async function EventsPage({ searchParams }: EventsPageProps) {
@@ -104,191 +93,155 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
     correlationId: correlationId || undefined,
   });
 
-  return (
-    <main className="events-page">
-      <section className="events-hero">
-        <div className="events-hero__copy">
-          <span className="eyebrow">Event Journal</span>
-          <h2>Structured operational history for what happened, in what order, and why.</h2>
-          <p className="muted">
-            Filter the append-only timeline by event type, category, severity, strategy, instrument, or correlation id to inspect specific trade narratives and system transitions.
-          </p>
-        </div>
-        <div className="events-hero__stats">
-          <div className="events-hero__stat">
-            <span className="eyebrow">Loaded</span>
-            <strong>{events.length}</strong>
-          </div>
-          <div className="events-hero__stat">
-            <span className="eyebrow">{tab === "errors" ? "Error Type" : "Event Type"}</span>
-            <strong>{tab === "errors" ? errorType || "All" : eventType || "All"}</strong>
-          </div>
-          <div className="events-hero__stat">
-            <span className="eyebrow">Correlation</span>
-            <strong>{correlationId || "Any"}</strong>
-          </div>
-        </div>
-      </section>
+  const selectedEvent = events[0] ?? null;
 
-      <section className="page-grid">
-        <div className="events-tabs">
-          <Link href={makeTabHref(resolvedParams, "all")} className={`nav-link ${tab === "all" ? "is-active" : ""}`.trim()}>
-            All Events
+  return (
+    <main className="console-page">
+      <StickyToolbar>
+        <div className="toolbar-group">
+          <Link href={makeTabHref(resolvedParams, "all")} className={`console-chip${tab === "all" ? " is-active" : ""}`}>
+            All
           </Link>
-          <Link href={makeTabHref(resolvedParams, "errors")} className={`nav-link ${tab === "errors" ? "is-active" : ""}`.trim()}>
+          <Link href={makeTabHref(resolvedParams, "errors")} className={`console-chip${tab === "errors" ? " is-active" : ""}`}>
             Errors
           </Link>
         </div>
-        <Card
-          title="Filters"
-          subtitle={
-            tab === "errors"
-              ? "Errors are journaled with explicit error types so broker, runtime, and execution failures can be isolated quickly."
-              : "Use exact event type filters for execution milestones like position opened, order rejected, or runtime transitions."
-          }
-        >
-          <div className="status-note status-note--inline">
-            Testing reset clears persisted history without removing strategy definitions. Running runtimes and open positions are kept.
-          </div>
+        <div className="toolbar-group">
           <ResetHistoryButton />
-          <form className="events-filters" method="get">
-            <input type="hidden" name="tab" value={tab} />
-            <label>
-              <span className="eyebrow">{tab === "errors" ? "Error Type" : "Event Type"}</span>
-              {tab === "errors" ? (
-                <input name="error_type" defaultValue={errorType} placeholder="IGBrokerError" />
-              ) : (
-                <select name="event_type" defaultValue={eventType}>
-                  <option value="">All event types</option>
-                  {EVENT_TYPE_OPTIONS.map((option) => (
+        </div>
+      </StickyToolbar>
+
+      <SplitPanel
+        left={
+          <Panel title="Filters" priority="passive" tone="inactive" compact>
+            <form className="console-form-grid" method="get">
+              <input type="hidden" name="tab" value={tab} />
+              <label>
+                <span className="console-kicker">{tab === "errors" ? "Error" : "Event"}</span>
+                {tab === "errors" ? (
+                  <input className="console-input" name="error_type" defaultValue={errorType} placeholder="IGBrokerError" />
+                ) : (
+                  <select className="console-select" name="event_type" defaultValue={eventType}>
+                    <option value="">All</option>
+                    {EVENT_TYPE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </label>
+
+              <label>
+                <span className="console-kicker">Category</span>
+                <select className="console-select" name="category" defaultValue={category}>
+                  <option value="">All</option>
+                  {CATEGORY_OPTIONS.map((option) => (
                     <option key={option} value={option}>
                       {option}
                     </option>
                   ))}
                 </select>
-              )}
-            </label>
+              </label>
 
-            <label>
-              <span className="eyebrow">Category</span>
-              <select name="category" defaultValue={category}>
-                <option value="">All categories</option>
-                {CATEGORY_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              <span className="eyebrow">Severity</span>
-              <select name="severity" defaultValue={severity} disabled={tab === "errors"}>
-                <option value="">All severities</option>
-                {SEVERITY_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-              {tab === "errors" ? <input type="hidden" name="severity" value="error" /> : null}
-            </label>
-
-            <label>
-              <span className="eyebrow">Strategy</span>
-              <input name="strategy_name" defaultValue={strategyName} placeholder="mean_reversion" />
-            </label>
-
-            <label>
-              <span className="eyebrow">Instrument</span>
-              <input name="instrument" defaultValue={instrument} placeholder="CS.D.EURUSD.CFD.IP" />
-            </label>
-
-            <label>
-              <span className="eyebrow">Correlation ID</span>
-              <input name="correlation_id" defaultValue={correlationId} placeholder="ent-..." />
-            </label>
-
-            <label>
-              <span className="eyebrow">Limit</span>
-              <input name="limit" defaultValue={String(limit)} inputMode="numeric" />
-            </label>
-
-            <div className="events-filters__actions">
-              <button type="submit" className="button">
-                Apply Filters
-              </button>
-              <Link href="/events" className="button secondary">
-                Reset
-              </Link>
-            </div>
-          </form>
-        </Card>
-      </section>
-
-      <section className="page-grid">
-        <Card
-          title="Recent Events"
-          subtitle={
-            tab === "errors"
-              ? "Newest errors first. Error type is shown explicitly and payload can be expanded for raw context."
-              : "Newest first. Expand payload to inspect structured context for each event."
-          }
-        >
-          {events.length === 0 ? (
-            <div className="empty-state">No events matched the current filters.</div>
-          ) : (
-            <div className="table-shell">
-              <table className="table analysis-table events-table">
-                <thead>
-                  <tr>
-                    <th>When</th>
-                    <th>Event</th>
-                    <th>Severity</th>
-                    <th>Scope</th>
-                    <th>Narrative</th>
-                    <th>Context</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {events.map((event) => (
-                    <tr key={event.id}>
-                      <td>
-                        <strong>{formatDateTime(event.created_at)}</strong>
-                        <div className="muted">#{event.id}</div>
-                      </td>
-                      <td>
-                        <strong>{event.title}</strong>
-                        <div className="muted">{event.event_type}</div>
-                        {event.error_type ? <div className="muted">Error Type: {event.error_type}</div> : null}
-                        <div className="muted">{event.category}</div>
-                      </td>
-                      <td>
-                        <StatusBadge label={event.severity} tone={badgeTone(event.severity)} />
-                      </td>
-                      <td>
-                        <strong>{event.strategy_name ?? "system"}</strong>
-                        <div className="muted">{event.instrument ?? "no instrument"}</div>
-                      </td>
-                      <td>
-                        <div>{event.message ?? "No message provided."}</div>
-                        {event.correlation_id ? <div className="muted">Correlation: {event.correlation_id}</div> : null}
-                        {event.runtime_id ? <div className="muted">Runtime: {event.runtime_id}</div> : null}
-                      </td>
-                      <td>
-                        <details className="events-payload">
-                          <summary>Payload</summary>
-                          <pre>{payloadPreview(event.payload_json)}</pre>
-                        </details>
-                      </td>
-                    </tr>
+              <label>
+                <span className="console-kicker">Severity</span>
+                <select className="console-select" name="severity" defaultValue={severity} disabled={tab === "errors"}>
+                  <option value="">All</option>
+                  {SEVERITY_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      </section>
+                </select>
+                {tab === "errors" ? <input type="hidden" name="severity" value="error" /> : null}
+              </label>
+
+              <label>
+                <span className="console-kicker">Strategy</span>
+                <input className="console-input" name="strategy_name" defaultValue={strategyName} placeholder="mean_reversion" />
+              </label>
+              <label>
+                <span className="console-kicker">Instrument</span>
+                <input className="console-input" name="instrument" defaultValue={instrument} placeholder="CS.D.EURUSD.CFD.IP" />
+              </label>
+              <label>
+                <span className="console-kicker">Correlation</span>
+                <input className="console-input" name="correlation_id" defaultValue={correlationId} placeholder="ent-..." />
+              </label>
+              <label>
+                <span className="console-kicker">Limit</span>
+                <input className="console-input" name="limit" defaultValue={String(limit)} inputMode="numeric" />
+              </label>
+
+              <div className="console-inline-actions">
+                <button type="submit" className="console-button">
+                  Apply
+                </button>
+              </div>
+            </form>
+          </Panel>
+        }
+        center={
+          <Panel title="Event Log" priority="primary" tone={tab === "errors" ? "negative" : "neutral"}>
+            <CompactTable
+              rows={events}
+              emptyLabel="No events match the current filters."
+              getRowTone={(row) => (row.severity === "error" ? "negative" : row.severity === "warning" ? "warning" : "neutral")}
+              getRowActive={(_, index) => index === 0}
+              columns={[
+                { key: "time", header: "Time", render: (row) => formatDateTime(row.created_at) },
+                {
+                  key: "sev",
+                  header: "Severity",
+                  render: (row) => <StatusPill label={row.severity} tone={row.severity === "error" ? "negative" : row.severity === "warning" ? "warning" : "neutral"} />,
+                },
+                { key: "event", header: "Event", render: (row) => row.event_type },
+                { key: "title", header: "Title", render: (row) => row.title },
+                { key: "source", header: "Source", render: (row) => row.strategy_name ?? row.source },
+              ]}
+            />
+          </Panel>
+        }
+        right={
+          <Panel title="Selected Event" priority="secondary" tone={selectedEvent?.severity === "error" ? "negative" : selectedEvent?.severity === "warning" ? "warning" : "neutral"}>
+            {selectedEvent ? (
+              <div className="detail-stack">
+                <div className="summary-bar">
+                  <div className="summary-bar__item">
+                    <span>Severity</span>
+                    <strong>{selectedEvent.severity}</strong>
+                    <em>{selectedEvent.category}</em>
+                  </div>
+                  <div className="summary-bar__item">
+                    <span>Time</span>
+                    <strong>{formatDateTime(selectedEvent.created_at)}</strong>
+                    <em>{selectedEvent.correlation_id ?? "no correlation"}</em>
+                  </div>
+                  <div className="summary-bar__item">
+                    <span>Source</span>
+                    <strong>{selectedEvent.strategy_name ?? selectedEvent.source}</strong>
+                    <em>{selectedEvent.instrument ?? "system"}</em>
+                  </div>
+                </div>
+
+                <div className="detail-block">
+                  <span className="console-kicker">Summary</span>
+                  <p>{selectedEvent.title}</p>
+                  <p>{selectedEvent.message ?? "No message provided."}</p>
+                </div>
+
+                <div className="detail-block">
+                  <span className="console-kicker">Payload</span>
+                  <p>{payloadPreview(selectedEvent.payload_json)}</p>
+                </div>
+              </div>
+            ) : (
+              <div className="console-empty">No event selected.</div>
+            )}
+          </Panel>
+        }
+      />
     </main>
   );
 }
