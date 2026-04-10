@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from app.core.broker import BrokerMarketDetails
 from app.core.broker import OrderDirection
 
 
@@ -32,6 +33,24 @@ class PriceUpdate:
         if direction is OrderDirection.SELL and self.bid is not None:
             return self.bid
         return self.price
+
+
+@dataclass(slots=True)
+class ScreeningSnapshot:
+    instrument: str
+    market_details: BrokerMarketDetails
+    refreshed_at: datetime
+    streamed: bool = False
+    source_tier: str = "TIER2"
+
+
+@dataclass(slots=True)
+class PromotionIntent:
+    scanner_name: str
+    instrument: str
+    score: float
+    reason: str
+    requested_frequency: str | None = None
 
 
 class Strategy(ABC):
@@ -86,3 +105,13 @@ class Strategy(ABC):
 
     def restore_state_snapshot(self, snapshot: dict[str, Any]) -> None:
         """Restore state previously returned by `export_state_snapshot()`."""
+
+
+class ScreeningStrategy(ABC):
+    """Tier 2 screening contract for requesting Tier 1 promotion only."""
+
+    name: str
+
+    @abstractmethod
+    def evaluate(self, snapshot: ScreeningSnapshot) -> PromotionIntent | None:
+        raise NotImplementedError

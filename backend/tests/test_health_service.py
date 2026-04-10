@@ -8,9 +8,11 @@ from app.api.routes.health import health_check
 from app.services.health_service import get_health_service
 
 
-def test_health_service_classifies_ok_when_feed_and_broker_are_healthy():
+def test_health_service_classifies_ok_when_feed_and_broker_are_healthy(monkeypatch):
     health_service = get_health_service()
     now = datetime.now(UTC)
+    monkeypatch.setattr(health_service, "_has_live_operational_demand", lambda: True)
+    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda: False)
 
     health_service.heartbeat(now)
     health_service.record_price_update(now, stream_connected=True)
@@ -21,9 +23,31 @@ def test_health_service_classifies_ok_when_feed_and_broker_are_healthy():
     assert report["details"].broker_latency_ms == 42.0
 
 
-def test_health_service_classifies_degraded_when_order_failures_accumulate():
+def test_health_service_classifies_idle_when_system_is_unarmed(monkeypatch):
+    health_service = get_health_service()
+    monkeypatch.setattr(health_service, "_has_live_operational_demand", lambda: False)
+    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda: False)
+
+    report = health_service.get_health_report()
+
+    assert report["status"] == "idle"
+
+
+def test_health_service_classifies_armed_when_autonomy_is_enabled(monkeypatch):
+    health_service = get_health_service()
+    monkeypatch.setattr(health_service, "_has_live_operational_demand", lambda: False)
+    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda: True)
+
+    report = health_service.get_health_report()
+
+    assert report["status"] == "armed"
+
+
+def test_health_service_classifies_degraded_when_order_failures_accumulate(monkeypatch):
     health_service = get_health_service()
     now = datetime.now(UTC)
+    monkeypatch.setattr(health_service, "_has_live_operational_demand", lambda: True)
+    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda: False)
 
     health_service.record_price_update(now, stream_connected=True)
     health_service.update_broker_state(connected=True, latency_ms=25.0)
@@ -36,9 +60,11 @@ def test_health_service_classifies_degraded_when_order_failures_accumulate():
     assert report["details"].order_failures_last_5m == 3
 
 
-def test_health_service_classifies_critical_when_broker_is_disconnected():
+def test_health_service_classifies_critical_when_broker_is_disconnected(monkeypatch):
     health_service = get_health_service()
     now = datetime.now(UTC)
+    monkeypatch.setattr(health_service, "_has_live_operational_demand", lambda: True)
+    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda: False)
 
     health_service.record_price_update(now, stream_connected=True)
     health_service.update_broker_state(connected=False)
@@ -47,9 +73,11 @@ def test_health_service_classifies_critical_when_broker_is_disconnected():
     assert report["status"] == "critical"
 
 
-def test_health_check_returns_ok_when_system_is_healthy():
+def test_health_check_returns_ok_when_system_is_healthy(monkeypatch):
     health_service = get_health_service()
     now = datetime.now(UTC)
+    monkeypatch.setattr(health_service, "_has_live_operational_demand", lambda: True)
+    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda: False)
 
     health_service.heartbeat(now)
     health_service.record_price_update(now, stream_connected=True)
@@ -62,7 +90,13 @@ def test_health_check_returns_ok_when_system_is_healthy():
     assert payload == {"status": "ok"}
 
 
-def test_health_check_returns_503_when_system_is_critical():
+def test_health_check_returns_503_when_system_is_critical(monkeypatch):
+    health_service = get_health_service()
+    now = datetime.now(UTC)
+    monkeypatch.setattr(health_service, "_has_live_operational_demand", lambda: True)
+    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda: False)
+    health_service.record_price_update(now, stream_connected=True)
+    health_service.update_broker_state(connected=False)
     response = Response()
 
     payload = health_check(response)

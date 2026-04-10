@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     runtime_duplicate_signal_window_seconds: int = 30
     runtime_max_unhealthy_runtimes: int = 0
     runtime_global_entry_kill_switch: bool = False
+    autonomous_control_enabled: bool = True
+    autonomous_candidate_instruments_per_family: int = 4
+    trade_allocator_enabled: bool = True
+    trade_allocator_signal_stale_after_seconds: float = 15.0
+    trade_allocator_max_decisions_per_cycle: int = 2
+    trade_allocator_max_open_positions_per_instrument: int = 1
     ai_reviewer_llm_enabled: bool = False
     ai_reviewer_llm_provider: str = "disabled"
     ai_reviewer_llm_model: str = "unconfigured"
@@ -58,6 +64,23 @@ class Settings(BaseSettings):
     ig_streaming_watch_interval_seconds: float = 1.0
     ig_streaming_stale_after_seconds: float = 20.0
     ig_streaming_transition_debounce_seconds: float = 10.0
+    ig_streaming_max_instruments: int = 8
+    ig_streaming_max_promotions_per_minute: int = 4
+    ig_streaming_requested_frequency: str = "2.0"
+    ig_streaming_min_tier1_residency_seconds: int = 30
+    ig_streaming_demotion_cooldown_seconds: int = 120
+    ig_streaming_max_subscription_churn_per_minute: int = 8
+    ig_streaming_promotion_score_threshold: float = 0.7
+    ig_streaming_eviction_score_threshold: float = 0.5
+    ig_streaming_asset_class_slot_budgets: Annotated[dict[str, int], NoDecode] = {}
+    ig_streaming_seed_instruments: Annotated[list[str], NoDecode] = []
+    tier2_refresh_enabled: bool = True
+    tier2_refresh_interval_seconds: float = 30.0
+    tier2_refresh_batch_size: int = 5
+    tier2_refresh_stale_after_seconds: float = 120.0
+    tier2_seed_instruments: Annotated[list[str], NoDecode] = []
+    tier2_promotion_score_threshold: float = 0.75
+    tier2_promotion_ttl_seconds: int = 300
     ig_market_cache_ttl_seconds: float = 30.0
     ig_market_cache_stale_ttl_seconds: float = 300.0
     ig_verify_ssl: bool = True
@@ -71,6 +94,35 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
+
+    @field_validator("ig_streaming_seed_instruments", mode="before")
+    @classmethod
+    def parse_seed_instruments(cls, value: str | list[str]) -> list[str]:
+        if isinstance(value, str):
+            return [instrument.strip() for instrument in value.split(",") if instrument.strip()]
+        return value
+
+    @field_validator("tier2_seed_instruments", mode="before")
+    @classmethod
+    def parse_tier2_seed_instruments(cls, value: str | list[str]) -> list[str]:
+        if isinstance(value, str):
+            return [instrument.strip() for instrument in value.split(",") if instrument.strip()]
+        return value
+
+    @field_validator("ig_streaming_asset_class_slot_budgets", mode="before")
+    @classmethod
+    def parse_ig_streaming_asset_class_slot_budgets(cls, value: str | dict[str, int]) -> dict[str, int]:
+        if isinstance(value, dict):
+            return {str(key).upper(): int(raw_value) for key, raw_value in value.items()}
+        parsed: dict[str, int] = {}
+        for segment in value.split(","):
+            if not segment.strip():
+                continue
+            key, separator, raw_amount = segment.partition("=")
+            if not separator:
+                raise ValueError("IG_STREAMING_ASSET_CLASS_SLOT_BUDGETS must use ASSET=COUNT entries.")
+            parsed[key.strip().upper()] = int(raw_amount.strip())
+        return parsed
 
     @field_validator("database_url", mode="before")
     @classmethod
@@ -107,6 +159,8 @@ class Settings(BaseSettings):
         "ig_streaming_watch_interval_seconds",
         "ig_streaming_stale_after_seconds",
         "ig_streaming_transition_debounce_seconds",
+        "tier2_refresh_interval_seconds",
+        "tier2_refresh_stale_after_seconds",
     )
     @classmethod
     def validate_positive_poll_intervals(cls, value: float) -> float:
@@ -123,6 +177,16 @@ class Settings(BaseSettings):
         "runtime_cooldown_after_loss_seconds",
         "runtime_cooldown_after_exit_seconds",
         "runtime_duplicate_signal_window_seconds",
+        "ig_streaming_max_instruments",
+        "ig_streaming_max_promotions_per_minute",
+        "ig_streaming_min_tier1_residency_seconds",
+        "ig_streaming_demotion_cooldown_seconds",
+        "ig_streaming_max_subscription_churn_per_minute",
+        "tier2_refresh_batch_size",
+        "tier2_promotion_ttl_seconds",
+        "trade_allocator_max_decisions_per_cycle",
+        "trade_allocator_max_open_positions_per_instrument",
+        "autonomous_candidate_instruments_per_family",
         mode="after",
     )
     @classmethod
@@ -137,10 +201,14 @@ class Settings(BaseSettings):
         "runtime_max_position_notional",
         "runtime_max_spread_percent_of_price",
         "runtime_price_stale_after_seconds",
+        "trade_allocator_signal_stale_after_seconds",
         "max_price_age_ms",
         "max_spread_pips",
         "market_status_cache_ttl_ms",
         "system_health_heartbeat_interval_seconds",
+        "ig_streaming_promotion_score_threshold",
+        "ig_streaming_eviction_score_threshold",
+        "tier2_promotion_score_threshold",
         mode="after",
     )
     @classmethod
@@ -162,6 +230,17 @@ class Settings(BaseSettings):
         if value <= 0:
             raise ValueError("IG market cache TTL settings must be greater than 0.")
         return value
+
+    @field_validator("ig_streaming_requested_frequency")
+    @classmethod
+    def validate_ig_streaming_requested_frequency(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized == "unlimited":
+            return "unlimited"
+        frequency = float(value)
+        if frequency <= 0:
+            raise ValueError("IG_STREAMING_REQUESTED_FREQUENCY must be a positive number or 'unlimited'.")
+        return value.strip()
 
 
 @lru_cache

@@ -7,8 +7,8 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Investmate",
-  description: "Smart investing. Made simple.",
+  title: "Investmate Ops",
+  description: "Autonomous trading oversight, coverage monitoring, and investigation.",
 };
 
 export default async function RootLayout({
@@ -86,7 +86,7 @@ export default async function RootLayout({
               </svg>
               <div>
                 <h1>Investmate</h1>
-                <p className="muted">Smart investing. Made simple.</p>
+                <p className="muted">Autonomous trading oversight.</p>
               </div>
             </div>
             <AppNav />

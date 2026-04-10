@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from app.core.broker import Broker, OrderDirection
@@ -27,6 +28,8 @@ class TradingEngine:
     instrument: str
     runtime_id: str = field(default_factory=lambda: str(uuid4()))
     trade_size: float = 1.0
+    active_profile_name: str | None = None
+    strategy_parameters: dict[str, Any] = field(default_factory=dict)
     active: bool = False
     current_position: Position | None = field(default=None, init=False)
     last_heartbeat_at: datetime | None = field(default=None, init=False)

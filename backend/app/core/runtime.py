@@ -11,7 +11,7 @@ from app.core.signals import EntrySignal, ExitSignal
 from app.core.trading_engine import TradingEngine
 from app.models.trade import Position, clone_position
 from app.strategies.base import PriceUpdate
-from app.strategies.registry import StrategyMetadata, strategy_registry
+from app.strategies.registry import ResolvedStrategyProfile, StrategyMetadata, strategy_registry
 
 logger = get_logger(__name__)
 
@@ -51,6 +51,8 @@ class StrategyRuntimeManager:
         strategy_name: str,
         instrument: str,
         *,
+        profile_name: str | None = None,
+        strategy_parameters: dict[str, object] | None = None,
         runtime_id: str | None = None,
         strategy_snapshot: dict[str, object] | None = None,
         current_position: Position | None = None,
@@ -61,7 +63,8 @@ class StrategyRuntimeManager:
             raise ValueError(f"Strategy '{strategy_name}' is already running for instrument '{instrument}'.")
 
         metadata = strategy_registry.get_metadata(strategy_name)
-        strategy = strategy_registry.create(strategy_name)
+        resolved_profile = self.resolve_profile(strategy_name, profile_name=profile_name, strategy_parameters=strategy_parameters)
+        strategy = strategy_registry.create(strategy_name, parameters=resolved_profile.constructor_kwargs)
         if strategy_snapshot:
             strategy.restore_state_snapshot(strategy_snapshot)
         engine = TradingEngine(
@@ -69,14 +72,49 @@ class StrategyRuntimeManager:
             broker=get_broker(),
             instrument=instrument,
             runtime_id=runtime_id or str(uuid4()),
+            active_profile_name=resolved_profile.profile_name,
+            strategy_parameters=dict(resolved_profile.parameter_values),
         )
         engine.trade_size = metadata.position_size
         engine.current_position = clone_position(current_position)
         if activate:
             engine.start()
         self.engines[key] = engine
-        logger.info("Runtime started", extra={"strategy": strategy_name, "instrument": instrument})
+        logger.info(
+            "Runtime started",
+            extra={
+                "strategy": strategy_name,
+                "instrument": instrument,
+                "profile_name": resolved_profile.profile_name,
+                "strategy_parameters": resolved_profile.parameter_values,
+            },
+        )
         return engine
+
+    def resolve_profile(
+        self,
+        strategy_name: str,
+        *,
+        profile_name: str | None = None,
+        strategy_parameters: dict[str, object] | None = None,
+    ) -> ResolvedStrategyProfile:
+        resolved_profile = strategy_registry.resolve_profile(strategy_name, profile_name)
+        if not strategy_parameters:
+            return resolved_profile
+        parameter_values = dict(resolved_profile.parameter_values)
+        parameter_values.update(strategy_parameters)
+        metadata = strategy_registry.get_metadata(strategy_name)
+        constructor_kwargs = {}
+        for definition in metadata.parameters:
+            value = parameter_values.get(definition.key, definition.value)
+            constructor_kwargs[definition.constructor_key or definition.key] = value
+            parameter_values[definition.key] = value
+        return ResolvedStrategyProfile(
+            strategy_name=strategy_name,
+            profile_name=resolved_profile.profile_name,
+            parameter_values=parameter_values,
+            constructor_kwargs=constructor_kwargs,
+        )
 
     def stop(
         self,

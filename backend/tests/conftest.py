@@ -10,11 +10,17 @@ from sqlmodel import SQLModel, Session, create_engine
 from app.core.config import get_settings
 from app.core.runtime import runtime_manager
 from app.models.domain_event import DomainEvent
+from app.models.operator_control import OperatorControlState
+from app.models.promotion_request import PromotionRequest
 from app.models.runtime import StrategyRuntimeState
+from app.models.strategy_deployment import StrategyDeployment
+from app.models.strategy_governance import StrategyFamilyGovernance
 from app.models.trade import Execution, Position, ReconciliationEvent, Trade
+from app.models.watchlist import WatchlistEntry
 from app.services.domain_event_service import domain_event_service
 from app.services.health_service import get_health_service
 from app.services.market_status_service import get_market_status_service
+from app.services.watchlist_service import get_watchlist_service
 from tests.fakes import FakeBroker
 
 
@@ -26,6 +32,8 @@ def reset_runtime_manager() -> Iterator[None]:
     runtime_manager.last_price_errors.clear()
     get_health_service().reset()
     get_market_status_service().reset()
+    watchlist_service = get_watchlist_service()
+    watchlist_service.session = None
     yield
     runtime_manager.engines.clear()
     runtime_manager.last_prices.clear()
@@ -33,6 +41,8 @@ def reset_runtime_manager() -> Iterator[None]:
     runtime_manager.last_price_errors.clear()
     get_health_service().reset()
     get_market_status_service().reset()
+    watchlist_service = get_watchlist_service()
+    watchlist_service.session = None
 
 
 @pytest.fixture(autouse=True)
@@ -53,13 +63,26 @@ def broker() -> FakeBroker:
 def patch_external_boundaries(monkeypatch: pytest.MonkeyPatch, broker: FakeBroker) -> None:
     monkeypatch.setattr("app.core.runtime.get_broker", lambda: broker)
     monkeypatch.setattr("app.core.broker_factory.get_broker", lambda: broker)
+    monkeypatch.setattr("app.services.market_status_service.get_broker", lambda: broker)
     monkeypatch.setattr("app.services.reconciliation_service.get_broker", lambda: broker)
     monkeypatch.setattr(domain_event_service, "record_event", lambda **_: None)
 
 
 @pytest.fixture
 def session() -> Iterator[Session]:
-    _ = (Trade, Position, StrategyRuntimeState, ReconciliationEvent, Execution, DomainEvent)
+    _ = (
+        Trade,
+        Position,
+        StrategyRuntimeState,
+        ReconciliationEvent,
+        Execution,
+        DomainEvent,
+        OperatorControlState,
+        WatchlistEntry,
+        PromotionRequest,
+        StrategyFamilyGovernance,
+        StrategyDeployment,
+    )
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},

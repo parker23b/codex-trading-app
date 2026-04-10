@@ -36,11 +36,11 @@ export function RiskPanel({
   return (
     <Card
       title="Risk"
-      subtitle="Main portfolio risk checks for the current book."
+      subtitle="Core portfolio limits for the current book."
       action={<StatusBadge label={overall.label} tone={overall.tone} />}
       className="risk-panel card--compact"
     >
-      <div className="risk-stack">
+      <div className="risk-grid">
         {items.map((item) => {
           const status = getRiskTone(item.value, item.thresholds[0], item.thresholds[1]);
           return (

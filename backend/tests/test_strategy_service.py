@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
 from app.core.broker import BrokerMarketDetails, OrderDirection
 from app.core.config import get_settings
 from app.core.runtime import runtime_manager
+from app.core.signals import EntrySignal, SignalCandidate, SignalKind
 from sqlmodel import select
 
 from app.core.broker import BrokerOrderResult, BrokerOrderStatus
@@ -171,6 +173,130 @@ def test_process_price_update_runs_entry_to_close_lifecycle(session, broker, fix
         ExecutionStatus.POSITION_OPENED.value,
         ExecutionStatus.CLOSE_CONFIRMED.value,
     }
+
+
+def test_evaluate_price_update_is_decoupled_from_execution_orchestration(session, broker, fixed_now):
+    service = StrategyService(session)
+    trade_service = TradeService(session)
+    service.start_strategy(STRATEGY, INSTRUMENT)
+    broker.place_order_outcomes.append(
+        make_order_result(
+            broker_reference="entry-split-1",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=101.0,
+            average_fill_price=101.0,
+            executed_at=fixed_now + timedelta(seconds=1),
+        )
+    )
+
+    service.evaluate_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+        source_tier="TIER2",
+    )
+    candidates = service.evaluate_price_update(
+        INSTRUMENT,
+        101.0,
+        bid=100.99,
+        ask=101.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+        source_tier="TIER2",
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].source_tier == "TIER2"
+    assert candidates[0].signal is not None
+    assert broker.placed_orders == []
+    assert trade_service.list_executions(limit=10) == []
+
+    service.orchestrate_signal_candidates(
+        candidates,
+        price=101.0,
+        bid=100.99,
+        ask=101.01,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
+
+    executions = trade_service.list_executions(limit=10)
+    assert len(broker.placed_orders) == 1
+    assert len(executions) == 1
+    assert executions[0].status == ExecutionStatus.POSITION_OPENED.value
+
+
+def test_allocate_signal_candidates_filters_weaker_conflicting_entries(session, broker, fixed_now):
+    service = StrategyService(session)
+    instrument = INSTRUMENT
+    broker.market_details_by_instrument[instrument] = BrokerMarketDetails(
+        instrument=instrument,
+        name=instrument,
+        bid=1.1000,
+        offer=1.1001,
+        high=1.1010,
+        low=1.0990,
+        percentage_change=0.0,
+        net_change=0.0,
+        market_status="TRADEABLE",
+        update_time=fixed_now.isoformat(),
+        tradable=True,
+    )
+    buy_engine = SimpleNamespace(strategy=SimpleNamespace(name="breakout_guard"), broker=broker, instrument=instrument)
+    sell_engine = SimpleNamespace(strategy=SimpleNamespace(name="mean_reversion"), broker=broker, instrument=instrument)
+    strong_buy = SignalCandidate(
+        strategy_name="breakout_guard",
+        instrument=instrument,
+        signal=EntrySignal(
+            kind=SignalKind.ENTRY,
+            strategy_name="breakout_guard",
+            instrument=instrument,
+            observed_price=1.1001,
+            signal_at=fixed_now,
+            direction=OrderDirection.BUY,
+            size=1.0,
+            risk_percent=0.7,
+            bid=1.1000,
+            ask=1.1001,
+            market_status="TRADEABLE",
+            tradable=True,
+        ),
+        engine=buy_engine,
+        confidence=0.95,
+        metadata=SimpleNamespace(risk_per_trade=0.7),
+    )
+    sell_conflict = SignalCandidate(
+        strategy_name="mean_reversion",
+        instrument=instrument,
+        signal=EntrySignal(
+            kind=SignalKind.ENTRY,
+            strategy_name="mean_reversion",
+            instrument=instrument,
+            observed_price=1.1001,
+            signal_at=fixed_now,
+            direction=OrderDirection.SELL,
+            size=1.0,
+            risk_percent=0.7,
+            bid=1.1000,
+            ask=1.1001,
+            market_status="TRADEABLE",
+            tradable=True,
+        ),
+        engine=sell_engine,
+        confidence=0.5,
+        metadata=SimpleNamespace(risk_per_trade=0.7),
+    )
+
+    selected = service.allocate_signal_candidates([sell_conflict, strong_buy], received_at=fixed_now)
+
+    assert len(selected) == 1
+    assert selected[0].strategy_name == "breakout_guard"
 
 
 def test_entry_broker_failure_fails_safely_without_opening_position(session, broker, fixed_now):

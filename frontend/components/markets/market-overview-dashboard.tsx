@@ -51,6 +51,16 @@ export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashb
   });
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  const refreshSelectedMarket = async () => {
+    try {
+      const overview = await getMarketOverview(selectedCategory);
+      setLoadedMarkets((current) => ({ ...current, [selectedCategory]: overview }));
+      setLoadError(null);
+    } catch (error: unknown) {
+      setLoadError(error instanceof Error ? error.message : "Failed to refresh market data.");
+    }
+  };
+
   useEffect(() => {
     const stored = window.localStorage.getItem(WATCHLIST_STORAGE_KEY);
     if (stored) {
@@ -88,32 +98,6 @@ export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashb
         });
     });
   }, [loadedMarkets, selectedCategory]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const refresh = async () => {
-      try {
-        const overview = await getMarketOverview(selectedCategory);
-        if (cancelled) {
-          return;
-        }
-        setLoadedMarkets((current) => ({ ...current, [selectedCategory]: overview }));
-        setLoadError(null);
-      } catch (error: unknown) {
-        if (cancelled) {
-          return;
-        }
-        setLoadError(error instanceof Error ? error.message : "Failed to refresh market data.");
-      }
-    };
-
-    const intervalId = window.setInterval(refresh, 5000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [selectedCategory]);
 
   const selectedMarket = loadedMarkets[selectedCategory];
   const selectedSummary = selectedMarket?.summary ?? buildPlaceholderSummary(selectedCategory);
@@ -169,8 +153,8 @@ export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashb
     <main className="dashboard-layout">
       <section className="page-grid">
         <Card
-          title="Market Readiness"
-          subtitle="Use the market selector to see where strategies can operate right now, then narrow the instrument table to tradable, active names."
+          title="Investigate Market State"
+          subtitle="Inspect deployability, venue restrictions, and strategy fit on demand so market checks stay useful without aggressive IG polling."
           action={<MarketSelector categories={MARKET_CATEGORIES} selectedCategory={selectedCategory} onSelect={setSelectedCategory} />}
         >
           {/* The strip gives an at-a-glance scan across categories before the operator commits to one table view. */}
@@ -197,8 +181,8 @@ export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashb
           </div>
           <div className="hero-grid__side">
             <Card
-              title="Table Controls"
-              subtitle="Fast scanning matters, so the controls trim noise before the user reaches the rows."
+              title="Investigation Controls"
+              subtitle="Load one market slice at a time, filter the rows, and refresh only when you need a newer snapshot."
               className="card--compact"
             >
               <div className="markets-controls">
@@ -227,8 +211,20 @@ export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashb
                   />
                   <span>Show active only</span>
                 </label>
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={isPending}
+                  onClick={() => {
+                    startTransition(() => {
+                      void refreshSelectedMarket();
+                    });
+                  }}
+                >
+                  Refresh Snapshot
+                </button>
                 <div className="status-note status-note--inline">
-                  Watchlist stars stay in local browser state so the operator can pin priority instruments without backend writes.
+                  Stars are local-only investigation pins. They do not write to the backend or affect autonomous routing.
                 </div>
                 {isPending && !selectedMarket ? <div className="status-note status-note--inline">Loading {selectedSummary.label} market data…</div> : null}
                 {loadError ? <div className="status-note status-note--inline">{loadError}</div> : null}
@@ -240,8 +236,8 @@ export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashb
 
       <section className="page-grid">
         <Card
-          title={`${selectedSummary?.label ?? "Market"} Instruments`}
-          subtitle="Starred instruments stay at the top so the page behaves like a market-readiness dashboard instead of a static reference table."
+          title={`${selectedSummary?.label ?? "Market"} Investigation List`}
+          subtitle="The table prioritizes deployability and relevance so blocked or marginal instruments can be explained quickly."
           className="card--table"
         >
           {selectedMarket ? (
@@ -250,7 +246,7 @@ export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashb
             <div className="empty-state">Loading {selectedSummary.label.toLowerCase()} instruments…</div>
           )}
           <div className="status-note">
-            Snapshot refreshed from {new Date((selectedMarket ?? initialOverview).generatedAt).toLocaleString("en-GB")} and countdown updated at{" "}
+            Snapshot loaded from {new Date((selectedMarket ?? initialOverview).generatedAt).toLocaleString("en-GB")} and page clock updated at{" "}
             {new Date(now).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}.
           </div>
         </Card>

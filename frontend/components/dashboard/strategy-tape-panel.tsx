@@ -19,7 +19,7 @@ export function StrategyTapePanel({ rows }: StrategyTapePanelProps) {
   return (
     <Card
       title="Running Strategies"
-      subtitle="Latest broker price per live strategy runtime."
+      subtitle="Latest broker price per live runtime, capped so the page stays scan-friendly."
       className="card--compact card--full-width"
     >
       {rows.length === 0 ? (

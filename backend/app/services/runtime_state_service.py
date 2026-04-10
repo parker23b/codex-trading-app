@@ -42,6 +42,10 @@ class RuntimeStateService:
         status: str,
         recovery_state: str,
         recovery_reason: str | None = None,
+        control_mode: str | None = None,
+        deployment_id: int | None = None,
+        active_profile_name: str | None = None,
+        parameters: dict[str, Any] | None = None,
         auto_resume: bool = True,
         started_at: datetime | None = None,
         stopped_at: datetime | None = None,
@@ -63,18 +67,24 @@ class RuntimeStateService:
                 strategy_name=strategy_name,
                 strategy_version="1",
                 instrument=instrument,
-                parameters={parameter.key: parameter.value for parameter in metadata.parameters},
+                parameters=parameters or {parameter.key: parameter.value for parameter in metadata.parameters},
                 started_at=started_at or now,
+                control_mode=control_mode or "MANUAL",
+                deployment_id=deployment_id,
+                active_profile_name=active_profile_name,
             )
 
         runtime.runtime_id = engine.runtime_id
         runtime.strategy_name = strategy_name
         runtime.strategy_version = "1"
         runtime.instrument = instrument
-        runtime.parameters = {parameter.key: parameter.value for parameter in metadata.parameters}
+        runtime.parameters = parameters or engine.strategy_parameters or {parameter.key: parameter.value for parameter in metadata.parameters}
         runtime.status = status
         runtime.recovery_state = recovery_state
         runtime.recovery_reason = recovery_reason
+        runtime.control_mode = control_mode or runtime.control_mode or "MANUAL"
+        runtime.deployment_id = deployment_id if deployment_id is not None else runtime.deployment_id
+        runtime.active_profile_name = active_profile_name or engine.active_profile_name or runtime.active_profile_name
         runtime.auto_resume = auto_resume
         runtime.started_at = started_at or runtime.started_at
         runtime.stopped_at = stopped_at

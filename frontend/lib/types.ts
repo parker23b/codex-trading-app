@@ -150,6 +150,267 @@ export type StreamHealthStatus = {
   last_error?: string | null;
 };
 
+export type CoverageWatchlistEntry = {
+  instrument: string;
+  tier: "TIER1" | "TIER2" | "TIER3";
+  status: "ACTIVE" | "COOLDOWN" | "INACTIVE";
+  asset_class?: string | null;
+  pinned: boolean;
+  reason?: string | null;
+  priority_score: number;
+  requested_frequency?: string | null;
+  promotion_expires_at?: string | null;
+  last_streamed_at?: string | null;
+  last_refreshed_at?: string | null;
+  streamed: boolean;
+};
+
+export type CoveragePromotionRequest = {
+  id?: number | null;
+  instrument: string;
+  source: string;
+  reason: string;
+  score: number;
+  status: "PENDING" | "ACCEPTED" | "REJECTED" | "EXPIRED";
+  requested_at: string;
+  expires_at?: string | null;
+  market_status?: string | null;
+  tradable?: boolean | null;
+  requested_frequency?: string | null;
+  updated_at: string;
+};
+
+export type ControlPlaneFamily = {
+  strategy_name: string;
+  description: string;
+  supported_asset_classes: string[];
+  available_profile_names: string[];
+  governance: {
+    approval_state: string;
+    autonomous_operation_allowed: boolean;
+    emergency_stop: boolean;
+    approved_asset_classes: string[];
+    approved_instruments: string[];
+    approved_profile_names: string[];
+    supported_asset_classes: string[];
+    available_profile_names: string[];
+    updated_at?: string | null;
+  };
+  deployment: {
+    state: string;
+    selected_profile?: string | null;
+    selected_profile_parameters: Record<string, number>;
+    selected_instrument?: string | null;
+    selected_asset_class?: string | null;
+    suitability_score?: number | null;
+    suitability_reason?: string | null;
+    profile_selected_at?: string | null;
+    profile_change_reason?: string | null;
+    last_restart_reason?: string | null;
+    blocked_reason?: string | null;
+    degraded_reason?: string | null;
+    last_evaluated_at?: string | null;
+    last_deployed_at?: string | null;
+    updated_at?: string | null;
+  } | null;
+  runtime: {
+    is_running: boolean;
+    active_runtime_id?: string | null;
+    active_instrument?: string | null;
+    active_profile_name?: string | null;
+    active_parameters: Record<string, number>;
+    control_mode?: string | null;
+    recovery_state?: string | null;
+    updated_at?: string | null;
+    persisted_runtimes: Array<{
+      runtime_id: string;
+      status: string;
+      instrument: string;
+      control_mode?: string | null;
+      active_profile_name?: string | null;
+      parameters: Record<string, number>;
+      updated_at?: string | null;
+    }>;
+  };
+  alignment: {
+    is_aligned: boolean | null;
+    status: string;
+    reason: string;
+    checks: Array<{
+      code: string;
+      passed: boolean;
+      expected?: unknown;
+      actual?: unknown;
+    }>;
+  };
+  recent_events: Array<{
+    id?: number | null;
+    created_at: string;
+    event_type: string;
+    title: string;
+    message?: string | null;
+    severity: string;
+    payload_json: Record<string, unknown>;
+  }>;
+};
+
+export type ControlPlaneSummary = {
+  autonomous_control_enabled: boolean;
+  configured_autonomous_control_enabled: boolean;
+  effective_autonomous_control_enabled: boolean;
+  autonomy_override_active: boolean;
+  autonomy_override_value?: boolean | null;
+  autonomy_override_reason?: string | null;
+  autonomy_updated_at?: string | null;
+  counts: Record<string, number>;
+  misaligned_count: number;
+  families: ControlPlaneFamily[];
+};
+
+export type OperatorControlState = {
+  configured_autonomous_control_enabled: boolean;
+  effective_autonomous_control_enabled: boolean;
+  override_active: boolean;
+  override_value?: boolean | null;
+  override_reason?: string | null;
+  updated_at?: string | null;
+};
+
+export type TradeAllocatorDecisionSummary = {
+  id?: number | null;
+  created_at: string;
+  event_type: string;
+  selected: boolean;
+  strategy_name?: string | null;
+  instrument?: string | null;
+  reason_code?: string | null;
+  reason?: string | null;
+  score?: number | null;
+  direction?: "BUY" | "SELL" | null;
+  source_tier?: string | null;
+};
+
+export type CoverageSummary = {
+  streaming: {
+    active_instruments: CoverageWatchlistEntry[];
+    execution_readiness: Array<{
+      instrument: string;
+      is_ok: boolean;
+      market_open: boolean;
+      tradable: boolean;
+      quote_fresh: boolean;
+      spread_ok: boolean;
+      session_valid: boolean;
+      dealing_allowed: boolean;
+      last_price_age_ms: number;
+      spread?: number | null;
+      reason?: string | null;
+    }>;
+    desired_instruments: string[];
+    pinned_instruments: string[];
+    capped_instruments: string[];
+    asset_class_usage: Record<string, number>;
+  };
+  tier2: {
+    refresh_queue: string[];
+    active_candidates: CoverageWatchlistEntry[];
+  };
+  promotions: {
+    pending_count: number;
+    accepted_count: number;
+    rejected_count: number;
+    expired_count: number;
+    recent_requests: CoveragePromotionRequest[];
+  };
+  trade_allocator: {
+    selected_count: number;
+    rejected_count: number;
+    reason_counts: Record<string, number>;
+    recent_decisions: TradeAllocatorDecisionSummary[];
+  };
+};
+
+export type OperationalTelemetry = {
+  status: string;
+  last_heartbeat: string;
+  heartbeat_age_ms?: number | null;
+  last_price_update?: string | null;
+  last_price_age_ms?: number | null;
+  last_reconciliation?: string | null;
+  last_reconciliation_age_ms?: number | null;
+  stream_connected: boolean;
+  stream_last_tick_at?: string | null;
+  stream_last_tick_age_ms?: number | null;
+  subscribed_instrument_count: number;
+  desired_instrument_count: number;
+  broker_connected: boolean;
+  broker_latency_ms?: number | null;
+  runtime_count: number;
+  active_runtime_count: number;
+  stale_runtime_count: number;
+  stale_price_runtime_count: number;
+  reconciliation_mismatches: number;
+  order_failures_last_5m: number;
+  rejected_orders_last_5m: number;
+  strategies_paused_by_health: number;
+};
+
+export type ScreeningStrategyLimit = {
+  name: string;
+  description: string;
+  promotion_threshold: number;
+  refresh_tier: string;
+};
+
+export type SystemOperatingLimits = {
+  autonomous_control_enabled: boolean;
+  risk: {
+    max_open_positions: number;
+    max_positions_per_strategy: number;
+    max_open_risk_percent: number;
+    daily_loss_limit: number;
+    max_position_notional: number;
+    max_unhealthy_runtimes: number;
+    global_entry_kill_switch: boolean;
+  };
+  execution: {
+    max_price_age_ms: number;
+    max_spread_pips: number;
+    max_spread_percent_of_price: number;
+    entry_burst_limit: number;
+    entry_burst_window_seconds: number;
+    failed_entry_retry_cooldown_seconds: number;
+    duplicate_signal_window_seconds: number;
+    cooldown_after_loss_seconds: number;
+    cooldown_after_exit_seconds: number;
+    allocator_enabled: boolean;
+    allocator_max_decisions_per_cycle: number;
+    allocator_max_open_positions_per_instrument: number;
+    allocator_signal_stale_after_seconds: number;
+  };
+  coverage: {
+    streaming_enabled: boolean;
+    max_instruments: number;
+    requested_frequency: string;
+    max_promotions_per_minute: number;
+    max_subscription_churn_per_minute: number;
+    promotion_score_threshold: number;
+    eviction_score_threshold: number;
+    min_tier1_residency_seconds: number;
+    demotion_cooldown_seconds: number;
+    tier2_refresh_enabled: boolean;
+    tier2_refresh_interval_seconds: number;
+    tier2_refresh_batch_size: number;
+    tier2_refresh_stale_after_seconds: number;
+    tier2_promotion_score_threshold: number;
+    tier2_promotion_ttl_seconds: number;
+    asset_class_slot_budgets: Record<string, number>;
+    seed_instruments: string[];
+    tier2_seed_instruments: string[];
+  };
+  screening: ScreeningStrategyLimit[];
+};
+
 export type DomainEvent = {
   id: number;
   created_at: string;

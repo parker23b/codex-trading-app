@@ -52,7 +52,7 @@ export function EquityPanel({ points, latestValue, delta }: EquityPanelProps) {
   }, [filter, points]);
 
   const width = 760;
-  const height = 300;
+  const height = 220;
   const padding = 24;
   const equityPath = buildLine(filteredPoints, width, height, padding, "value");
   const drawdownPath = buildLine(filteredPoints, width, height, padding, "drawdown");

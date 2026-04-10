@@ -1,13 +1,18 @@
 import {
   BrokerAuthStatus,
+  CoverageSummary,
+  ControlPlaneSummary,
   DashboardSnapshot,
   DomainEvent,
   Execution,
   MarketCategory,
   MarketCategoryOverviewResponse,
+  OperatorControlState,
   OperatorSummaryReview,
+  OperationalTelemetry,
   Position,
   ReviewHistoryItem,
+  SystemOperatingLimits,
   StrategyDefinition,
   StreamHealthStatus,
   Trade,
@@ -32,6 +37,121 @@ export const EMPTY_STREAM_HEALTH_STATUS: StreamHealthStatus = {
   last_tick_at: null,
   last_status: "Unavailable",
   last_error: "Stream health could not be loaded.",
+};
+
+export const EMPTY_COVERAGE_SUMMARY: CoverageSummary = {
+  streaming: {
+    active_instruments: [],
+    execution_readiness: [],
+    desired_instruments: [],
+    pinned_instruments: [],
+    capped_instruments: [],
+    asset_class_usage: {},
+  },
+  tier2: {
+    refresh_queue: [],
+    active_candidates: [],
+  },
+  promotions: {
+    pending_count: 0,
+    accepted_count: 0,
+    rejected_count: 0,
+    expired_count: 0,
+    recent_requests: [],
+  },
+  trade_allocator: {
+    selected_count: 0,
+    rejected_count: 0,
+    reason_counts: {},
+    recent_decisions: [],
+  },
+};
+
+export const EMPTY_CONTROL_PLANE_SUMMARY: ControlPlaneSummary = {
+  autonomous_control_enabled: true,
+  configured_autonomous_control_enabled: true,
+  effective_autonomous_control_enabled: true,
+  autonomy_override_active: false,
+  autonomy_override_value: null,
+  autonomy_override_reason: null,
+  autonomy_updated_at: null,
+  counts: {},
+  misaligned_count: 0,
+  families: [],
+};
+
+export const EMPTY_OPERATIONAL_TELEMETRY: OperationalTelemetry = {
+  status: "unknown",
+  last_heartbeat: new Date(0).toISOString(),
+  heartbeat_age_ms: null,
+  last_price_update: null,
+  last_price_age_ms: null,
+  last_reconciliation: null,
+  last_reconciliation_age_ms: null,
+  stream_connected: false,
+  stream_last_tick_at: null,
+  stream_last_tick_age_ms: null,
+  subscribed_instrument_count: 0,
+  desired_instrument_count: 0,
+  broker_connected: false,
+  broker_latency_ms: null,
+  runtime_count: 0,
+  active_runtime_count: 0,
+  stale_runtime_count: 0,
+  stale_price_runtime_count: 0,
+  reconciliation_mismatches: 0,
+  order_failures_last_5m: 0,
+  rejected_orders_last_5m: 0,
+  strategies_paused_by_health: 0,
+};
+
+export const EMPTY_SYSTEM_OPERATING_LIMITS: SystemOperatingLimits = {
+  autonomous_control_enabled: true,
+  risk: {
+    max_open_positions: 0,
+    max_positions_per_strategy: 0,
+    max_open_risk_percent: 0,
+    daily_loss_limit: 0,
+    max_position_notional: 0,
+    max_unhealthy_runtimes: 0,
+    global_entry_kill_switch: false,
+  },
+  execution: {
+    max_price_age_ms: 0,
+    max_spread_pips: 0,
+    max_spread_percent_of_price: 0,
+    entry_burst_limit: 0,
+    entry_burst_window_seconds: 0,
+    failed_entry_retry_cooldown_seconds: 0,
+    duplicate_signal_window_seconds: 0,
+    cooldown_after_loss_seconds: 0,
+    cooldown_after_exit_seconds: 0,
+    allocator_enabled: false,
+    allocator_max_decisions_per_cycle: 0,
+    allocator_max_open_positions_per_instrument: 0,
+    allocator_signal_stale_after_seconds: 0,
+  },
+  coverage: {
+    streaming_enabled: false,
+    max_instruments: 0,
+    requested_frequency: "n/a",
+    max_promotions_per_minute: 0,
+    max_subscription_churn_per_minute: 0,
+    promotion_score_threshold: 0,
+    eviction_score_threshold: 0,
+    min_tier1_residency_seconds: 0,
+    demotion_cooldown_seconds: 0,
+    tier2_refresh_enabled: false,
+    tier2_refresh_interval_seconds: 0,
+    tier2_refresh_batch_size: 0,
+    tier2_refresh_stale_after_seconds: 0,
+    tier2_promotion_score_threshold: 0,
+    tier2_promotion_ttl_seconds: 0,
+    asset_class_slot_budgets: {},
+    seed_instruments: [],
+    tier2_seed_instruments: [],
+  },
+  screening: [],
 };
 
 export const EMPTY_DASHBOARD_SNAPSHOT: DashboardSnapshot = {
@@ -133,6 +253,58 @@ export async function getBrokerAuthStatus(): Promise<BrokerAuthStatus> {
 
 export async function getStreamHealth(): Promise<StreamHealthStatus> {
   return request<StreamHealthStatus>("/health/stream");
+}
+
+export async function getCoverageSummary(): Promise<CoverageSummary> {
+  return request<CoverageSummary>("/coverage/summary");
+}
+
+export async function getControlPlaneSummary(): Promise<ControlPlaneSummary> {
+  return request<ControlPlaneSummary>("/control-plane/summary");
+}
+
+export async function getControlPlaneFamily(strategyName: string): Promise<ControlPlaneSummary["families"][number]> {
+  return request<ControlPlaneSummary["families"][number]>(`/control-plane/strategies/${strategyName}`);
+}
+
+export async function getOperatorControlState(): Promise<OperatorControlState> {
+  return request<OperatorControlState>("/control-plane/operator-state");
+}
+
+export async function updateOperatorControlState(
+  payload: { autonomous_control_enabled?: boolean | null; reason?: string | null },
+): Promise<OperatorControlState> {
+  return request<OperatorControlState>("/control-plane/operator-state", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateStrategyGovernance(
+  strategyName: string,
+  payload: {
+    approval_state?: string | null;
+    autonomous_operation_allowed?: boolean | null;
+    emergency_stop?: boolean | null;
+    approved_asset_classes?: string[] | null;
+    approved_instruments?: string[] | null;
+    approved_profile_names?: string[] | null;
+    max_concurrent_deployments?: number | null;
+    notes?: string | null;
+  },
+): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(`/control-plane/governance/${strategyName}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getOperationalTelemetry(): Promise<OperationalTelemetry> {
+  return request<OperationalTelemetry>("/system/telemetry");
+}
+
+export async function getSystemOperatingLimits(): Promise<SystemOperatingLimits> {
+  return request<SystemOperatingLimits>("/system/limits");
 }
 
 export async function withFallback<T>(loader: () => Promise<T>, fallback: T): Promise<T> {

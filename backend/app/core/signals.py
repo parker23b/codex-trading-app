@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from app.core.broker import OrderDirection
 from app.models.trade import Position
@@ -55,3 +56,23 @@ class ExitSignal:
     tradable: bool | None = None
     status: SignalStatus = SignalStatus.PENDING
     reason: str | None = None
+
+
+@dataclass(slots=True)
+class SignalCandidate:
+    strategy_name: str
+    instrument: str
+    signal: EntrySignal | ExitSignal | None
+    engine: Any
+    source_tier: str = "TIER1"
+    confidence: float | None = None
+    metadata: Any | None = None
+
+
+@dataclass(slots=True)
+class TradeAllocationDecision:
+    candidate: SignalCandidate
+    selected: bool
+    reason_code: str
+    reason: str
+    score: float | None = None

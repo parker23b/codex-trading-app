@@ -4,15 +4,16 @@ from datetime import UTC, datetime
 from time import perf_counter
 from uuid import uuid4
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.core.broker import BrokerOrderStatus, OrderDirection, OrderRequest
 from app.core.config import get_settings
 from app.core.ig_broker import IGBrokerError
 from app.core.logging import get_logger
-from app.core.signals import EntrySignal, ExitSignal, SignalStatus
+from app.core.signals import EntrySignal, ExitSignal, SignalCandidate, SignalStatus, TradeAllocationDecision
 from app.core.instrument_catalog import list_instruments
 from app.core.runtime import runtime_manager
+from app.models.strategy_deployment import StrategyDeployment
 from app.models.trade import Execution, ExecutionPhase, ExecutionStatus, Position, Trade, clone_position, utc_now
 from app.strategies.registry import strategy_registry
 from app.services.domain_event_service import domain_event_service
@@ -20,6 +21,8 @@ from app.services.health_service import get_health_service
 from app.services.market_status_service import MarketStatus, get_market_status_service
 from app.services.portfolio_risk_service import PortfolioRiskService
 from app.services.runtime_state_service import RuntimeStateService
+from app.services.strategy_governance_service import StrategyGovernanceService
+from app.services.trade_allocator_service import TradeAllocatorService
 from app.services.trade_service import TradeService
 
 logger = get_logger(__name__)
@@ -48,6 +51,7 @@ class StrategyService:
         self.health_service = get_health_service()
         self.market_status_service = get_market_status_service()
         self.risk_service = PortfolioRiskService(session)
+        self.trade_allocator = TradeAllocatorService(session)
         self.runtime_state_service = RuntimeStateService(session) if session is not None else None
 
     def list_strategies(self) -> list[dict[str, object]]:
@@ -73,6 +77,14 @@ class StrategyService:
                 latest_execution_warning_by_key[key] = execution
 
         strategies: list[dict[str, object]] = []
+        governance_by_name = {
+            record.strategy_name: record
+            for record in StrategyGovernanceService(self.session).list_strategies()
+        }
+        deployment_by_name = {
+            deployment.strategy_name: deployment
+            for deployment in self.session.exec(select(StrategyDeployment)).all()
+        }
         runtimes_by_key = {}
         if self.runtime_state_service is not None:
             runtimes_by_key = {
@@ -92,6 +104,17 @@ class StrategyService:
             )
             primary_instrument = primary_engine.instrument if primary_engine else metadata.default_instrument
             primary_warning = latest_execution_warning_by_key.get((metadata.name, primary_instrument))
+            governance = governance_by_name.get(metadata.name)
+            deployment = deployment_by_name.get(metadata.name)
+            primary_runtime = runtimes_by_key.get((metadata.name, primary_instrument))
+            active_parameter_values = (
+                primary_runtime.parameters
+                if primary_runtime is not None and primary_runtime.parameters
+                else {
+                    parameter.key: parameter.value
+                    for parameter in metadata.parameters
+                }
+            )
             price_snapshot = (
                 self._resolve_price_snapshot(
                     primary_instrument,
@@ -116,6 +139,24 @@ class StrategyService:
                     "account_type": self.settings.broker_mode,
                     "position_size": metadata.position_size,
                     "risk_per_trade": metadata.risk_per_trade,
+                    "supported_asset_classes": list(metadata.supported_asset_classes),
+                    "available_profiles": [profile.name for profile in metadata.parameter_profiles],
+                    "governance_approval_state": governance.approval_state if governance is not None else "UNKNOWN",
+                    "autonomous_operation_allowed": (
+                        governance.autonomous_operation_allowed if governance is not None else False
+                    ),
+                    "emergency_stop": governance.emergency_stop if governance is not None else False,
+                    "deployment_state": deployment.state if deployment is not None else "UNASSIGNED",
+                    "deployment_profile": deployment.selected_profile if deployment is not None else None,
+                    "deployment_parameters": deployment.selected_profile_parameters if deployment is not None else {},
+                    "deployment_instrument": deployment.selected_instrument if deployment is not None else None,
+                    "deployment_reason": (
+                        deployment.blocked_reason
+                        or deployment.degraded_reason
+                        or deployment.suitability_reason
+                        if deployment is not None
+                        else None
+                    ),
                     "active_instruments": [engine.instrument for _, engine in active_engines],
                     "active_runtime_count": len(active_engines),
                     "open_position_count": len(strategy_positions),
@@ -140,6 +181,16 @@ class StrategyService:
                                 runtimes_by_key.get((metadata.name, engine.instrument)).recovery_state
                                 if runtimes_by_key.get((metadata.name, engine.instrument)) is not None
                                 else "EPHEMERAL"
+                            ),
+                            "control_mode": (
+                                runtimes_by_key.get((metadata.name, engine.instrument)).control_mode
+                                if runtimes_by_key.get((metadata.name, engine.instrument)) is not None
+                                else "EPHEMERAL"
+                            ),
+                            "deployment_id": (
+                                runtimes_by_key.get((metadata.name, engine.instrument)).deployment_id
+                                if runtimes_by_key.get((metadata.name, engine.instrument)) is not None
+                                else None
                             ),
                             "recovery_reason": (
                                 runtimes_by_key.get((metadata.name, engine.instrument)).recovery_reason
@@ -172,6 +223,10 @@ class StrategyService:
                             "last_heartbeat_at": runtime.last_heartbeat_at,
                             "last_price_seen": runtime.last_price_seen,
                             "last_price_seen_at": runtime.last_price_seen_at,
+                            "control_mode": runtime.control_mode,
+                            "deployment_id": runtime.deployment_id,
+                            "active_profile_name": runtime.active_profile_name,
+                            "parameters": runtime.parameters,
                             "auto_resume": runtime.auto_resume,
                         }
                         for key, runtime in runtimes_by_key.items()
@@ -182,7 +237,7 @@ class StrategyService:
                         {
                             "key": parameter.key,
                             "label": parameter.label,
-                            "value": parameter.value,
+                            "value": active_parameter_values.get(parameter.key, parameter.value),
                             "step": parameter.step,
                         }
                         for parameter in metadata.parameters
@@ -191,14 +246,32 @@ class StrategyService:
             )
         return strategies
 
-    def start_strategy(self, strategy_name: str, instrument: str) -> None:
-        engine = runtime_manager.start(strategy_name=strategy_name, instrument=instrument)
+    def start_strategy(
+        self,
+        strategy_name: str,
+        instrument: str,
+        *,
+        control_mode: str = "MANUAL",
+        deployment_id: int | None = None,
+        profile_name: str | None = None,
+        strategy_parameters: dict[str, object] | None = None,
+    ) -> None:
+        engine = runtime_manager.start(
+            strategy_name=strategy_name,
+            instrument=instrument,
+            profile_name=profile_name,
+            strategy_parameters=strategy_parameters,
+        )
         if self.runtime_state_service is not None:
             self.runtime_state_service.sync_engine_state(
                 strategy_name=strategy_name,
                 instrument=instrument,
                 status="RUNNING",
                 recovery_state="RUNNING",
+                control_mode=control_mode,
+                deployment_id=deployment_id,
+                active_profile_name=engine.active_profile_name,
+                parameters=engine.strategy_parameters,
                 last_price_seen=runtime_manager.get_last_price(instrument),
                 last_price_seen_at=runtime_manager.get_last_price_updated_at(instrument),
                 current_position=engine.current_position,
@@ -213,7 +286,13 @@ class StrategyService:
             runtime_id=engine.runtime_id,
             strategy_name=strategy_name,
             instrument=instrument,
-            payload_json={"status": "RUNNING"},
+            payload_json={
+                "status": "RUNNING",
+                "control_mode": control_mode,
+                "deployment_id": deployment_id,
+                "active_profile_name": engine.active_profile_name,
+                "strategy_parameters": engine.strategy_parameters,
+            },
         )
         self._refresh_paused_strategy_count()
 
@@ -263,12 +342,44 @@ class StrategyService:
         tradable: bool | None = None,
         received_at: datetime | None = None,
     ) -> None:
-        if self.session is None:
-            raise ValueError("A database session is required to process price updates.")
+        candidates = self.evaluate_price_update(
+            instrument=instrument,
+            price=price,
+            bid=bid,
+            ask=ask,
+            high=high,
+            low=low,
+            market_status=market_status,
+            tradable=tradable,
+            received_at=received_at,
+            source_tier="TIER1",
+        )
+        candidates = self.allocate_signal_candidates(candidates, received_at=received_at)
+        self.orchestrate_signal_candidates(
+            candidates,
+            price=price,
+            bid=bid,
+            ask=ask,
+            received_at=received_at,
+        )
 
-        trade_service = TradeService(self.session)
-        open_positions = trade_service.list_positions()
-        trades = trade_service.list_trades()
+    def evaluate_price_update(
+        self,
+        instrument: str,
+        price: float,
+        *,
+        bid: float | None = None,
+        ask: float | None = None,
+        high: float | None = None,
+        low: float | None = None,
+        market_status: str | None = None,
+        tradable: bool | None = None,
+        received_at: datetime | None = None,
+        source_tier: str = "TIER1",
+    ) -> list[SignalCandidate]:
+        if self.session is None:
+            raise ValueError("A database session is required to evaluate price updates.")
+
         update_results = runtime_manager.process_price_update(
             instrument=instrument,
             price=price,
@@ -296,15 +407,64 @@ class StrategyService:
                         else None
                     ),
                 )
+        candidates: list[SignalCandidate] = []
         for update_result in update_results:
-            engine = update_result.engine
-            metadata = strategy_registry.get_metadata(engine.strategy.name)
+            candidates.append(
+                SignalCandidate(
+                    strategy_name=update_result.engine.strategy.name,
+                    instrument=update_result.engine.instrument,
+                    signal=update_result.signal,
+                    engine=update_result.engine,
+                    source_tier=source_tier,
+                    metadata=strategy_registry.get_metadata(update_result.engine.strategy.name),
+                )
+            )
+        return candidates
+
+    def allocate_signal_candidates(
+        self,
+        candidates: list[SignalCandidate],
+        *,
+        received_at: datetime | None = None,
+    ) -> list[SignalCandidate]:
+        if not self.settings.trade_allocator_enabled:
+            return candidates
+
+        decisions = self.trade_allocator.allocate(candidates, received_at=received_at)
+        selected_candidates: list[SignalCandidate] = []
+        for decision in decisions:
+            if decision.selected:
+                self._record_allocator_selection(decision)
+                selected_candidates.append(decision.candidate)
+                continue
+            self._record_allocator_rejection(decision)
+        return selected_candidates
+
+    def orchestrate_signal_candidates(
+        self,
+        candidates: list[SignalCandidate],
+        *,
+        price: float,
+        bid: float | None = None,
+        ask: float | None = None,
+        received_at: datetime | None = None,
+    ) -> None:
+        if self.session is None:
+            raise ValueError("A database session is required to orchestrate signal candidates.")
+
+        trade_service = TradeService(self.session)
+        open_positions = trade_service.list_positions()
+        trades = trade_service.list_trades()
+
+        for candidate in candidates:
+            engine = candidate.engine
+            metadata = candidate.metadata
             existing_position = trade_service.get_open_position(
-                instrument,
+                candidate.instrument,
                 strategy_name=engine.strategy.name,
                 broker_reference=engine.current_position.broker_reference if engine.current_position else None,
             )
-            signal = update_result.signal
+            signal = candidate.signal
 
             if isinstance(signal, EntrySignal):
                 execution, should_submit = self._prepare_execution(
@@ -342,6 +502,7 @@ class StrategyService:
                         "size": signal.size,
                         "market_status": signal.market_status,
                         "tradable": signal.tradable,
+                        "source_tier": candidate.source_tier,
                     },
                     created_at=signal.signal_at,
                 )
@@ -426,7 +587,7 @@ class StrategyService:
 
             if engine.current_position is not None:
                 existing_position = trade_service.get_open_position(
-                    instrument,
+                    candidate.instrument,
                     strategy_name=engine.strategy.name,
                     broker_reference=engine.current_position.broker_reference,
                 )
@@ -509,6 +670,7 @@ class StrategyService:
                         "market_status": signal.market_status,
                         "tradable": signal.tradable,
                         "broker_reference": signal.position.broker_reference if signal.position is not None else None,
+                        "source_tier": candidate.source_tier,
                     },
                     created_at=signal.signal_at,
                 )
@@ -526,7 +688,7 @@ class StrategyService:
                 trade.r_multiple = round(trade.pnl / risk_budget, 2)
                 trade.reason = f"{trade.strategy_name} exit triggered"
                 existing_position = trade_service.get_open_position(
-                    instrument,
+                    candidate.instrument,
                     strategy_name=trade.strategy_name,
                     broker_reference=trade.broker_reference,
                 )
@@ -573,6 +735,54 @@ class StrategyService:
                 open_positions = trade_service.list_positions()
                 trades = trade_service.list_trades()
         self._refresh_paused_strategy_count()
+
+    def _record_allocator_rejection(self, decision: TradeAllocationDecision) -> None:
+        signal = decision.candidate.signal
+        if not isinstance(signal, EntrySignal):
+            return
+        self.event_service.record_event(
+            event_type="strategy.trade_allocator_rejected",
+            category="strategy",
+            severity="info",
+            source="strategy_service.allocate_signal_candidates",
+            title="Trade allocator rejected signal candidate",
+            message=f"{signal.strategy_name} entry on {signal.instrument} was filtered before execution orchestration.",
+            strategy_name=signal.strategy_name,
+            instrument=signal.instrument,
+            payload_json={
+                "reason_code": decision.reason_code,
+                "reason": decision.reason,
+                "score": decision.score,
+                "direction": signal.direction.value,
+                "observed_price": signal.observed_price,
+                "source_tier": decision.candidate.source_tier,
+            },
+            created_at=signal.signal_at,
+        )
+
+    def _record_allocator_selection(self, decision: TradeAllocationDecision) -> None:
+        signal = decision.candidate.signal
+        if not isinstance(signal, EntrySignal):
+            return
+        self.event_service.record_event(
+            event_type="strategy.trade_allocator_selected",
+            category="strategy",
+            severity="info",
+            source="strategy_service.allocate_signal_candidates",
+            title="Trade allocator selected signal candidate",
+            message=f"{signal.strategy_name} entry on {signal.instrument} advanced to risk and execution orchestration.",
+            strategy_name=signal.strategy_name,
+            instrument=signal.instrument,
+            payload_json={
+                "reason_code": decision.reason_code,
+                "reason": decision.reason,
+                "score": decision.score,
+                "direction": signal.direction.value,
+                "observed_price": signal.observed_price,
+                "source_tier": decision.candidate.source_tier,
+            },
+            created_at=signal.signal_at,
+        )
 
     @staticmethod
     def _apply_broker_entry_constraints(*, engine, signal: EntrySignal) -> EntrySignal:

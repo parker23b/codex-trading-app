@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -14,6 +15,7 @@ from app.core.logging import get_logger
 from app.core.runtime import runtime_manager
 from app.db.session import engine
 from app.services.health_service import get_health_service
+from app.services.watchlist_service import get_watchlist_service
 from app.services.strategy_service import StrategyService
 
 try:
@@ -56,11 +58,14 @@ class StreamHealthState:
     enabled: bool = False
     connected: bool = False
     subscribed_instruments: tuple[str, ...] = ()
+    desired_instruments: tuple[str, ...] = ()
+    capped_instruments: tuple[str, ...] = ()
     last_tick_at: datetime | None = None
     last_tick_at_by_instrument: dict[str, datetime] | None = None
     last_status: str | None = None
     last_error: str | None = None
     dependency_ready: bool = False
+    subscription_churn_last_minute: int = 0
 
 
 class _StreamClientListener(ClientListener):
@@ -172,6 +177,7 @@ class IGStreamingService:
         self._subscribed_instruments: tuple[str, ...] = ()
         self._latest_prices: dict[str, float] = {}
         self._last_tick_at_by_instrument: dict[str, datetime] = {}
+        self._subscription_churn_events: deque[datetime] = deque()
         self._missing_dependency_logged = False
         self._health = StreamHealthState()
 
@@ -202,11 +208,14 @@ class IGStreamingService:
             enabled=self._health.enabled,
             connected=self._health.connected,
             subscribed_instruments=self._health.subscribed_instruments,
+            desired_instruments=self._health.desired_instruments,
+            capped_instruments=self._health.capped_instruments,
             last_tick_at=self._health.last_tick_at,
             last_tick_at_by_instrument=dict(self._last_tick_at_by_instrument),
             last_status=self._health.last_status,
             last_error=self._health.last_error,
             dependency_ready=self._health.dependency_ready,
+            subscription_churn_last_minute=self._health.subscription_churn_last_minute,
         )
 
     def get_last_price(self, instrument: str) -> float | None:
@@ -260,8 +269,11 @@ class IGStreamingService:
         self._loop.call_soon_threadsafe(self._queue.put_nowait, update)
 
     async def _reconcile_subscription(self) -> None:
-        active_instruments = tuple(runtime_manager.list_active_instruments())
-        if not active_instruments:
+        streaming_plan = get_watchlist_service().get_streaming_plan()
+        desired_instruments = streaming_plan.instruments
+        self._health.desired_instruments = desired_instruments
+        self._health.capped_instruments = streaming_plan.capped_instruments
+        if not desired_instruments:
             if self._subscription is not None:
                 logger.info("No active instruments remain; closing IG price subscription.")
             self._unsubscribe_price_stream()
@@ -271,8 +283,23 @@ class IGStreamingService:
         if credentials != self._credentials or self._client is None:
             self._reset_client(credentials)
 
-        if active_instruments != self._subscribed_instruments:
-            self._resubscribe(active_instruments)
+        if desired_instruments != self._subscribed_instruments:
+            churn_amount = self._churn_amount(desired_instruments)
+            if not self._has_churn_capacity(churn_amount):
+                self._health.last_error = "Subscription churn limit reached; keeping current streamed watchlist."
+                logger.warning(
+                    "Skipping IG subscription update because churn budget is exhausted",
+                    extra={
+                        "current_instruments": list(self._subscribed_instruments),
+                        "desired_instruments": list(desired_instruments),
+                        "capped_instruments": list(streaming_plan.capped_instruments),
+                        "churn_amount": churn_amount,
+                    },
+                )
+                return
+            self._resubscribe(desired_instruments)
+            self._record_churn(churn_amount)
+            self._health.last_error = None
 
     async def _drain_price_queue(self, *, timeout: float) -> None:
         try:
@@ -339,6 +366,7 @@ class IGStreamingService:
         subscription = Subscription("MERGE", items, PRICE_FIELDS)
         subscription.setDataAdapter("Pricing")
         subscription.setRequestedSnapshot("yes")
+        self._apply_requested_frequency(subscription)
         listener = _PriceSubscriptionListener(self)
         subscription.addListener(listener)
         self._client.subscribe(subscription)
@@ -348,6 +376,7 @@ class IGStreamingService:
         market_items = [f"MARKET:{instrument}" for instrument in instruments]
         market_subscription = Subscription("MERGE", market_items, MARKET_FIELDS)
         market_subscription.setRequestedSnapshot("yes")
+        self._apply_requested_frequency(market_subscription)
         market_listener = _MarketSubscriptionListener(self)
         market_subscription.addListener(market_listener)
         self._client.subscribe(market_subscription)
@@ -380,6 +409,8 @@ class IGStreamingService:
         self._subscribed_instruments = ()
         self._last_tick_at_by_instrument = {}
         self._health.subscribed_instruments = ()
+        self._health.desired_instruments = ()
+        self._health.capped_instruments = ()
 
     def _teardown_client(self) -> None:
         self._unsubscribe_price_stream()
@@ -421,6 +452,39 @@ class IGStreamingService:
         if ask is not None:
             return ask
         return None
+
+    def _apply_requested_frequency(self, subscription: Any) -> None:
+        requested_frequency = self.settings.ig_streaming_requested_frequency
+        if not hasattr(subscription, "setRequestedMaxFrequency"):
+            return
+        if requested_frequency.lower() == "unlimited":
+            subscription.setRequestedMaxFrequency("unlimited")
+            return
+        subscription.setRequestedMaxFrequency(requested_frequency)
+
+    def _churn_amount(self, desired_instruments: tuple[str, ...]) -> int:
+        return len(set(desired_instruments).symmetric_difference(self._subscribed_instruments))
+
+    def _has_churn_capacity(self, churn_amount: int) -> bool:
+        if churn_amount <= 0:
+            return True
+        self._prune_churn_events()
+        limit = self.settings.ig_streaming_max_subscription_churn_per_minute
+        return len(self._subscription_churn_events) + churn_amount <= limit
+
+    def _record_churn(self, churn_amount: int) -> None:
+        if churn_amount <= 0:
+            return
+        now = datetime.now(UTC)
+        for _ in range(churn_amount):
+            self._subscription_churn_events.append(now)
+        self._prune_churn_events()
+
+    def _prune_churn_events(self) -> None:
+        cutoff = datetime.now(UTC).timestamp() - 60.0
+        while self._subscription_churn_events and self._subscription_churn_events[0].timestamp() < cutoff:
+            self._subscription_churn_events.popleft()
+        self._health.subscription_churn_last_minute = len(self._subscription_churn_events)
 
 
 _streaming_service: IGStreamingService | None = None

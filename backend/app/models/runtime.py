@@ -28,6 +28,9 @@ class StrategyRuntimeState(SQLModel, table=True):
     last_price_seen: float | None = None
     last_price_seen_at: datetime | None = None
     current_position_broker_reference: str | None = Field(default=None, index=True)
+    control_mode: str = Field(default="MANUAL", index=True)
+    deployment_id: int | None = Field(default=None, index=True)
+    active_profile_name: str | None = Field(default=None, index=True)
     auto_resume: bool = True
     strategy_state_snapshot: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utc_now, nullable=False)

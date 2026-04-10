@@ -2,14 +2,32 @@ from sqlalchemy import text
 from sqlmodel import SQLModel
 
 from app.models.domain_event import DomainEvent
+from app.models.operator_control import OperatorControlState
+from app.models.promotion_request import PromotionRequest
 from app.models.review import GeneratedReviewRecord
 from app.db.session import engine
+from app.models.strategy_deployment import StrategyDeployment
+from app.models.strategy_governance import StrategyFamilyGovernance
 from app.models.runtime import StrategyRuntimeState
 from app.models.trade import Execution, Position, ReconciliationEvent, Trade
+from app.models.watchlist import WatchlistEntry
 
 
 def initialize_database() -> None:
-    _ = (Trade, Position, StrategyRuntimeState, ReconciliationEvent, Execution, GeneratedReviewRecord, DomainEvent)
+    _ = (
+        Trade,
+        Position,
+        StrategyRuntimeState,
+        ReconciliationEvent,
+        Execution,
+        GeneratedReviewRecord,
+        DomainEvent,
+        OperatorControlState,
+        WatchlistEntry,
+        PromotionRequest,
+        StrategyFamilyGovernance,
+        StrategyDeployment,
+    )
     SQLModel.metadata.create_all(engine)
     _ensure_sqlite_column("position", "broker_reference", "VARCHAR")
     _ensure_sqlite_column("position", "broker_sync_status", "VARCHAR DEFAULT 'PENDING'")
@@ -44,6 +62,9 @@ def initialize_database() -> None:
     _ensure_sqlite_column("strategyruntimestate", "last_price_seen", "FLOAT")
     _ensure_sqlite_column("strategyruntimestate", "last_price_seen_at", "TIMESTAMP")
     _ensure_sqlite_column("strategyruntimestate", "current_position_broker_reference", "VARCHAR")
+    _ensure_sqlite_column("strategyruntimestate", "control_mode", "VARCHAR DEFAULT 'MANUAL'")
+    _ensure_sqlite_column("strategyruntimestate", "deployment_id", "INTEGER")
+    _ensure_sqlite_column("strategyruntimestate", "active_profile_name", "VARCHAR")
     _ensure_sqlite_column("strategyruntimestate", "auto_resume", "BOOLEAN DEFAULT 1")
     _ensure_sqlite_column("strategyruntimestate", "strategy_state_snapshot", "JSON")
     _ensure_sqlite_column("strategyruntimestate", "updated_at", "TIMESTAMP")
@@ -95,6 +116,31 @@ def initialize_database() -> None:
         "domain_events",
         "error_type, created_at DESC",
     )
+    _ensure_index(
+        "ix_watchlist_entry_tier_status_priority",
+        "watchlist_entry",
+        "tier, status, pinned DESC, priority_score DESC, assigned_at ASC",
+    )
+    _ensure_sqlite_column("watchlist_entry", "promotion_expires_at", "TIMESTAMP")
+    _ensure_index(
+        "ix_promotion_request_status_requested_at",
+        "promotion_request",
+        "status, requested_at DESC",
+    )
+    _ensure_index(
+        "ix_strategy_family_governance_strategy_name",
+        "strategyfamilygovernance",
+        "strategy_name",
+    )
+    _ensure_index(
+        "ix_strategy_deployment_state_strategy",
+        "strategydeployment",
+        "state, strategy_name, updated_at DESC",
+    )
+    _ensure_sqlite_column("strategydeployment", "selected_profile_parameters", "JSON")
+    _ensure_sqlite_column("strategydeployment", "profile_selected_at", "TIMESTAMP")
+    _ensure_sqlite_column("strategydeployment", "profile_change_reason", "VARCHAR")
+    _ensure_sqlite_column("strategydeployment", "last_restart_reason", "VARCHAR")
 
 
 def _ensure_sqlite_column(table_name: str, column_name: str, column_sql: str) -> None:

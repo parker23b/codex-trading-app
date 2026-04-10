@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { CoverageControlPanel } from "@/components/dashboard/coverage-control-panel";
+import { ControlPlaneStrip } from "@/components/dashboard/control-plane-strip";
 import { EquityPanel } from "@/components/dashboard/equity-panel";
 import { KpiBar } from "@/components/dashboard/kpi-bar";
 import { NotificationCenter } from "@/components/dashboard/notification-center";
@@ -12,8 +14,8 @@ import { RiskPanel } from "@/components/dashboard/risk-panel";
 import { StrategyTapePanel } from "@/components/dashboard/strategy-tape-panel";
 import { ModeIndicator } from "@/components/ui/mode-indicator";
 import { Card } from "@/components/ui/card";
-import { getBrokerAuthStatus, getDashboardSnapshot, getExecutions, getOpenPositions, getStreamHealth, getTrades } from "@/lib/api";
-import { BrokerAuthStatus, DashboardSnapshot, Execution, Position, StreamHealthStatus, Trade } from "@/lib/types";
+import { getBrokerAuthStatus, getControlPlaneSummary, getCoverageSummary, getDashboardSnapshot, getExecutions, getOpenPositions, getStreamHealth, getSystemOperatingLimits, getTrades } from "@/lib/api";
+import { BrokerAuthStatus, ControlPlaneSummary, CoverageSummary, DashboardSnapshot, Execution, Position, StreamHealthStatus, SystemOperatingLimits, Trade } from "@/lib/types";
 
 type DashboardLiveProps = {
   initialPositions: Position[];
@@ -22,6 +24,9 @@ type DashboardLiveProps = {
   initialBrokerAuth: BrokerAuthStatus;
   initialDashboard: DashboardSnapshot;
   initialStreamHealth: StreamHealthStatus;
+  initialCoverage: CoverageSummary;
+  initialControlPlane: ControlPlaneSummary;
+  initialOperatingLimits: SystemOperatingLimits;
 };
 
 export function DashboardLive({
@@ -31,6 +36,9 @@ export function DashboardLive({
   initialBrokerAuth,
   initialDashboard,
   initialStreamHealth,
+  initialCoverage,
+  initialControlPlane,
+  initialOperatingLimits,
 }: DashboardLiveProps) {
   const [positions, setPositions] = useState(initialPositions);
   const [trades, setTrades] = useState(initialTrades);
@@ -38,6 +46,9 @@ export function DashboardLive({
   const [brokerAuth, setBrokerAuth] = useState(initialBrokerAuth);
   const [dashboard, setDashboard] = useState(initialDashboard);
   const [streamHealth, setStreamHealth] = useState(initialStreamHealth);
+  const [coverage, setCoverage] = useState(initialCoverage);
+  const [controlPlane, setControlPlane] = useState(initialControlPlane);
+  const [operatingLimits, setOperatingLimits] = useState(initialOperatingLimits);
 
   useEffect(() => {
     setPositions(initialPositions);
@@ -46,20 +57,26 @@ export function DashboardLive({
     setBrokerAuth(initialBrokerAuth);
     setDashboard(initialDashboard);
     setStreamHealth(initialStreamHealth);
-  }, [initialPositions, initialTrades, initialExecutions, initialBrokerAuth, initialDashboard, initialStreamHealth]);
+    setCoverage(initialCoverage);
+    setControlPlane(initialControlPlane);
+    setOperatingLimits(initialOperatingLimits);
+  }, [initialPositions, initialTrades, initialExecutions, initialBrokerAuth, initialDashboard, initialStreamHealth, initialCoverage, initialControlPlane, initialOperatingLimits]);
 
   useEffect(() => {
     let cancelled = false;
 
     const refresh = async () => {
       try {
-        const [nextPositions, nextTrades, nextExecutions, nextBrokerAuth, nextDashboard, nextStreamHealth] = await Promise.all([
+        const [nextPositions, nextTrades, nextExecutions, nextBrokerAuth, nextDashboard, nextStreamHealth, nextCoverage, nextControlPlane, nextOperatingLimits] = await Promise.all([
           getOpenPositions(),
           getTrades(),
           getExecutions(),
           getBrokerAuthStatus(),
           getDashboardSnapshot(),
           getStreamHealth(),
+          getCoverageSummary(),
+          getControlPlaneSummary(),
+          getSystemOperatingLimits(),
         ]);
         if (cancelled) {
           return;
@@ -70,6 +87,9 @@ export function DashboardLive({
         setBrokerAuth(nextBrokerAuth);
         setDashboard(nextDashboard);
         setStreamHealth(nextStreamHealth);
+        setCoverage(nextCoverage);
+        setControlPlane(nextControlPlane);
+        setOperatingLimits(nextOperatingLimits);
       } catch {
         // Keep the last successful snapshot visible if a refresh fails.
       }
@@ -211,7 +231,11 @@ export function DashboardLive({
             concentration={riskConcentration}
             drawdown={drawdownPercent}
           />
+          <CoverageControlPanel coverage={coverage} operatingLimits={operatingLimits} />
         </div>
+      </section>
+      <section className="page-grid">
+        <ControlPlaneStrip summary={controlPlane} />
       </section>
       <section className="page-grid">
         <div className="insight-grid">

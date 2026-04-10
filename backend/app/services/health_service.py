@@ -5,9 +5,15 @@ from datetime import UTC, datetime, timedelta
 from threading import RLock
 
 from pydantic import BaseModel
+from sqlmodel import Session, select
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.runtime import runtime_manager
+from app.db.session import engine
+from app.models.strategy_governance import GovernanceApprovalState, StrategyFamilyGovernance
+from app.models.trade import Execution, Position
+from app.services.operator_control_service import OperatorControlService
 
 logger = get_logger(__name__)
 
@@ -142,12 +148,59 @@ class HealthService:
             )
 
     def _classify_status(self, details: SystemHealth) -> str:
+        if self._is_idle():
+            return "idle"
+        if self._is_armed():
+            return "armed"
         price_is_fresh = self._is_price_fresh(details.last_price_update)
         if details.last_price_update is None or not details.broker_connected or not details.stream_connected:
             return "critical"
         if not price_is_fresh or details.order_failures_last_5m >= 3:
             return "degraded"
         return "ok"
+
+    def _is_idle(self) -> bool:
+        return not self._has_live_operational_demand() and not self._has_autonomy_armed()
+
+    def _is_armed(self) -> bool:
+        return not self._has_live_operational_demand() and self._has_autonomy_armed()
+
+    def _has_live_operational_demand(self) -> bool:
+        if runtime_manager.list_active_instruments():
+            return True
+        with Session(engine) as session:
+            has_open_positions = session.exec(select(Position.id).where(Position.is_open.is_(True)).limit(1)).first()
+            if has_open_positions is not None:
+                return True
+            has_pending_executions = session.exec(
+                select(Execution.id).where(
+                    Execution.status.in_(
+                        (
+                            "SIGNAL_GENERATED",
+                            "RISK_APPROVED",
+                            "CLOSE_REQUESTED",
+                            "ORDER_SUBMITTED",
+                            "ORDER_ACKNOWLEDGED",
+                            "FILL_PARTIAL",
+                        )
+                    )
+                ).limit(1)
+            ).first()
+            return has_pending_executions is not None
+
+    def _has_autonomy_armed(self) -> bool:
+        with Session(engine) as session:
+            operator_control = OperatorControlService(session)
+            if not operator_control.get_effective_autonomous_control_enabled():
+                return False
+            record = session.exec(
+                select(StrategyFamilyGovernance.id).where(
+                    StrategyFamilyGovernance.approval_state == GovernanceApprovalState.APPROVED.value,
+                    StrategyFamilyGovernance.autonomous_operation_allowed.is_(True),
+                    StrategyFamilyGovernance.emergency_stop.is_(False),
+                ).limit(1)
+            ).first()
+            return record is not None
 
     def _is_price_fresh(self, last_price_update: datetime | None) -> bool:
         if last_price_update is None:

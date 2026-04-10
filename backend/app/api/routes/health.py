@@ -1,10 +1,13 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel
+from sqlmodel import Session
 
+from app.db.session import get_session
 from app.services.health_service import SystemHealth, get_health_service
 from app.services.ig_streaming_service import get_ig_streaming_service
+from app.services.operational_telemetry_service import OperationalTelemetryService
 
 router = APIRouter()
 
@@ -55,3 +58,33 @@ class SystemHealthResponse(BaseModel):
 def system_health_check() -> SystemHealthResponse:
     report = get_health_service().get_health_report()
     return SystemHealthResponse(status=str(report["status"]), details=report["details"])
+
+
+class OperationalTelemetryResponse(BaseModel):
+    status: str
+    last_heartbeat: datetime
+    heartbeat_age_ms: float | None
+    last_price_update: datetime | None
+    last_price_age_ms: float | None
+    last_reconciliation: datetime | None
+    last_reconciliation_age_ms: float | None
+    stream_connected: bool
+    stream_last_tick_at: datetime | None
+    stream_last_tick_age_ms: float | None
+    subscribed_instrument_count: int
+    desired_instrument_count: int
+    broker_connected: bool
+    broker_latency_ms: float | None
+    runtime_count: int
+    active_runtime_count: int
+    stale_runtime_count: int
+    stale_price_runtime_count: int
+    reconciliation_mismatches: int
+    order_failures_last_5m: int
+    rejected_orders_last_5m: int
+    strategies_paused_by_health: int
+
+
+@router.get("/system/telemetry", response_model=OperationalTelemetryResponse)
+def operational_telemetry(session: Session = Depends(get_session)) -> OperationalTelemetryResponse:
+    return OperationalTelemetryResponse(**OperationalTelemetryService(session).get_summary())

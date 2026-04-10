@@ -435,7 +435,7 @@ p {
   display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(300px, 0.95fr);
   gap: 24px;
-  align-items: stretch;
+  align-items: start;
 }
 
 .card {
@@ -542,24 +542,31 @@ p {
 .hero-grid__main > *,
 .hero-grid__side > * {
   min-width: 0;
-  height: 100%;
+}
+
+.hero-grid__side {
+  display: grid;
+  gap: 24px;
+  align-content: start;
 }
 
 .strategy-tape {
   display: grid;
   gap: 12px;
+  max-height: 460px;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .insight-grid {
   display: grid;
   grid-template-columns: minmax(300px, 0.95fr) minmax(0, 1.65fr);
   gap: 24px;
-  align-items: stretch;
+  align-items: start;
 }
 
 .insight-grid > * {
   min-width: 0;
-  height: 100%;
 }
 
 .strategy-tape__row {
@@ -582,6 +589,12 @@ p {
 .review-panel__split {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+}
+
+.review-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .reviewer-page .card {
@@ -1161,7 +1174,7 @@ p {
   justify-content: space-between;
   align-items: flex-end;
   gap: 14px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .chart-value {
@@ -1172,9 +1185,13 @@ p {
 
 .equity-panel__chart {
   border-radius: 14px;
-  padding: 12px;
+  padding: 10px 12px;
   background: var(--chart-bg);
   box-shadow: inset 0 0 0 1px var(--glassBorder);
+}
+
+.equity-panel .card-header .muted {
+  max-width: 34ch;
 }
 
 .line-chart {
@@ -1216,6 +1233,28 @@ p {
 
 .legend-swatch--drawdown {
   background: var(--accent-secondary);
+}
+
+.risk-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.risk-item {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--background) 88%, white 12%);
+  box-shadow: inset 0 0 0 1px var(--glassBorder);
+}
+
+.risk-item__value {
+  margin-top: 4px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 .chart-axis {

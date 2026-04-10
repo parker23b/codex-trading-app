@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from sqlmodel import select
+
+from app.models.promotion_request import PromotionRequest
+from app.models.watchlist import WatchlistEntry, WatchlistTier
 from app.services.market_data_service import MarketDataService
+from app.services.watchlist_service import StreamingPlan, Tier2RefreshPlan
 
 
 class _StubStreamingService:
@@ -123,3 +128,70 @@ def test_polling_fallback_events_are_debounced(monkeypatch):
         "health.polling_fallback_stopped",
         "health.stream_recovered",
     ]
+
+
+def test_tier2_refresh_creates_promotion_request_for_high_scoring_candidate(session, monkeypatch):
+    service = MarketDataService(poll_prices=False)
+    service.settings.tier2_refresh_interval_seconds = 1
+    service.settings.tier2_promotion_score_threshold = 0.7
+    service.settings.tier2_promotion_ttl_seconds = 300
+    now = datetime(2026, 4, 8, 18, 0, tzinfo=UTC)
+    service._now = lambda: now  # type: ignore[method-assign]
+
+    broker = type(
+        "Broker",
+        (),
+        {
+            "get_market_details": lambda self, instrument: type(
+                "Details",
+                (),
+                {
+                    "bid": 1.0,
+                    "offer": 1.1,
+                    "high": 1.2,
+                    "low": 0.9,
+                    "market_status": "TRADEABLE",
+                    "tradable": True,
+                    "percentage_change": 1.2,
+                },
+            )()
+        },
+    )()
+    service.broker = broker
+
+    watchlist = type(
+        "Watchlist",
+        (),
+        {
+            "get_tier2_refresh_plan": lambda self: Tier2RefreshPlan(
+                instruments=("CS.D.GBPJPY.CFD.IP",),
+                streamed_instruments=(),
+                capped_instruments=("CS.D.GBPJPY.CFD.IP",),
+            ),
+            "record_tier2_refresh": lambda self, *, instrument, refreshed_at: session.add(
+                WatchlistEntry(
+                    instrument=instrument,
+                    tier=WatchlistTier.TIER2.value,
+                    status="ACTIVE",
+                    assigned_at=refreshed_at,
+                    last_refreshed_at=refreshed_at,
+                    updated_at=refreshed_at,
+                )
+            ) or session.commit(),
+        },
+    )()
+    monkeypatch.setattr("app.services.market_data_service.get_watchlist_service", lambda: watchlist)
+    monkeypatch.setattr("app.services.market_data_service.domain_event_service.record_event", lambda **_: None)
+    monkeypatch.setattr("app.services.market_data_service.engine", session.get_bind())
+
+    import asyncio
+
+    asyncio.run(service._refresh_tier2_once())
+
+    request = session.exec(select(PromotionRequest)).one()
+    assert request.instrument == "CS.D.GBPJPY.CFD.IP"
+    assert request.status == "ACCEPTED"
+    assert request.source == "activity_surveillance_scanner"
+    assert request.score >= 0.7
+    entry = session.exec(select(WatchlistEntry).where(WatchlistEntry.instrument == "CS.D.GBPJPY.CFD.IP")).all()[-1]
+    assert entry.tier == WatchlistTier.TIER1.value
