@@ -3,16 +3,24 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
-import { CompactTable, Panel, SplitPanel, StatusPill, StatusStrip } from "@/components/console/primitives";
+import { CompactTable, DataIndicator, Panel, SplitPanel, StatusPill, StatusStrip } from "@/components/console/primitives";
 import { getBrokerAuthStatus, getExecutions, getStrategies, getStreamHealth, startStrategy, stopStrategy } from "@/lib/api";
 import { formatInstrumentLabel, formatPrice, formatSignedCurrency } from "@/lib/format";
 import { BrokerAuthStatus, Execution, StrategyDefinition, StreamHealthStatus } from "@/lib/types";
+
+type StrategyResourceErrors = {
+  strategies: string | null;
+  executions: string | null;
+  brokerAuth: string | null;
+  streamHealth: string | null;
+};
 
 type StrategyLiveProps = {
   initialStrategies: StrategyDefinition[];
   initialExecutions: Execution[];
   initialBrokerAuth: BrokerAuthStatus;
   initialStreamHealth: StreamHealthStatus;
+  initialErrors: StrategyResourceErrors;
 };
 
 function strategyTone(strategy: StrategyDefinition) {
@@ -27,6 +35,7 @@ export function StrategyLive({
   initialExecutions,
   initialBrokerAuth,
   initialStreamHealth,
+  initialErrors,
 }: StrategyLiveProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -34,10 +43,18 @@ export function StrategyLive({
   const [executions, setExecutions] = useState(initialExecutions);
   const [brokerAuth, setBrokerAuth] = useState(initialBrokerAuth);
   const [streamHealth, setStreamHealth] = useState(initialStreamHealth);
+  const [errors, setErrors] = useState(initialErrors);
+  const [loading, setLoading] = useState({
+    strategies: false,
+    executions: false,
+    brokerAuth: false,
+    streamHealth: false,
+  });
   const [selectedStrategyName, setSelectedStrategyName] = useState(initialStrategies[0]?.name ?? "");
   const [instrumentOverrides, setInstrumentOverrides] = useState<Record<string, string>>(
     Object.fromEntries(initialStrategies.map((strategy) => [strategy.name, strategy.instrument])),
   );
+  const [dirtyOverrides, setDirtyOverrides] = useState<Record<string, boolean>>({});
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -45,29 +62,52 @@ export function StrategyLive({
     setExecutions(initialExecutions);
     setBrokerAuth(initialBrokerAuth);
     setStreamHealth(initialStreamHealth);
-  }, [initialStrategies, initialExecutions, initialBrokerAuth, initialStreamHealth]);
+    setErrors(initialErrors);
+  }, [initialStrategies, initialExecutions, initialBrokerAuth, initialErrors, initialStreamHealth]);
 
   useEffect(() => {
     let cancelled = false;
 
     const refresh = async () => {
-      try {
-        const [nextStrategies, nextExecutions, nextBrokerAuth, nextStreamHealth] = await Promise.all([
-          getStrategies(),
-          getExecutions(),
-          getBrokerAuthStatus(),
-          getStreamHealth(),
-        ]);
-        if (cancelled) {
-          return;
-        }
-        setStrategies(nextStrategies);
-        setExecutions(nextExecutions);
-        setBrokerAuth(nextBrokerAuth);
-        setStreamHealth(nextStreamHealth);
-      } catch {
-        // Keep last good state visible.
+      setLoading({
+        strategies: true,
+        executions: true,
+        brokerAuth: true,
+        streamHealth: true,
+      });
+      const [nextStrategies, nextExecutions, nextBrokerAuth, nextStreamHealth] = await Promise.allSettled([
+        getStrategies(),
+        getExecutions(),
+        getBrokerAuthStatus(),
+        getStreamHealth(),
+      ]);
+      if (cancelled) {
+        return;
       }
+      if (nextStrategies.status === "fulfilled") {
+        setStrategies(nextStrategies.value);
+      }
+      if (nextExecutions.status === "fulfilled") {
+        setExecutions(nextExecutions.value);
+      }
+      if (nextBrokerAuth.status === "fulfilled") {
+        setBrokerAuth(nextBrokerAuth.value);
+      }
+      if (nextStreamHealth.status === "fulfilled") {
+        setStreamHealth(nextStreamHealth.value);
+      }
+      setErrors({
+        strategies: nextStrategies.status === "rejected" ? (nextStrategies.reason instanceof Error ? nextStrategies.reason.message : "Failed to load strategies.") : null,
+        executions: nextExecutions.status === "rejected" ? (nextExecutions.reason instanceof Error ? nextExecutions.reason.message : "Failed to load executions.") : null,
+        brokerAuth: nextBrokerAuth.status === "rejected" ? (nextBrokerAuth.reason instanceof Error ? nextBrokerAuth.reason.message : "Failed to load broker status.") : null,
+        streamHealth: nextStreamHealth.status === "rejected" ? (nextStreamHealth.reason instanceof Error ? nextStreamHealth.reason.message : "Failed to load stream health.") : null,
+      });
+      setLoading({
+        strategies: false,
+        executions: false,
+        brokerAuth: false,
+        streamHealth: false,
+      });
     };
 
     void refresh();
@@ -80,14 +120,18 @@ export function StrategyLive({
 
   useEffect(() => {
     setInstrumentOverrides((current) => ({
-      ...Object.fromEntries(strategies.map((strategy) => [strategy.name, strategy.instrument])),
-      ...current,
+      ...Object.fromEntries(
+        strategies.map((strategy) => [
+          strategy.name,
+          dirtyOverrides[strategy.name] ? current[strategy.name] ?? strategy.instrument : strategy.instrument,
+        ]),
+      ),
     }));
     if (selectedStrategyName && strategies.some((strategy) => strategy.name === selectedStrategyName)) {
       return;
     }
     setSelectedStrategyName(strategies[0]?.name ?? "");
-  }, [selectedStrategyName, strategies]);
+  }, [dirtyOverrides, selectedStrategyName, strategies]);
 
   const sortedStrategies = useMemo(
     () =>
@@ -107,24 +151,58 @@ export function StrategyLive({
     .slice()
     .sort((left, right) => new Date(right.last_transition_at).getTime() - new Date(left.last_transition_at).getTime());
 
+  const strategyCountValue = errors.strategies ? (
+    <>
+      -<DataIndicator state={loading.strategies ? "loading" : "error"} message={errors.strategies} />
+    </>
+  ) : (
+    strategies.length
+  );
+  const brokerValue = errors.brokerAuth ? (
+    <>
+      -<DataIndicator state={loading.brokerAuth ? "loading" : "error"} message={errors.brokerAuth} />
+    </>
+  ) : brokerAuth.state === "connected" ? (
+    "Connected"
+  ) : (
+    brokerAuth.label
+  );
+  const streamValue = errors.streamHealth ? (
+    <>
+      -<DataIndicator state={loading.streamHealth ? "loading" : "error"} message={errors.streamHealth} />
+    </>
+  ) : streamHealth.connected ? (
+    "Live"
+  ) : (
+    "Interrupted"
+  );
+
   const runAction = (strategy: StrategyDefinition) => {
     startTransition(async () => {
-      const instrument = instrumentOverrides[strategy.name];
-      const result = await startStrategy(strategy.name, instrument);
-      setStatusMessage(
-        result.status === "started" ? `Started ${strategy.name} on ${formatInstrumentLabel(instrument)}.` : result.status,
-      );
-      router.refresh();
+      try {
+        const instrument = instrumentOverrides[strategy.name];
+        const result = await startStrategy(strategy.name, instrument);
+        setStatusMessage(
+          result.status === "started" ? `Started ${strategy.name} on ${formatInstrumentLabel(instrument)}.` : result.status,
+        );
+        router.refresh();
+      } catch (error) {
+        setStatusMessage(error instanceof Error ? error.message : "Failed to start strategy.");
+      }
     });
   };
 
   const stopRuntime = (strategyName: string, instrument: string) => {
     startTransition(async () => {
-      const result = await stopStrategy({ strategyName, instrument });
-      setStatusMessage(
-        result.status === "stopped" ? `Stopped ${strategyName} on ${formatInstrumentLabel(instrument)}.` : result.status,
-      );
-      router.refresh();
+      try {
+        const result = await stopStrategy({ strategyName, instrument });
+        setStatusMessage(
+          result.status === "stopped" ? `Stopped ${strategyName} on ${formatInstrumentLabel(instrument)}.` : result.status,
+        );
+        router.refresh();
+      } catch (error) {
+        setStatusMessage(error instanceof Error ? error.message : "Failed to stop strategy.");
+      }
     });
   };
 
@@ -132,28 +210,30 @@ export function StrategyLive({
     <main className="console-page">
       <StatusStrip
         items={[
-          { label: "Strategies", value: strategies.length, tone: "neutral" },
+          { label: "Strategies", value: strategyCountValue, tone: errors.strategies ? "inactive" : "neutral", meta: errors.strategies ?? undefined },
           {
             label: "Running",
-            value: strategies.filter((strategy) => strategy.status === "RUNNING").length,
-            tone: "positive",
+            value: errors.strategies ? "-" : strategies.filter((strategy) => strategy.status === "RUNNING").length,
+            tone: errors.strategies ? "inactive" : "positive",
             emphasis: "strong",
           },
           {
             label: "Warnings",
-            value: strategies.filter((strategy) => strategy.warning_message).length,
-            tone: strategies.some((strategy) => strategy.warning_message) ? "warning" : "positive",
+            value: errors.strategies ? "-" : strategies.filter((strategy) => strategy.warning_message).length,
+            tone: errors.strategies ? "inactive" : strategies.some((strategy) => strategy.warning_message) ? "warning" : "positive",
             emphasis: "strong",
           },
           {
             label: "Broker",
-            value: brokerAuth.state === "connected" ? "Connected" : brokerAuth.label,
-            tone: brokerAuth.state === "connected" ? "positive" : "inactive",
+            value: brokerValue,
+            tone: errors.brokerAuth ? "inactive" : brokerAuth.state === "connected" ? "positive" : "inactive",
+            meta: errors.brokerAuth ?? brokerAuth.detail,
           },
           {
             label: "Stream",
-            value: streamHealth.connected ? "Live" : "Interrupted",
-            tone: streamHealth.connected ? "positive" : "warning",
+            value: streamValue,
+            tone: errors.streamHealth ? "inactive" : streamHealth.connected ? "positive" : "warning",
+            meta: errors.streamHealth ?? undefined,
           },
         ]}
       />
@@ -243,10 +323,16 @@ export function StrategyLive({
                     className="console-select"
                     value={instrumentOverrides[selectedStrategy.name]}
                     onChange={(event) =>
-                      setInstrumentOverrides((current) => ({
-                        ...current,
-                        [selectedStrategy.name]: event.target.value,
-                      }))
+                      {
+                        setInstrumentOverrides((current) => ({
+                          ...current,
+                          [selectedStrategy.name]: event.target.value,
+                        }));
+                        setDirtyOverrides((current) => ({
+                          ...current,
+                          [selectedStrategy.name]: true,
+                        }));
+                      }
                     }
                   >
                     {(selectedStrategy.instrument_options ?? []).map((option) => (
@@ -326,7 +412,7 @@ export function StrategyLive({
               <CompactTable
                 dense
                 rows={executionQueue.slice(0, 8)}
-                emptyLabel="No execution activity."
+                emptyLabel={errors.executions ? "Execution feed unavailable." : "No execution activity."}
                 getRowTone={(row) =>
                   row.status === "FAILED" || row.status === "NEEDS_MANUAL_REVIEW"
                     ? "negative"
@@ -342,6 +428,7 @@ export function StrategyLive({
               />
             </Panel>
 
+            {errors.executions ? <div className="console-alert console-alert--warning">Execution feed unavailable. {errors.executions}</div> : null}
             {statusMessage ? <div className="console-alert console-alert--neutral">{statusMessage}</div> : null}
           </div>
         }

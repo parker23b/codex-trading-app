@@ -1,5 +1,5 @@
 import { MarketOverviewDashboard } from "@/components/markets/market-overview-dashboard";
-import { getMarketOverview, withFallback } from "@/lib/api";
+import { getMarketOverview, loadWithMeta } from "@/lib/api";
 import { MarketCategoryOverviewResponse } from "@/lib/types";
 
 const EMPTY_FOREX_OVERVIEW: MarketCategoryOverviewResponse = {
@@ -21,7 +21,7 @@ const EMPTY_FOREX_OVERVIEW: MarketCategoryOverviewResponse = {
 };
 
 export default async function MarketsPage() {
-  const overview = await withFallback(() => getMarketOverview("forex"), EMPTY_FOREX_OVERVIEW);
+  const overview = await loadWithMeta(() => getMarketOverview("forex"), EMPTY_FOREX_OVERVIEW);
 
-  return <MarketOverviewDashboard initialOverview={overview} />;
+  return <MarketOverviewDashboard initialOverview={overview.data} initialOverviewError={overview.error} />;
 }

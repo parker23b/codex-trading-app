@@ -91,6 +91,11 @@ type StatusPillProps = {
   quiet?: boolean;
 };
 
+type DataIndicatorProps = {
+  state: "loading" | "error" | "unavailable";
+  message?: string | null;
+};
+
 export function Panel({
   title,
   subtitle,
@@ -184,6 +189,19 @@ export function StatusPill({ label, tone = "neutral", quiet = false }: StatusPil
     <span className={`console-pill console-pill--${tone}${quiet ? " console-pill--quiet" : ""}`}>
       <span className={`state-dot state-dot--${tone}`} aria-hidden="true" />
       {label}
+    </span>
+  );
+}
+
+export function DataIndicator({ state, message }: DataIndicatorProps) {
+  const label = state === "loading" ? "Loading" : state === "error" ? "Error" : "Unavailable";
+  return (
+    <span
+      className={`data-indicator data-indicator--${state}`}
+      title={message ?? label}
+      aria-label={message ?? label}
+    >
+      {state === "loading" ? <span className="data-indicator__spinner" aria-hidden="true" /> : state === "error" ? "!" : "-"}
     </span>
   );
 }

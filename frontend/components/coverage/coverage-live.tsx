@@ -2,15 +2,22 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { CompactTable, Panel, SplitPanel, StatusPill, StatusStrip } from "@/components/console/primitives";
+import { CompactTable, DataIndicator, Panel, SplitPanel, StatusPill, StatusStrip } from "@/components/console/primitives";
 import { getCoverageSummary, getOperationalTelemetry, getSystemOperatingLimits } from "@/lib/api";
 import { formatRelativeDuration } from "@/lib/format";
 import { CoverageSummary, OperationalTelemetry, SystemOperatingLimits } from "@/lib/types";
+
+type CoverageResourceErrors = {
+  coverage: string | null;
+  telemetry: string | null;
+  operatingLimits: string | null;
+};
 
 type CoverageLiveProps = {
   initialCoverage: CoverageSummary;
   initialTelemetry: OperationalTelemetry;
   initialOperatingLimits: SystemOperatingLimits;
+  initialErrors: CoverageResourceErrors;
 };
 
 function formatAge(ms?: number | null) {
@@ -23,35 +30,45 @@ function formatAge(ms?: number | null) {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-export function CoverageLive({ initialCoverage, initialTelemetry, initialOperatingLimits }: CoverageLiveProps) {
+export function CoverageLive({ initialCoverage, initialTelemetry, initialOperatingLimits, initialErrors }: CoverageLiveProps) {
   const [coverage, setCoverage] = useState(initialCoverage);
   const [telemetry, setTelemetry] = useState(initialTelemetry);
   const [operatingLimits, setOperatingLimits] = useState(initialOperatingLimits);
+  const [errors, setErrors] = useState(initialErrors);
 
   useEffect(() => {
     setCoverage(initialCoverage);
     setTelemetry(initialTelemetry);
     setOperatingLimits(initialOperatingLimits);
-  }, [initialCoverage, initialTelemetry, initialOperatingLimits]);
+    setErrors(initialErrors);
+  }, [initialCoverage, initialErrors, initialOperatingLimits, initialTelemetry]);
 
   useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
-      try {
-        const [nextCoverage, nextTelemetry, nextOperatingLimits] = await Promise.all([
+      const [nextCoverage, nextTelemetry, nextOperatingLimits] = await Promise.allSettled([
           getCoverageSummary(),
           getOperationalTelemetry(),
           getSystemOperatingLimits(),
         ]);
-        if (!cancelled) {
-          setCoverage(nextCoverage);
-          setTelemetry(nextTelemetry);
-          setOperatingLimits(nextOperatingLimits);
+      if (!cancelled) {
+        if (nextCoverage.status === "fulfilled") {
+          setCoverage(nextCoverage.value);
         }
-      } catch {
-        // Keep last visible state.
+        if (nextTelemetry.status === "fulfilled") {
+          setTelemetry(nextTelemetry.value);
+        }
+        if (nextOperatingLimits.status === "fulfilled") {
+          setOperatingLimits(nextOperatingLimits.value);
+        }
+        setErrors({
+          coverage: nextCoverage.status === "rejected" ? (nextCoverage.reason instanceof Error ? nextCoverage.reason.message : "Failed to load coverage.") : null,
+          telemetry: nextTelemetry.status === "rejected" ? (nextTelemetry.reason instanceof Error ? nextTelemetry.reason.message : "Failed to load telemetry.") : null,
+          operatingLimits: nextOperatingLimits.status === "rejected" ? (nextOperatingLimits.reason instanceof Error ? nextOperatingLimits.reason.message : "Failed to load limits.") : null,
+        });
       }
     };
+    void refresh();
     const intervalId = window.setInterval(refresh, 5000);
     return () => {
       cancelled = true;
@@ -77,32 +94,44 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
         items={[
           {
             label: "Tier 1 Live",
-            value: coverage.streaming.active_instruments.length,
-            tone: "positive",
+            value: errors.coverage ? (
+              <>
+                -<DataIndicator state="error" message={errors.coverage} />
+              </>
+            ) : (
+              coverage.streaming.active_instruments.length
+            ),
+            tone: errors.coverage ? "inactive" : "positive",
             emphasis: "strong",
           },
           {
             label: "Readiness Blocked",
-            value: blockedReadiness.length,
-            tone: blockedReadiness.length ? "warning" : "positive",
+            value: errors.coverage ? "-" : blockedReadiness.length,
+            tone: errors.coverage ? "inactive" : blockedReadiness.length ? "warning" : "positive",
             emphasis: "strong",
           },
           {
             label: "Promotions",
-            value: coverage.promotions.pending_count,
-            tone: coverage.promotions.pending_count ? "warning" : "neutral",
-            meta: "pending",
+            value: errors.coverage ? "-" : coverage.promotions.pending_count,
+            tone: errors.coverage ? "inactive" : coverage.promotions.pending_count ? "warning" : "neutral",
+            meta: errors.coverage ?? "pending",
           },
           {
             label: "Allocator",
-            value: coverage.trade_allocator.rejected_count,
-            tone: coverage.trade_allocator.rejected_count ? "warning" : "positive",
-            meta: "recent rejects",
+            value: errors.coverage ? "-" : coverage.trade_allocator.rejected_count,
+            tone: errors.coverage ? "inactive" : coverage.trade_allocator.rejected_count ? "warning" : "positive",
+            meta: errors.coverage ?? "recent rejects",
           },
           {
             label: "Telemetry",
-            value: telemetry.status,
-            tone: telemetry.status === "healthy" ? "positive" : "warning",
+            value: errors.telemetry ? (
+              <>
+                -<DataIndicator state="error" message={errors.telemetry} />
+              </>
+            ) : (
+              telemetry.status
+            ),
+            tone: errors.telemetry ? "inactive" : telemetry.status === "healthy" ? "positive" : "warning",
           },
         ]}
       />
@@ -112,7 +141,7 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
           <Panel title="Monitored Universe" subtitle="Primary watch state." priority="primary" tone={blockedReadiness.length ? "warning" : "positive"}>
             <CompactTable
               rows={activeUniverseRows}
-              emptyLabel="No active Tier 1 instruments."
+              emptyLabel={errors.coverage ? "Coverage feed unavailable." : "No active Tier 1 instruments."}
               getRowTone={(row) => (!row.streamed ? "inactive" : row.status !== "ACTIVE" ? "warning" : "positive")}
               columns={[
                 { key: "instrument", header: "Instrument", render: (row) => row.instrument },
@@ -140,7 +169,7 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
           <Panel title="Readiness" subtitle="What is blocked right now." priority="critical" tone={blockedReadiness.length ? "warning" : "positive"}>
             <CompactTable
               rows={coverage.streaming.execution_readiness}
-              emptyLabel="No readiness records available."
+              emptyLabel={errors.coverage ? "Coverage feed unavailable." : "No readiness records available."}
               getRowTone={(row) => (row.is_ok ? "positive" : "warning")}
               columns={[
                 { key: "instrument", header: "Instrument", render: (row) => row.instrument },
@@ -161,7 +190,7 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
               <CompactTable
                 dense
                 rows={coverage.promotions.recent_requests.slice(0, 8)}
-                emptyLabel="No recent promotions."
+                emptyLabel={errors.coverage ? "Coverage feed unavailable." : "No recent promotions."}
                 getRowTone={(row) => (row.status === "PENDING" ? "warning" : row.status === "ACCEPTED" ? "positive" : "inactive")}
                 columns={[
                   { key: "instrument", header: "Instrument", render: (row) => row.instrument },
@@ -175,23 +204,23 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
               <div className="metric-stack">
                 <div className="metric-stack__row">
                   <span>Heartbeat</span>
-                  <strong>{formatAge(telemetry.heartbeat_age_ms)}</strong>
+                  <strong>{errors.telemetry ? "-" : formatAge(telemetry.heartbeat_age_ms)}</strong>
                 </div>
                 <div className="metric-stack__row">
                   <span>Price age</span>
-                  <strong>{formatAge(telemetry.last_price_age_ms)}</strong>
+                  <strong>{errors.telemetry ? "-" : formatAge(telemetry.last_price_age_ms)}</strong>
                 </div>
                 <div className="metric-stack__row">
                   <span>Stale runtimes</span>
-                  <strong>{telemetry.stale_runtime_count}</strong>
+                  <strong>{errors.telemetry ? "-" : telemetry.stale_runtime_count}</strong>
                 </div>
                 <div className="metric-stack__row">
                   <span>Top reject</span>
-                  <strong>{topRejectionReason}</strong>
+                  <strong>{errors.coverage ? "-" : topRejectionReason}</strong>
                 </div>
                 <div className="metric-stack__row">
                   <span>Tier 1 cap</span>
-                  <strong>{operatingLimits.coverage.max_instruments}</strong>
+                  <strong>{errors.operatingLimits ? "-" : operatingLimits.coverage.max_instruments}</strong>
                 </div>
               </div>
             </Panel>
@@ -203,7 +232,7 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
         <CompactTable
           dense
           rows={coverage.trade_allocator.recent_decisions.slice(0, 10)}
-          emptyLabel="No allocator decisions recorded."
+          emptyLabel={errors.coverage ? "Coverage feed unavailable." : "No allocator decisions recorded."}
           getRowTone={(row) => (row.selected ? "positive" : "warning")}
           columns={[
             { key: "age", header: "Age", render: (row) => formatRelativeDuration(row.created_at) },

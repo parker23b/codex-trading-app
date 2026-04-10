@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { CompactTable, Panel, SplitPanel, StatusPill, StatusStrip } from "@/components/console/primitives";
+import { CompactTable, DataIndicator, Panel, SplitPanel, StatusPill, StatusStrip } from "@/components/console/primitives";
 import { getControlPlaneSummary, updateOperatorControlState, updateStrategyGovernance } from "@/lib/api";
 import { ControlPlaneFamily, ControlPlaneSummary } from "@/lib/types";
 
 type ControlPlaneLiveProps = {
   initialSummary: ControlPlaneSummary;
+  initialSummaryError: string | null;
 };
 
 function formatTime(value?: string | null) {
@@ -34,28 +35,41 @@ function familyTone(summary: ControlPlaneSummary, family: ControlPlaneFamily) {
   return "positive" as const;
 }
 
-export function ControlPlaneLive({ initialSummary }: ControlPlaneLiveProps) {
+export function ControlPlaneLive({ initialSummary, initialSummaryError }: ControlPlaneLiveProps) {
   const [summary, setSummary] = useState(initialSummary);
+  const [summaryError, setSummaryError] = useState(initialSummaryError);
+  const [summaryLoading, setSummaryLoading] = useState(false);
   const [selectedStrategyName, setSelectedStrategyName] = useState<string | null>(null);
   const [pendingGlobalAction, setPendingGlobalAction] = useState<"enable" | "disable" | null>(null);
   const [pendingFamily, setPendingFamily] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setSummary(initialSummary);
-  }, [initialSummary]);
+    setSummaryError(initialSummaryError);
+  }, [initialSummary, initialSummaryError]);
 
   useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
+      setSummaryLoading(true);
       try {
         const nextSummary = await getControlPlaneSummary();
         if (!cancelled) {
           setSummary(nextSummary);
+          setSummaryError(null);
         }
-      } catch {
-        // Keep last snapshot visible.
+      } catch (error) {
+        if (!cancelled) {
+          setSummaryError(error instanceof Error ? error.message : "Failed to load control plane.");
+        }
+      } finally {
+        if (!cancelled) {
+          setSummaryLoading(false);
+        }
       }
     };
+    void refresh();
     const intervalId = window.setInterval(refresh, 5000);
     return () => {
       cancelled = true;
@@ -87,6 +101,7 @@ export function ControlPlaneLive({ initialSummary }: ControlPlaneLiveProps) {
   const refreshSummary = async () => {
     const nextSummary = await getControlPlaneSummary();
     setSummary(nextSummary);
+    setSummaryError(null);
   };
 
   const handleGlobalAutonomy = async (enabled: boolean) => {
@@ -99,6 +114,9 @@ export function ControlPlaneLive({ initialSummary }: ControlPlaneLiveProps) {
           : "Operator paused governed autonomy from the control plane.",
       });
       await refreshSummary();
+      setStatusMessage(enabled ? "Autonomy armed." : "Autonomy paused.");
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to update operator control.");
     } finally {
       setPendingGlobalAction(null);
     }
@@ -111,6 +129,9 @@ export function ControlPlaneLive({ initialSummary }: ControlPlaneLiveProps) {
         autonomous_operation_allowed: enabled,
       });
       await refreshSummary();
+      setStatusMessage(enabled ? `${strategyName} can auto deploy.` : `${strategyName} auto deploy disallowed.`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to update strategy governance.");
     } finally {
       setPendingFamily(null);
     }
@@ -122,26 +143,34 @@ export function ControlPlaneLive({ initialSummary }: ControlPlaneLiveProps) {
         items={[
           {
             label: "Autonomy",
-            value: summary.effective_autonomous_control_enabled ? "Armed" : "Paused",
-            tone: summary.effective_autonomous_control_enabled ? "positive" : "negative",
+            value: summaryError ? (
+              <>
+                -<DataIndicator state={summaryLoading ? "loading" : "error"} message={summaryError} />
+              </>
+            ) : summary.effective_autonomous_control_enabled ? (
+              "Armed"
+            ) : (
+              "Paused"
+            ),
+            tone: summaryError ? "inactive" : summary.effective_autonomous_control_enabled ? "positive" : "negative",
             emphasis: "strong",
           },
           {
             label: "Issues",
-            value: exceptionFamilies.length,
-            tone: exceptionFamilies.length ? "warning" : "positive",
-            meta: exceptionFamilies.length ? "families need action" : "all aligned",
+            value: summaryError ? "-" : exceptionFamilies.length,
+            tone: summaryError ? "inactive" : exceptionFamilies.length ? "warning" : "positive",
+            meta: summaryError ?? (exceptionFamilies.length ? "families need action" : "all aligned"),
             emphasis: "strong",
           },
           {
             label: "Emergency Stops",
-            value: summary.families.filter((family) => family.governance.emergency_stop).length,
-            tone: summary.families.some((family) => family.governance.emergency_stop) ? "negative" : "positive",
+            value: summaryError ? "-" : summary.families.filter((family) => family.governance.emergency_stop).length,
+            tone: summaryError ? "inactive" : summary.families.some((family) => family.governance.emergency_stop) ? "negative" : "positive",
           },
           {
             label: "Auto Deployed",
-            value: summary.counts.AUTO_DEPLOYED ?? 0,
-            tone: "neutral",
+            value: summaryError ? "-" : summary.counts.AUTO_DEPLOYED ?? 0,
+            tone: summaryError ? "inactive" : "neutral",
           },
         ]}
       />
@@ -155,10 +184,10 @@ export function ControlPlaneLive({ initialSummary }: ControlPlaneLiveProps) {
             tone={exceptionFamilies.length ? "warning" : "positive"}
             actions={
               <div className="console-inline-actions">
-                <button
+              <button
                   type="button"
                   className="console-button"
-                  disabled={pendingGlobalAction !== null || summary.effective_autonomous_control_enabled}
+                  disabled={summaryError !== null || pendingGlobalAction !== null || summary.effective_autonomous_control_enabled}
                   onClick={() => handleGlobalAutonomy(true)}
                 >
                   {pendingGlobalAction === "enable" ? "Arming..." : "Arm"}
@@ -166,7 +195,7 @@ export function ControlPlaneLive({ initialSummary }: ControlPlaneLiveProps) {
                 <button
                   type="button"
                   className="console-button console-button--ghost"
-                  disabled={pendingGlobalAction !== null || !summary.effective_autonomous_control_enabled}
+                  disabled={summaryError !== null || pendingGlobalAction !== null || !summary.effective_autonomous_control_enabled}
                   onClick={() => handleGlobalAutonomy(false)}
                 >
                   {pendingGlobalAction === "disable" ? "Pausing..." : "Pause"}
@@ -176,7 +205,7 @@ export function ControlPlaneLive({ initialSummary }: ControlPlaneLiveProps) {
           >
             <CompactTable
               rows={exceptionFamilies}
-              emptyLabel="No intervention-required families."
+              emptyLabel={summaryError ? "Control plane unavailable." : "No intervention-required families."}
               getRowTone={(family) => familyTone(summary, family)}
               getRowActive={(family) => family.strategy_name === selectedStrategyName}
               columns={[
@@ -211,7 +240,7 @@ export function ControlPlaneLive({ initialSummary }: ControlPlaneLiveProps) {
           <Panel title="Alignment Matrix" subtitle="Full family comparison." priority="primary" tone={exceptionFamilies.length ? "warning" : "neutral"}>
             <CompactTable
               rows={summary.families}
-              emptyLabel="No families configured."
+              emptyLabel={summaryError ? "Control plane unavailable." : "No families configured."}
               getRowTone={(family) => familyTone(summary, family)}
               getRowActive={(family) => family.strategy_name === selectedStrategyName}
               columns={[
@@ -325,7 +354,7 @@ export function ControlPlaneLive({ initialSummary }: ControlPlaneLiveProps) {
         <CompactTable
           dense
           rows={healthyFamilies}
-          emptyLabel="No stable families."
+          emptyLabel={summaryError ? "Control plane unavailable." : "No stable families."}
           columns={[
             { key: "family", header: "Family", render: (family) => family.strategy_name },
             { key: "profile", header: "Profile", render: (family) => family.deployment?.selected_profile ?? "n/a" },
@@ -333,6 +362,7 @@ export function ControlPlaneLive({ initialSummary }: ControlPlaneLiveProps) {
           ]}
         />
       </Panel>
+      {statusMessage ? <div className="console-alert console-alert--neutral">{statusMessage}</div> : null}
     </main>
   );
 }

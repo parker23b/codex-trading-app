@@ -264,6 +264,52 @@ p {
   flex: 0 0 auto;
 }
 
+.data-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  min-width: 1rem;
+  height: 1rem;
+  margin-left: 0.35rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  vertical-align: middle;
+}
+
+.data-indicator--error {
+  border-color: color-mix(in srgb, var(--negative) 48%, var(--border));
+  color: var(--negative);
+  background: var(--negative-soft);
+}
+
+.data-indicator--unavailable {
+  border-color: color-mix(in srgb, var(--inactive) 48%, var(--border));
+  color: var(--inactive);
+  background: var(--inactive-soft);
+}
+
+.data-indicator--loading {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: var(--accent-soft);
+}
+
+.data-indicator__spinner {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-top-color: var(--accent);
+  animation: data-indicator-spin 0.8s linear infinite;
+}
+
+@keyframes data-indicator-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .status-strip__item {
   padding: 11px 12px;
   border-radius: 14px;

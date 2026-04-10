@@ -167,6 +167,11 @@ export const EMPTY_DASHBOARD_SNAPSHOT: DashboardSnapshot = {
 
 type BackendMode = "live";
 
+export type LoadResult<T> = {
+  data: T;
+  error: string | null;
+};
+
 class HttpError extends Error {
   status: number;
   detail?: string;
@@ -312,6 +317,21 @@ export async function withFallback<T>(loader: () => Promise<T>, fallback: T): Pr
     return await loader();
   } catch {
     return fallback;
+  }
+}
+
+export async function loadWithMeta<T>(loader: () => Promise<T>, fallback: T): Promise<LoadResult<T>> {
+  try {
+    return {
+      data: await loader(),
+      error: null,
+    };
+  } catch (error) {
+    const message = error instanceof HttpError ? error.detail ?? error.message : error instanceof Error ? error.message : "Request failed";
+    return {
+      data: fallback,
+      error: message,
+    };
   }
 }
 

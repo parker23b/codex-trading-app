@@ -6,22 +6,28 @@ import {
   getExecutions,
   getStrategies,
   getStreamHealth,
-  withFallback,
+  loadWithMeta,
 } from "@/lib/api";
 
 export default async function StrategiesPage() {
   const [strategies, executions, brokerAuth, streamHealth] = await Promise.all([
-    withFallback(() => getStrategies(), []),
-    withFallback(() => getExecutions(), []),
-    withFallback(() => getBrokerAuthStatus(), EMPTY_BROKER_AUTH_STATUS),
-    withFallback(() => getStreamHealth(), EMPTY_STREAM_HEALTH_STATUS),
+    loadWithMeta(() => getStrategies(), []),
+    loadWithMeta(() => getExecutions(), []),
+    loadWithMeta(() => getBrokerAuthStatus(), EMPTY_BROKER_AUTH_STATUS),
+    loadWithMeta(() => getStreamHealth(), EMPTY_STREAM_HEALTH_STATUS),
   ]);
   return (
     <StrategyLive
-      initialStrategies={strategies}
-      initialExecutions={executions}
-      initialBrokerAuth={brokerAuth}
-      initialStreamHealth={streamHealth}
+      initialStrategies={strategies.data}
+      initialExecutions={executions.data}
+      initialBrokerAuth={brokerAuth.data}
+      initialStreamHealth={streamHealth.data}
+      initialErrors={{
+        strategies: strategies.error,
+        executions: executions.error,
+        brokerAuth: brokerAuth.error,
+        streamHealth: streamHealth.error,
+      }}
     />
   );
 }

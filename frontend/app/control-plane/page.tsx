@@ -1,8 +1,8 @@
 import { ControlPlaneLive } from "@/components/control-plane/control-plane-live";
-import { EMPTY_CONTROL_PLANE_SUMMARY, getControlPlaneSummary, withFallback } from "@/lib/api";
+import { EMPTY_CONTROL_PLANE_SUMMARY, getControlPlaneSummary, loadWithMeta } from "@/lib/api";
 
 export default async function ControlPlanePage() {
-  const summary = await withFallback(() => getControlPlaneSummary(), EMPTY_CONTROL_PLANE_SUMMARY);
+  const summary = await loadWithMeta(() => getControlPlaneSummary(), EMPTY_CONTROL_PLANE_SUMMARY);
 
-  return <ControlPlaneLive initialSummary={summary} />;
+  return <ControlPlaneLive initialSummary={summary.data} initialSummaryError={summary.error} />;
 }

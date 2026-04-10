@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 
-import { CompactTable, Panel, SplitPanel, StatusPill, StickyToolbar } from "@/components/console/primitives";
+import { CompactTable, DataIndicator, Panel, SplitPanel, StatusPill, StickyToolbar } from "@/components/console/primitives";
 import { getMarketOverview } from "@/lib/api";
 import { formatSignedPercent } from "@/lib/format";
-import { MarketCategory, MarketCategoryOverviewResponse, MarketSummary } from "@/lib/types";
+import { MarketCategory, MarketCategoryOverviewResponse } from "@/lib/types";
 
 type MarketOverviewDashboardProps = {
   initialOverview: MarketCategoryOverviewResponse;
+  initialOverviewError: string | null;
 };
 
 const WATCHLIST_STORAGE_KEY = "trading-platform-market-watchlist";
@@ -36,34 +37,18 @@ function formatCountdown(targetIso: string) {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
-function buildPlaceholderSummary(category: MarketCategory): MarketSummary {
-  return {
-    category,
-    label: MARKET_LABELS[category],
-    description: MARKET_DESCRIPTIONS[category],
-    status: "LIMITED",
-    headline: "Load on demand",
-    detail: "This market snapshot will load when selected.",
-    nextTransitionAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-    nextTransitionLabel: "Refreshes",
-    tradableCount: 0,
-    activeCount: 0,
-    totalCount: 0,
-  };
-}
-
-export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashboardProps) {
+export function MarketOverviewDashboard({ initialOverview, initialOverviewError }: MarketOverviewDashboardProps) {
   const [selectedCategory, setSelectedCategory] = useState<MarketCategory>("forex");
-  const [selectedInstrumentId, setSelectedInstrumentId] = useState<string>(initialOverview.instruments[0]?.id ?? "");
+  const [selectedInstrumentId, setSelectedInstrumentId] = useState<string>(initialOverviewError ? "" : initialOverview.instruments[0]?.id ?? "");
   const [search, setSearch] = useState("");
   const [showTradableOnly, setShowTradableOnly] = useState(false);
   const [showActiveOnly, setShowActiveOnly] = useState(false);
   const [starredIds, setStarredIds] = useState<string[]>([]);
   const [isPending, startTransition] = useTransition();
-  const [loadedMarkets, setLoadedMarkets] = useState<Partial<Record<MarketCategory, MarketCategoryOverviewResponse>>>({
-    forex: initialOverview,
-  });
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadedMarkets, setLoadedMarkets] = useState<Partial<Record<MarketCategory, MarketCategoryOverviewResponse>>>(
+    initialOverviewError ? {} : { forex: initialOverview },
+  );
+  const [loadError, setLoadError] = useState<string | null>(initialOverviewError);
 
   useEffect(() => {
     const stored = window.localStorage.getItem(WATCHLIST_STORAGE_KEY);
@@ -98,8 +83,12 @@ export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashb
   }, [loadedMarkets, selectedCategory]);
 
   const selectedMarket = loadedMarkets[selectedCategory];
-  const selectedSummary = selectedMarket?.summary ?? buildPlaceholderSummary(selectedCategory);
-  const summaries = MARKET_CATEGORIES.map((category) => loadedMarkets[category]?.summary ?? buildPlaceholderSummary(category));
+  const selectedSummary = selectedMarket?.summary ?? null;
+  const summaries = MARKET_CATEGORIES.map((category) => ({
+    category,
+    label: loadedMarkets[category]?.summary.label ?? MARKET_LABELS[category],
+    description: loadedMarkets[category]?.summary.description ?? MARKET_DESCRIPTIONS[category],
+  }));
 
   const filteredInstruments = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -172,7 +161,7 @@ export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashb
     <main className="console-page">
       <StickyToolbar>
         <div className="toolbar-group">
-          {summaries.map((summary) => (
+              {summaries.map((summary) => (
             <button
               key={summary.category}
               type="button"
@@ -250,7 +239,7 @@ export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashb
                   <div className="summary-bar__item">
                     <span>Venue</span>
                     <strong>{selectedInstrument.status}</strong>
-                    <em>{selectedSummary.label}</em>
+                      <em>{selectedSummary?.label ?? MARKET_LABELS[selectedCategory]}</em>
                   </div>
                   <div className="summary-bar__item">
                     <span>Tradable</span>
@@ -259,8 +248,11 @@ export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashb
                   </div>
                   <div className="summary-bar__item">
                     <span>Next transition</span>
-                    <strong>{formatCountdown(selectedSummary.nextTransitionAt)}</strong>
-                    <em>{selectedSummary.nextTransitionLabel}</em>
+                    <strong>
+                      {selectedSummary?.nextTransitionAt ? formatCountdown(selectedSummary.nextTransitionAt) : "-"}
+                      {!selectedSummary ? <DataIndicator state={isPending ? "loading" : loadError ? "error" : "unavailable"} message={loadError ?? "Market summary has not loaded yet."} /> : null}
+                    </strong>
+                    <em>{selectedSummary?.nextTransitionLabel ?? "Pending data"}</em>
                   </div>
                 </div>
 
@@ -296,19 +288,22 @@ export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashb
         }
         right={
           <div className="stack-layout">
-            <Panel title="Market State" priority="secondary" tone={selectedSummary.status === "OPEN" ? "positive" : selectedSummary.status === "LIMITED" ? "warning" : "inactive"} compact>
+            <Panel title="Market State" priority="secondary" tone={selectedSummary?.status === "OPEN" ? "positive" : selectedSummary?.status === "LIMITED" ? "warning" : "inactive"} compact>
               <div className="metric-stack">
                 <div className="metric-stack__row">
                   <span>Status</span>
-                  <strong>{selectedSummary.status}</strong>
+                  <strong>
+                    {selectedSummary?.status ?? "-"}
+                    {!selectedSummary ? <DataIndicator state={isPending ? "loading" : loadError ? "error" : "unavailable"} message={loadError ?? "Market status has not loaded yet."} /> : null}
+                  </strong>
                 </div>
                 <div className="metric-stack__row">
                   <span>Tradable</span>
-                  <strong>{selectedSummary.tradableCount}/{selectedSummary.totalCount}</strong>
+                  <strong>{selectedSummary ? `${selectedSummary.tradableCount}/${selectedSummary.totalCount}` : "-"}</strong>
                 </div>
                 <div className="metric-stack__row">
                   <span>Active</span>
-                  <strong>{selectedSummary.activeCount}</strong>
+                  <strong>{selectedSummary?.activeCount ?? "-"}</strong>
                 </div>
               </div>
             </Panel>
@@ -323,7 +318,10 @@ export function MarketOverviewDashboard({ initialOverview }: MarketOverviewDashb
                   {loadError ? <div className="console-alert console-alert--warning">{loadError}</div> : null}
                 </div>
               ) : (
-                <div className="console-empty">No instrument selected.</div>
+                <div className="detail-stack">
+                  <div className="console-empty">No instrument selected.</div>
+                  {loadError ? <div className="console-alert console-alert--warning">{loadError}</div> : null}
+                </div>
               )}
             </Panel>
           </div>

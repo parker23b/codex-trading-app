@@ -17,7 +17,7 @@ Today the product exposes four main operator workflows:
 2. Markets
    Inspect market categories such as forex or indices, see whether instruments are tradable, and understand which instruments are active or strategy-compatible.
 3. Strategies
-   Start and stop registered strategies, review current PnL and win rate, and inspect editable strategy settings in the UI.
+   Inspect strategy families, review runtime and deployment state, and use manual runtime overrides when supervised intervention is needed.
 4. AI Reviewer
    Inspect a read-only operator summary, deterministic review observations, warnings, provenance, and persisted review history for audit follow-up.
 
@@ -27,6 +27,85 @@ There are two distinct operating modes:
   The backend generates synthetic prices, starts default runtimes, and persists trades and positions locally.
 - `SIMULATION_MODE=false`
   The backend authenticates against IG, polls market data for running strategies, and reconciles local state against broker-truth positions.
+
+## Autonomous Operating Model
+
+The platform is designed around a governed autonomous control plane rather than a pure manual "pick a strategy and instrument" workflow.
+
+The intended flow is:
+
+1. Governance boundaries are operator-owned.
+2. Deployment, market assignment, profile selection, and runtime activation are system-owned.
+3. Coverage allocation decides what deserves scarce live market-data attention.
+4. Trade allocation decides which approved signals deserve capital and risk.
+5. Execution only acts on deployments and signals that survived those upstream control layers.
+
+### Control Plane Structure
+
+- Governance layer
+  Defines approved strategy families, approved asset classes or instruments, approved parameter profiles, hard risk boundaries, and emergency controls.
+- Strategy deployment manager
+  Decides which governed strategy family should be deployed, on which governed instrument, with which approved profile, and whether that deployment should be `AUTO_DEPLOYED`, `AUTO_PAUSED`, `DEGRADED`, `BLOCKED`, or `EMERGENCY_STOPPED`.
+- Regime and suitability engine
+  Scores candidate instruments using market status, tradability, spread quality, session validity, and operational health.
+- Coverage allocator
+  Owns the bounded IG live watchlist and promotion or demotion of instruments into Tier 1 streaming.
+- Trade allocator
+  Filters competing signals, suppresses duplicates, resolves conflicts, and decides which opportunities actually deserve risk.
+
+### Default Autonomy Posture
+
+The system now defaults toward allowed autonomy unless explicitly disabled.
+
+- Global autonomy is enabled by default.
+- Newly seeded strategy family governance defaults to `autonomous_operation_allowed=true`.
+- The operator or controller can still explicitly disable global autonomy or disallow autonomous deployment for a specific family.
+- Emergency stop remains stronger than the autonomy defaults.
+
+This means the platform should be understood as "autonomous unless governed otherwise," not "manual unless manually enabled."
+
+### Current User Flow For Autonomous Trading
+
+The current autonomous user flow is:
+
+1. Start the backend and frontend.
+2. Open the Control Plane page.
+3. Verify global autonomy is enabled.
+4. Verify one or more strategy families are allowed for autonomous deployment.
+5. Let the control plane reconcile continuously.
+6. Monitor whether families are `AUTO_DEPLOYED`, `AUTO_PAUSED`, `DEGRADED`, `BLOCKED`, or `EMERGENCY_STOPPED`.
+
+Once those conditions are satisfied, the intended operator workflow is mostly "run the app and supervise," not "manually assign strategies to instruments every day."
+
+### Health States In The Autonomous Model
+
+The system health model distinguishes between an idle platform and a broken one:
+
+- `idle`
+  No live operational demand exists and autonomy is not currently armed.
+- `armed`
+  Autonomy is enabled, but no deployment is currently live yet.
+- `ok`
+  Live demand exists and broker or stream prerequisites are healthy.
+- `degraded`
+  Live demand exists, but stale prices, order failures, or similar operational issues are present.
+- `critical`
+  Live demand exists, but core prerequisites such as broker connectivity, stream connectivity, or fresh price updates are missing.
+
+This prevents the UI from calling the system broken merely because it is currently unarmed or intentionally idle.
+
+### Manual Runtime Controls
+
+The `Start Runtime` control on the Strategies page is not the primary autonomous trading workflow.
+
+Its current purpose is:
+
+- manual override
+- supervised testing
+- smoke runs
+- debugging a specific strategy-family and instrument combination
+
+It starts a `MANUAL` runtime directly and records an operator action event. That path exists for intervention and diagnostics, but the intended autonomous path is through the control plane, not through day-to-day manual runtime launching.
 
 ## State Ownership
 
