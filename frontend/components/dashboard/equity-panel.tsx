@@ -62,7 +62,7 @@ export function EquityPanel({ points, latestValue, delta }: EquityPanelProps) {
       title="Performance"
       subtitle="Recent equity and drawdown by closed trade."
       action={<SegmentedControl options={["6 Trades", "10 Trades", "16 Trades", "All"]} value={filter} onChange={setFilter} />}
-      className="equity-panel"
+      className="equity-panel board-surface board-surface--primary"
     >
       <div className="equity-panel__summary">
         <div>

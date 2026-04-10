@@ -48,8 +48,9 @@ export function ControlPlaneStrip({ summary }: ControlPlaneStripProps) {
 
   return (
     <Card
-      title="Control Plane Alerts"
-      subtitle="Compact operator view of autonomous deployment exceptions and recent control-plane changes."
+      title="Autonomy Exceptions"
+      subtitle="Only the exception path lives here on the dashboard. Use the control plane for deeper inspection and guarded intervention."
+      className="board-surface board-surface--primary"
       action={<Link href="/control-plane" className="nav-link">Open Control Plane</Link>}
     >
       <div className="summary-grid">
@@ -83,7 +84,7 @@ export function ControlPlaneStrip({ summary }: ControlPlaneStripProps) {
 
       <section className="review-panel__split">
         <div>
-          <div className="review-panel__label">Current Exceptions</div>
+          <div className="review-panel__label">Needs Attention</div>
           <div className="review-stack">
             {!summary.effective_autonomous_control_enabled ? (
               <div className="status-note status-note--inline">

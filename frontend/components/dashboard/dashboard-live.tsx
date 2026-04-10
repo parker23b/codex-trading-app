@@ -2,14 +2,15 @@
 
 import { useEffect, useState } from "react";
 
+import { AutonomyOverview } from "@/components/dashboard/autonomy-overview";
 import { CoverageControlPanel } from "@/components/dashboard/coverage-control-panel";
+import { CoverageSnapshot } from "@/components/dashboard/coverage-snapshot";
 import { ControlPlaneStrip } from "@/components/dashboard/control-plane-strip";
 import { EquityPanel } from "@/components/dashboard/equity-panel";
 import { KpiBar } from "@/components/dashboard/kpi-bar";
 import { NotificationCenter } from "@/components/dashboard/notification-center";
 import { OpenPositionsTable } from "@/components/dashboard/open-positions-table";
 import { RecentTradesTable } from "@/components/dashboard/recent-trades-table";
-import { RiskAllocationPanel } from "@/components/dashboard/risk-allocation-panel";
 import { RiskPanel } from "@/components/dashboard/risk-panel";
 import { StrategyTapePanel } from "@/components/dashboard/strategy-tape-panel";
 import { ModeIndicator } from "@/components/ui/mode-indicator";
@@ -167,42 +168,21 @@ export function DashboardLive({
   const activeStrategyCount = (dashboard.runningStrategies ?? []).length;
 
   return (
-    <main className="dashboard-layout">
-      <section className="top-command-bar">
-        <div className="top-command-bar__mode">
+    <main className="dashboard-layout operate-board">
+      <section className="operate-board__top">
+        <div className="operate-board__mode">
           <ModeIndicator mode={mode} brokerAuth={brokerAuth} streamHealth={streamHealth} />
         </div>
-        <div className="top-command-bar__snapshot">
-          <Card title="Book Snapshot" subtitle="Quick read on current book quality." className="card--compact">
-            <div className="summary-grid">
-              <div className="summary-grid__item">
-                <span className="eyebrow">Active Strategies</span>
-                <strong>{activeStrategyCount}</strong>
-              </div>
-              <div className="summary-grid__item">
-                <span className="eyebrow">Avg Line Risk</span>
-                <strong>{averagePositionRiskPercent.toFixed(2)}%</strong>
-              </div>
-              <div className="summary-grid__item">
-                <span className="eyebrow">Long / Short</span>
-                <strong>{longLineCount} long / {shortLineCount} short</strong>
-              </div>
-            </div>
-            <div className="status-note status-note--inline">
-              {openRiskPercent < 2
-                ? "Risk is contained relative to current equity."
-                : openRiskPercent < 4
-                  ? "Risk is buildable, but new entries should be selective."
-                  : "Risk is elevated. Prioritise netting, trims, or tighter stops before adding."}
-            </div>
-            <div className="status-note status-note--inline">
-              {(dashboard.runningStrategies ?? []).length > 0
-                ? `${(dashboard.runningStrategies ?? []).filter((row) => row.hasOpenPosition).length} runtime${(dashboard.runningStrategies ?? []).filter((row) => row.hasOpenPosition).length === 1 ? "" : "s"} currently hold exposure; the rest are scanning only.`
-                : "No active runtimes are publishing into the dashboard yet."}
-            </div>
-          </Card>
+        <div className="operate-board__autonomy">
+          <AutonomyOverview
+            summary={controlPlane}
+            brokerAuth={brokerAuth}
+            streamHealth={streamHealth}
+            activeRuntimeCount={activeStrategyCount}
+            positionCount={positions.length}
+          />
         </div>
-        <div className="top-command-bar__metrics">
+        <div className="operate-board__metrics">
           <KpiBar
             accountValue={accountValue}
             accountChangePercent={accountChangePercent}
@@ -216,55 +196,87 @@ export function DashboardLive({
           />
         </div>
       </section>
-      <section className="hero-grid">
-        <div className="hero-grid__main">
+
+      <section className="operate-board__workspace">
+        <div className="operate-board__primary">
           <EquityPanel
             points={equityCurve.length ? equityCurve : [{ label: "T1", value: 100000, drawdown: 0 }]}
             latestValue={accountValue}
             delta={dailyPnl}
           />
+
+          <ControlPlaneStrip summary={controlPlane} />
+
+          <Card title="Open Positions" subtitle="Largest live exposures and execution state." className="card--table card--full-width board-surface board-surface--primary">
+            <div className="status-note status-note--inline">
+              Runtime-specific positions are shown with broker references so same-instrument exposure stays distinguishable.
+            </div>
+            <div className="status-note status-note--inline">
+              This table is read-only until position close and manual override actions are backed by durable backend mutations.
+            </div>
+            <OpenPositionsTable positions={positions} />
+          </Card>
         </div>
-        <div className="hero-grid__side">
+
+        <aside className="operate-board__secondary">
           <RiskPanel
             capitalAtRisk={openRiskPercent}
             largestPosition={largestPosition}
             concentration={riskConcentration}
             drawdown={drawdownPercent}
           />
-          <CoverageControlPanel coverage={coverage} operatingLimits={operatingLimits} />
-        </div>
-      </section>
-      <section className="page-grid">
-        <ControlPlaneStrip summary={controlPlane} />
-      </section>
-      <section className="page-grid">
-        <div className="insight-grid">
-          <RiskAllocationPanel
-            longExposure={longExposure}
-            shortExposure={shortExposure}
-            allocations={exposureByInstrument}
-            grossExposurePercent={grossExposurePercent}
-            netExposurePercent={netExposurePercent}
-            positionCount={positions.length}
-          />
+
+          <CoverageSnapshot coverage={coverage} />
+
+          <Card title="Book Snapshot" subtitle="Compact exposure summary, with deeper analysis left to secondary pages." className="card--compact board-surface board-surface--rail">
+            <div className="summary-grid">
+              <div className="summary-grid__item">
+                <span className="eyebrow">Active Strategies</span>
+                <strong>{activeStrategyCount}</strong>
+              </div>
+              <div className="summary-grid__item">
+                <span className="eyebrow">Avg Line Risk</span>
+                <strong>{averagePositionRiskPercent.toFixed(2)}%</strong>
+              </div>
+              <div className="summary-grid__item">
+                <span className="eyebrow">Long / Short</span>
+                <strong>{longLineCount} / {shortLineCount}</strong>
+              </div>
+              <div className="summary-grid__item">
+                <span className="eyebrow">Gross Exposure</span>
+                <strong>{grossExposurePercent.toFixed(1)}%</strong>
+              </div>
+              <div className="summary-grid__item">
+                <span className="eyebrow">Net Exposure</span>
+                <strong>{netExposurePercent.toFixed(1)}%</strong>
+              </div>
+              <div className="summary-grid__item">
+                <span className="eyebrow">Largest Line</span>
+                <strong>{largestPosition.toFixed(1)}%</strong>
+              </div>
+            </div>
+            <div className="status-note status-note--inline">
+              {openRiskPercent < 2
+                ? "Risk is contained relative to current equity."
+                : openRiskPercent < 4
+                  ? "Risk is buildable, but new entries should stay selective."
+                  : "Risk is elevated. Monitor autonomous deployment carefully before allowing fresh exposure to compound."}
+            </div>
+            <div className="status-note status-note--inline">
+              Coverage, allocation detail, and deployment reasoning now live on their own pages so the homepage stays focused on system state.
+            </div>
+          </Card>
+
           <StrategyTapePanel rows={dashboard.runningStrategies ?? []} />
-        </div>
+        </aside>
       </section>
+
       <NotificationCenter executions={executions} brokerAuth={brokerAuth} streamHealth={streamHealth} />
-      <section className="page-grid">
-        <Card title="Open Positions" subtitle="Current exposure and execution state." className="card--table card--full-width">
-          <div className="status-note status-note--inline">
-            Runtime-specific positions are now shown with broker references so same-instrument exposure stays distinguishable.
-          </div>
-          <div className="status-note status-note--inline">
-            This table is read-only until position close and manual override actions are backed by durable backend mutations.
-          </div>
-          <OpenPositionsTable positions={positions} />
-        </Card>
-      </section>
-      <section className="page-grid">
-        <Card title="Recent Trades" subtitle="Latest closed trades." className="card--table">
-          <RecentTradesTable trades={sortedTrades.slice(0, 10)} />
+
+      <section className="operate-board__lower">
+        <CoverageControlPanel coverage={coverage} operatingLimits={operatingLimits} />
+        <Card title="Recent Trades" subtitle="Latest closed trades remain available here, but no longer define the homepage narrative." className="card--table board-surface board-surface--secondary">
+          <RecentTradesTable trades={sortedTrades.slice(0, 8)} />
         </Card>
       </section>
     </main>
