@@ -27,3 +27,8 @@ out/
 
 # Logs
 *.log
+
+*.db
+
+*.egg-info/
+*.tsbuildinfo
