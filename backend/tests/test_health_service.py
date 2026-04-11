@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from fastapi import Response, status
-
 from app.api.routes.health import health_check
+from app.models.trade import TradeIntent
 from app.services.health_service import get_health_service
 
 
@@ -103,3 +103,21 @@ def test_health_check_returns_503_when_system_is_critical(monkeypatch):
 
     assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     assert payload == {"status": "critical"}
+
+
+def test_health_service_counts_pending_trade_intents_as_live_operational_demand(session, monkeypatch):
+    session.add(
+        TradeIntent(
+            strategy_name="mean_reversion",
+            instrument="IX.D.FTSE.DAILY.IP",
+            direction="BUY",
+            state="APPROVED",
+            signal_time=datetime.now(UTC),
+        )
+    )
+    session.commit()
+
+    health_service = get_health_service()
+    monkeypatch.setattr("app.services.health_service.engine", session.get_bind())
+
+    assert health_service._has_live_operational_demand() is True

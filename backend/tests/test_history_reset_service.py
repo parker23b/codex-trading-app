@@ -7,7 +7,7 @@ from sqlmodel import select
 from app.models.domain_event import DomainEvent
 from app.models.review import GeneratedReviewRecord
 from app.models.runtime import StrategyRuntimeState
-from app.models.trade import Execution, Position, ReconciliationEvent, Trade
+from app.models.trade import Execution, Position, ReconciliationEvent, Trade, TradeIntent
 from app.services.history_reset_service import HistoryResetService
 
 
@@ -26,6 +26,15 @@ def test_clear_test_history_removes_persisted_history_but_keeps_active_state(ses
             close_time=fixed_now - timedelta(hours=1),
             pnl=10.0,
             account_type="DEMO",
+        )
+    )
+    session.add(
+        TradeIntent(
+            strategy_name="mean_reversion",
+            instrument="IX.D.FTSE.DAILY.IP",
+            direction="BUY",
+            state="CLOSED",
+            signal_time=fixed_now - timedelta(hours=2),
         )
     )
     session.add(
@@ -113,6 +122,7 @@ def test_clear_test_history_removes_persisted_history_but_keeps_active_state(ses
     summary = HistoryResetService(session).clear_test_history()
 
     assert summary.trades_deleted == 1
+    assert summary.trade_intents_deleted == 1
     assert summary.executions_deleted == 1
     assert summary.reconciliation_events_deleted == 1
     assert summary.domain_events_deleted == 1
@@ -121,6 +131,7 @@ def test_clear_test_history_removes_persisted_history_but_keeps_active_state(ses
     assert summary.idle_runtimes_deleted == 1
 
     assert session.exec(select(Trade)).all() == []
+    assert session.exec(select(TradeIntent)).all() == []
     assert session.exec(select(Execution)).all() == []
     assert session.exec(select(ReconciliationEvent)).all() == []
     assert session.exec(select(DomainEvent)).all() == []

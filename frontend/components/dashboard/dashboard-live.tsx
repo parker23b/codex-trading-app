@@ -448,16 +448,37 @@ export function DashboardLive({
                     <span className="console-kicker">System Health</span>
                     <div className="console-inline-actions">
                       <StatusPill
-                        label={errors.controlPlane ? "autonomy unknown" : controlPlane.effective_autonomous_control_enabled ? "autonomy armed" : "autonomy stopped"}
+                        label="Autonomy"
                         tone={errors.controlPlane ? "inactive" : controlPlane.effective_autonomous_control_enabled ? "positive" : "negative"}
+                        title={
+                          errors.controlPlane
+                            ? `Autonomy unknown. ${errors.controlPlane}`
+                            : controlPlane.effective_autonomous_control_enabled
+                              ? "Autonomy armed. Governed autonomous control is enabled."
+                              : "Autonomy stopped. Governed autonomous control is paused."
+                        }
                       />
                       <StatusPill
-                        label={errors.streamHealth ? "market data unknown" : streamHealth.connected ? "market data live" : "feed degraded"}
+                        label="Feed"
                         tone={errors.streamHealth ? "inactive" : streamHealth.connected ? "positive" : "warning"}
+                        title={
+                          errors.streamHealth
+                            ? `Feed unknown. ${errors.streamHealth}`
+                            : streamHealth.connected
+                              ? "Feed live. Streaming market data is connected."
+                              : `Feed degraded. ${streamHealth.last_status ?? "Streaming market data is interrupted."}`
+                        }
                       />
                       <StatusPill
-                        label={errors.brokerAuth ? "broker unknown" : brokerAuth.state === "connected" ? "broker ready" : "broker unavailable"}
+                        label="Broker"
                         tone={errors.brokerAuth ? "inactive" : brokerAuth.state === "connected" ? "positive" : "inactive"}
+                        title={
+                          errors.brokerAuth
+                            ? `Broker unknown. ${errors.brokerAuth}`
+                            : brokerAuth.state === "connected"
+                              ? `Broker ready. ${brokerAuth.detail}`
+                              : `Broker unavailable. ${brokerAuth.detail}`
+                        }
                       />
                     </div>
                   </div>

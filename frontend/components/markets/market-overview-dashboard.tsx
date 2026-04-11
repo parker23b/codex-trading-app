@@ -200,7 +200,7 @@ export function MarketOverviewDashboard({ initialOverview, initialOverviewError 
       </StickyToolbar>
 
       <SplitPanel
-        className="layout-markets"
+        className="layout-markets items-start"
         left={
           <Panel title="Instrument List" priority="secondary" tone="neutral" compact>
             <div className="list-panel">

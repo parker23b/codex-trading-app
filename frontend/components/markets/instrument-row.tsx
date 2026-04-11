@@ -33,7 +33,7 @@ function activityTone(level: MarketInstrument["activityLevel"]) {
 export function InstrumentRow({ instrument, starred, onToggleStar }: InstrumentRowProps) {
   return (
     <tr>
-      <td>
+      <td data-label="Instrument">
         <div className="instrument-cell">
           <button
             type="button"
@@ -49,16 +49,16 @@ export function InstrumentRow({ instrument, starred, onToggleStar }: InstrumentR
           </div>
         </div>
       </td>
-      <td>
+      <td data-label="Status">
         <StatusBadge label={instrument.status} tone={statusTone(instrument.status)} />
       </td>
-      <td>
+      <td data-label="Tradable">
         <StatusBadge label={instrument.tradable ? "Yes" : "No"} tone={instrument.tradable ? "positive" : "negative"} />
       </td>
-      <td>
+      <td data-label="Activity">
         <StatusBadge label={instrument.activityLevel} tone={activityTone(instrument.activityLevel)} />
       </td>
-      <td>
+      <td data-label="Strategy Compatibility">
         <div className="strategy-pill-list">
           {instrument.strategyCompatibility.map((strategy) => (
             <span key={strategy} className="strategy-pill">
@@ -68,7 +68,7 @@ export function InstrumentRow({ instrument, starred, onToggleStar }: InstrumentR
         </div>
         {instrument.sessionNote ? <div className="status-note status-note--inline">{instrument.sessionNote}</div> : null}
       </td>
-      <td>
+      <td data-label="Price / Change">
         <div className="cell-stack">
           <strong>{formatPrice(instrument.price, instrument.symbol)}</strong>
           <span className={instrument.changePercent >= 0 ? "value-positive" : "value-negative"}>

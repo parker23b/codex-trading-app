@@ -14,33 +14,35 @@ export function PositionsTable({ positions }: PositionsTableProps) {
   }
 
   return (
-    <table className="table">
-      <thead>
-        <tr>
-          <th>Instrument</th>
-          <th>Strategy</th>
-          <th>Direction</th>
-          <th>Size</th>
-          <th>Open Price</th>
-          <th>Account</th>
-        </tr>
-      </thead>
-      <tbody>
-        {positions.map((position) => (
-          <tr key={position.id}>
-            <td>{position.instrument}</td>
-            <td>{position.strategy_name}</td>
-            <td>
-              <span className={`pill ${position.direction.toLowerCase()}`}>{position.direction}</span>
-            </td>
-            <td>{position.size}</td>
-            <td>{formatNumber(position.open_price)}</td>
-            <td>
-              <span className={`pill ${position.account_type.toLowerCase()}`}>{position.account_type}</span>
-            </td>
+    <div className="table-shell">
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Instrument</th>
+            <th>Strategy</th>
+            <th>Direction</th>
+            <th>Size</th>
+            <th>Open Price</th>
+            <th>Account</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {positions.map((position) => (
+            <tr key={position.id}>
+              <td data-label="Instrument">{position.instrument}</td>
+              <td data-label="Strategy">{position.strategy_name}</td>
+              <td data-label="Direction">
+                <span className={`pill ${position.direction.toLowerCase()}`}>{position.direction}</span>
+              </td>
+              <td data-label="Size">{position.size}</td>
+              <td data-label="Open Price">{formatNumber(position.open_price)}</td>
+              <td data-label="Account">
+                <span className={`pill ${position.account_type.toLowerCase()}`}>{position.account_type}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

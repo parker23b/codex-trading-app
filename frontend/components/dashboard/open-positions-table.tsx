@@ -35,27 +35,27 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
         <tbody>
           {activeRows.map((position) => (
             <tr key={position.id}>
-              <td>
+              <td data-label="Instrument">
                 <div className="cell-stack">
                   <strong>{formatInstrumentLabel(position.instrument)}</strong>
                   <span className="muted">{position.direction} {position.size} at {formatPrice(position.open_price, position.instrument)}</span>
                 </div>
               </td>
-              <td>
+              <td data-label="Strategy">
                 <div className="cell-stack">
                   <StatusBadge label={position.strategy_name} tone="neutral" />
                   {position.reason ? <span className="muted">{position.reason}</span> : null}
                 </div>
               </td>
-              <td><span className="muted">{position.broker_reference ?? "pending"}</span></td>
-              <td>{formatRelativeDuration(position.open_time)}</td>
-              <td className={(position.unrealized_pnl ?? 0) >= 0 ? "value-positive live-pulse" : "value-negative live-pulse"}>
+              <td data-label="Broker Ref"><span className="muted">{position.broker_reference ?? "pending"}</span></td>
+              <td data-label="Duration">{formatRelativeDuration(position.open_time)}</td>
+              <td data-label="PnL" className={(position.unrealized_pnl ?? 0) >= 0 ? "value-positive live-pulse" : "value-negative live-pulse"}>
                 <div className="cell-stack">
                   <strong>{formatSignedCurrency(position.unrealized_pnl ?? 0)}</strong>
                   <span className="muted">Px {formatPrice(position.current_price ?? position.open_price, position.instrument)}</span>
                 </div>
               </td>
-              <td>
+              <td data-label="Risk">
                 <div className="cell-stack">
                   <strong>{formatPercent(position.risk_percent ?? 0)}</strong>
                   <StatusBadge
@@ -64,13 +64,13 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
                   />
                 </div>
               </td>
-              <td>
+              <td data-label="Override Status">
                 <StatusBadge
                   label={position.manual_override ? "Manual Override Flagged" : "System Managed"}
                   tone={position.manual_override ? "warning" : "neutral"}
                 />
               </td>
-              <td>
+              <td data-label="Execution Status">
                 <span className="muted">Read-only in dashboard</span>
               </td>
             </tr>

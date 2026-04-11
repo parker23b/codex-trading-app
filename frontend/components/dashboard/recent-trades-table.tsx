@@ -27,14 +27,14 @@ export function RecentTradesTable({ trades }: RecentTradesTableProps) {
         <tbody>
           {trades.map((trade) => (
             <tr key={trade.id}>
-              <td><StatusBadge label={trade.strategy_name} tone="neutral" /></td>
-              <td>{formatInstrumentLabel(trade.instrument)}</td>
-              <td>
+              <td data-label="Strategy"><StatusBadge label={trade.strategy_name} tone="neutral" /></td>
+              <td data-label="Instrument">{formatInstrumentLabel(trade.instrument)}</td>
+              <td data-label="Outcome">
                 <StatusBadge label={trade.pnl >= 0 ? "Win" : "Loss"} tone={trade.pnl >= 0 ? "positive" : "negative"} />
               </td>
-              <td className={trade.pnl >= 0 ? "value-positive" : "value-negative"}>{formatSignedCurrency(trade.pnl)}</td>
-              <td>{trade.r_multiple ? `${trade.r_multiple.toFixed(1)}R` : "—"}</td>
-              <td className="muted">{trade.reason ?? "No annotation"}</td>
+              <td data-label="PnL" className={trade.pnl >= 0 ? "value-positive" : "value-negative"}>{formatSignedCurrency(trade.pnl)}</td>
+              <td data-label="R Multiple">{trade.r_multiple ? `${trade.r_multiple.toFixed(1)}R` : "—"}</td>
+              <td data-label="Rationale" className="muted">{trade.reason ?? "No annotation"}</td>
             </tr>
           ))}
         </tbody>

@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.core.broker_factory import get_broker
 from app.core.logging import get_logger
 from app.core.runtime import runtime_manager
-from app.models.trade import Position, clone_position, utc_now
+from app.models.trade import Position, Trade, TradeIntent, TradeIntentState, clone_position, utc_now
 from app.services.domain_event_service import domain_event_service
 from app.services.health_service import get_health_service
 from app.services.runtime_state_service import RuntimeStateService
@@ -13,7 +13,14 @@ logger = get_logger(__name__)
 
 
 class ReconciliationService:
-    """Synchronize local open positions against broker-truth positions."""
+    """
+    Synchronize local open positions against broker truth.
+
+    Reconciliation is no longer allowed to silently mutate portfolio truth.
+    If broker state appears without an internal lifecycle chain, this service
+    creates explicit TradeIntent records such as `EXTERNAL_POSITION_ADOPTED` or
+    `FORCED_RECONCILIATION_CLOSE` so operators can audit the out-of-band path.
+    """
 
     def __init__(self, trade_service: TradeService):
         self.trade_service = trade_service
@@ -74,6 +81,7 @@ class ReconciliationService:
             runtime_manager.last_prices.setdefault(instrument, remote_position.open_price)
             synced_position = Position(
                 id=persisted_id,
+                trade_intent_id=local_position.trade_intent_id if local_position is not None else None,
                 strategy_name=strategy_name,
                 broker_reference=remote_position.broker_reference,
                 instrument=remote_position.instrument,
@@ -95,8 +103,18 @@ class ReconciliationService:
             is_adopted = local_position is None
             needs_update = is_adopted or self._position_needs_reconciliation(local_position, synced_position)
             persisted = self.trade_service.record_broker_position(synced_position)
+            intent = self._resolve_reconciled_trade_intent(
+                local_position=local_position,
+                persisted_position=persisted,
+                matching_engine=matching_engine,
+                is_adopted=is_adopted,
+            )
+            if intent is not None and persisted.trade_intent_id != intent.id:
+                persisted.trade_intent_id = intent.id
+                persisted = self.trade_service.upsert_position(persisted)
             if needs_update:
                 details = {
+                    "trade_intent_id": intent.id if intent is not None else None,
                     "matched_local_position": local_position is not None,
                     "matched_runtime_engine": matching_engine is not None,
                     "size": remote_position.size,
@@ -104,6 +122,7 @@ class ReconciliationService:
                 }
                 self.trade_service.record_reconciliation_event(
                     event_type="POSITION_SYNCED_FROM_BROKER" if local_position is not None else "POSITION_ADOPTED_FROM_BROKER",
+                    trade_intent_id=intent.id if intent is not None else None,
                     strategy_name=strategy_name,
                     instrument=instrument,
                     broker_reference=remote_position.broker_reference,
@@ -173,13 +192,49 @@ class ReconciliationService:
                 broker_sync_status="MISSING_AT_BROKER",
                 close_reason="Closed locally after broker reconciliation found no matching open broker position.",
             )
+            intent = self._resolve_forced_close_trade_intent(local_position)
+            forced_trade = self.trade_service.record_trade(
+                Trade(
+                    trade_intent_id=intent.id if intent is not None else None,
+                    strategy_name=local_position.strategy_name,
+                    broker_reference=local_position.broker_reference,
+                    close_broker_reference=None,
+                    instrument=local_position.instrument,
+                    direction=local_position.direction,
+                    size=local_position.size,
+                    open_price=local_position.open_price,
+                    close_price=local_position.current_price or local_position.open_price,
+                    open_time=local_position.open_time,
+                    close_time=local_position.close_time or utc_now(),
+                    pnl=local_position.unrealized_pnl or local_position.pnl or 0.0,
+                    outcome="reconciled",
+                    reason="Forced reconciliation close",
+                    account_type=local_position.account_type,
+                )
+            )
+            if intent is not None:
+                self.trade_service.transition_trade_intent(
+                    intent,
+                    state=TradeIntentState.FORCED_RECONCILIATION_CLOSE,
+                    trade_id=forced_trade.id,
+                    position_id=local_position.id,
+                    close_reason_code="FORCED_RECONCILIATION_CLOSE",
+                    close_reason="Local position was force-closed because the broker no longer reported it.",
+                    average_fill_price=forced_trade.close_price,
+                    filled_size=forced_trade.size,
+                    completed_at=forced_trade.close_time,
+                    closed_at=forced_trade.close_time,
+                )
             unmatched_local_count += 1
             details = {
+                "trade_intent_id": intent.id if intent is not None else None,
                 "had_broker_reference": local_position.broker_reference is not None,
                 "close_price": local_position.current_price or local_position.open_price,
+                "forced_trade_id": forced_trade.id,
             }
             self.trade_service.record_reconciliation_event(
                 event_type="LOCAL_POSITION_CLOSED_AFTER_BROKER_MISS",
+                trade_intent_id=intent.id if intent is not None else None,
                 strategy_name=local_position.strategy_name,
                 instrument=local_position.instrument,
                 broker_reference=local_position.broker_reference,
@@ -261,5 +316,112 @@ class ReconciliationService:
                 float(local_position.size) != float(remote_position.size),
                 float(local_position.open_price) != float(remote_position.open_price),
                 local_position.broker_sync_status != "CONFIRMED",
+            )
+        )
+
+    def _resolve_reconciled_trade_intent(
+        self,
+        *,
+        local_position: Position | None,
+        persisted_position: Position,
+        matching_engine,
+        is_adopted: bool,
+    ) -> TradeIntent | None:
+        if local_position is not None and local_position.trade_intent_id is not None:
+            intent = self.trade_service.get_trade_intent(local_position.trade_intent_id)
+            if intent is not None:
+                return self.trade_service.transition_trade_intent(
+                    intent,
+                    state=(
+                        TradeIntentState.EXTERNAL_POSITION_ADOPTED
+                        if is_adopted
+                        else TradeIntentState.POSITION_OPENED
+                    ),
+                    broker_reference=persisted_position.broker_reference,
+                    position_id=persisted_position.id,
+                    average_fill_price=persisted_position.open_price,
+                    filled_size=persisted_position.size,
+                    opened_at=persisted_position.open_time,
+                    decision_reason_code=(
+                        "UNPLANNED_POSITION_DETECTED" if is_adopted else intent.decision_reason_code
+                    ),
+                    decision_reason=(
+                        "Broker position was adopted without an existing internal decision chain."
+                        if is_adopted
+                        else intent.decision_reason
+                    ),
+                )
+
+        strategy_name = (
+            local_position.strategy_name
+            if local_position is not None
+            else (matching_engine.strategy.name if matching_engine is not None else "broker_sync")
+        )
+        intent = self.trade_service.create_trade_intent(
+            TradeIntent(
+                strategy_name=strategy_name,
+                instrument=persisted_position.instrument,
+                direction=persisted_position.direction,
+                state=(
+                    TradeIntentState.EXTERNAL_POSITION_ADOPTED.value
+                    if is_adopted
+                    else TradeIntentState.POSITION_OPENED.value
+                ),
+                signal_time=persisted_position.open_time,
+                proposed_size=persisted_position.size,
+                allocated_size=persisted_position.size,
+                proposed_risk_percent=persisted_position.risk_percent,
+                allocated_risk_percent=persisted_position.risk_percent,
+                observed_price=persisted_position.open_price,
+                average_fill_price=persisted_position.open_price,
+                filled_size=persisted_position.size,
+                broker_reference=persisted_position.broker_reference,
+                position_id=persisted_position.id,
+                decision_reason_code=(
+                    "UNPLANNED_POSITION_DETECTED" if is_adopted else "RECOVERED_POSITION_LINK"
+                ),
+                decision_reason=(
+                    "Broker position was adopted without an existing internal decision chain."
+                    if is_adopted
+                    else "Reconciliation created an explicit lifecycle record for a legacy position."
+                ),
+                opened_at=persisted_position.open_time,
+                details={"reconciliation_created": True},
+            )
+        )
+        return intent
+
+    def _resolve_forced_close_trade_intent(self, local_position: Position) -> TradeIntent | None:
+        if local_position.trade_intent_id is not None:
+            intent = self.trade_service.get_trade_intent(local_position.trade_intent_id)
+            if intent is not None:
+                return intent
+        if local_position.broker_reference is not None:
+            intent = self.trade_service.find_open_trade_intent(
+                strategy_name=local_position.strategy_name,
+                instrument=local_position.instrument,
+                broker_reference=local_position.broker_reference,
+                position_id=local_position.id,
+            )
+            if intent is not None:
+                return intent
+        return self.trade_service.create_trade_intent(
+            TradeIntent(
+                strategy_name=local_position.strategy_name,
+                instrument=local_position.instrument,
+                direction=local_position.direction,
+                state=TradeIntentState.FORCED_RECONCILIATION_CLOSE.value,
+                signal_time=local_position.open_time,
+                proposed_size=local_position.size,
+                allocated_size=local_position.size,
+                proposed_risk_percent=local_position.risk_percent,
+                allocated_risk_percent=local_position.risk_percent,
+                observed_price=local_position.open_price,
+                broker_reference=local_position.broker_reference,
+                position_id=local_position.id,
+                decision_reason_code="UNPLANNED_POSITION_DETECTED",
+                decision_reason="Reconciliation created a lifecycle record for a position missing an intent chain.",
+                details={"reconciliation_created": True, "forced_close": True},
+                opened_at=local_position.open_time,
             )
         )

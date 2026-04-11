@@ -9,13 +9,14 @@ from app.db.session import engine
 from app.models.strategy_deployment import StrategyDeployment
 from app.models.strategy_governance import StrategyFamilyGovernance
 from app.models.runtime import StrategyRuntimeState
-from app.models.trade import Execution, Position, ReconciliationEvent, Trade
+from app.models.trade import Execution, Position, ReconciliationEvent, Trade, TradeIntent
 from app.models.watchlist import WatchlistEntry
 
 
 def initialize_database() -> None:
     _ = (
         Trade,
+        TradeIntent,
         Position,
         StrategyRuntimeState,
         ReconciliationEvent,
@@ -29,13 +30,16 @@ def initialize_database() -> None:
         StrategyDeployment,
     )
     SQLModel.metadata.create_all(engine)
+    _ensure_sqlite_column("position", "trade_intent_id", "INTEGER")
     _ensure_sqlite_column("position", "broker_reference", "VARCHAR")
     _ensure_sqlite_column("position", "broker_sync_status", "VARCHAR DEFAULT 'PENDING'")
     _ensure_sqlite_column("position", "broker_open_confirmed_at", "TIMESTAMP")
     _ensure_sqlite_column("position", "broker_closed_confirmed_at", "TIMESTAMP")
     _ensure_sqlite_column("position", "last_reconciled_at", "TIMESTAMP")
+    _ensure_sqlite_column("trade", "trade_intent_id", "INTEGER")
     _ensure_sqlite_column("trade", "broker_reference", "VARCHAR")
     _ensure_sqlite_column("trade", "close_broker_reference", "VARCHAR")
+    _ensure_sqlite_column("execution", "trade_intent_id", "INTEGER")
     _ensure_sqlite_column("execution", "client_request_id", "VARCHAR")
     _ensure_sqlite_column("execution", "broker_reference", "VARCHAR")
     _ensure_sqlite_column("execution", "local_position_id", "INTEGER")
@@ -54,6 +58,19 @@ def initialize_database() -> None:
     _ensure_sqlite_column("execution", "requires_manual_review", "BOOLEAN DEFAULT 0")
     _ensure_sqlite_column("execution", "details", "JSON")
     _ensure_sqlite_column("execution", "updated_at", "TIMESTAMP")
+    _ensure_sqlite_column("reconciliationevent", "trade_intent_id", "INTEGER")
+    _ensure_sqlite_partial_unique_index(
+        "uq_trade_intent_active_instrument",
+        "tradeintent",
+        "instrument",
+        (
+            "state IN ("
+            "'PROPOSED', 'APPROVED', 'SUBMITTED', 'ACKNOWLEDGED', 'PARTIALLY_FILLED', "
+            "'FILLED', 'POSITION_OPENED', 'CLOSE_REQUESTED', 'EXTERNAL_POSITION_ADOPTED', "
+            "'RECOVERED_POSITION_ATTACHED'"
+            ")"
+        ),
+    )
     _ensure_sqlite_column("strategyruntimestate", "strategy_version", "VARCHAR DEFAULT '1'")
     _ensure_sqlite_column("strategyruntimestate", "recovery_state", "VARCHAR DEFAULT 'PENDING'")
     _ensure_sqlite_column("strategyruntimestate", "recovery_reason", "VARCHAR")
@@ -157,3 +174,15 @@ def _ensure_sqlite_column(table_name: str, column_name: str, column_sql: str) ->
 def _ensure_index(index_name: str, table_name: str, columns_sql: str) -> None:
     with engine.begin() as connection:
         connection.execute(text(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({columns_sql})"))
+
+
+def _ensure_sqlite_partial_unique_index(index_name: str, table_name: str, columns_sql: str, where_sql: str) -> None:
+    if engine.dialect.name != "sqlite":
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS {index_name} "
+                f"ON {table_name} ({columns_sql}) WHERE {where_sql}"
+            )
+        )

@@ -1,9 +1,30 @@
 from datetime import datetime
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, desc, select
 
-from app.models.trade import Execution, ExecutionStatus, Position, ReconciliationEvent, Trade, utc_now
+from app.models.trade import (
+    ACTIVE_INSTRUMENT_OWNERSHIP_STATES,
+    Execution,
+    ExecutionStatus,
+    Position,
+    ReconciliationEvent,
+    Trade,
+    TradeIntent,
+    TradeIntentState,
+    utc_now,
+)
 from app.services.domain_event_service import domain_event_service
+
+
+class ActiveTradeIntentConflictError(RuntimeError):
+    def __init__(self, *, instrument: str, conflicting_intent_id: int | None = None) -> None:
+        self.instrument = instrument
+        self.conflicting_intent_id = conflicting_intent_id
+        message = f"Instrument {instrument} already has an active trade intent."
+        if conflicting_intent_id is not None:
+            message = f"{message} Conflicting intent id: {conflicting_intent_id}."
+        super().__init__(message)
 
 
 class TradeService:
@@ -33,6 +54,30 @@ class TradeService:
 
     def list_executions(self, *, limit: int = 100) -> list[Execution]:
         statement = select(Execution).order_by(desc(Execution.last_transition_at)).limit(limit)
+        return list(self.session.exec(statement).all())
+
+    def list_trade_intents(
+        self,
+        *,
+        limit: int = 250,
+        strategy_name: str | None = None,
+        instrument: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        states: set[str] | tuple[str, ...] | list[str] | None = None,
+    ) -> list[TradeIntent]:
+        statement = select(TradeIntent)
+        if strategy_name is not None:
+            statement = statement.where(TradeIntent.strategy_name == strategy_name)
+        if instrument is not None:
+            statement = statement.where(TradeIntent.instrument == instrument)
+        if date_from is not None:
+            statement = statement.where(TradeIntent.updated_at >= date_from)
+        if date_to is not None:
+            statement = statement.where(TradeIntent.updated_at <= date_to)
+        if states:
+            statement = statement.where(TradeIntent.state.in_(tuple(states)))
+        statement = statement.order_by(desc(TradeIntent.updated_at)).limit(limit)
         return list(self.session.exec(statement).all())
 
     def list_reconciliation_events(
@@ -78,6 +123,220 @@ class TradeService:
         self.session.refresh(trade)
         return trade
 
+    def create_trade_intent(self, intent: TradeIntent) -> TradeIntent:
+        try:
+            self.session.add(intent)
+            self.session.commit()
+            self.session.refresh(intent)
+            return intent
+        except IntegrityError as exc:
+            self.session.rollback()
+            if intent.state in ACTIVE_INSTRUMENT_OWNERSHIP_STATES:
+                conflicting = self.find_active_trade_intent_for_instrument_excluding(
+                    intent.instrument,
+                    exclude_intent_id=intent.id,
+                )
+                raise ActiveTradeIntentConflictError(
+                    instrument=intent.instrument,
+                    conflicting_intent_id=conflicting.id if conflicting is not None else None,
+                ) from exc
+            raise
+
+    def get_trade_intent(self, trade_intent_id: int) -> TradeIntent | None:
+        statement = select(TradeIntent).where(TradeIntent.id == trade_intent_id)
+        return self.session.exec(statement).first()
+
+    def find_active_trade_intent_for_instrument(self, instrument: str) -> TradeIntent | None:
+        return self.find_active_trade_intent_for_instrument_excluding(instrument, exclude_intent_id=None)
+
+    def find_active_trade_intent_for_instrument_excluding(
+        self,
+        instrument: str,
+        *,
+        exclude_intent_id: int | None,
+    ) -> TradeIntent | None:
+        statement = (
+            select(TradeIntent)
+            .where(TradeIntent.instrument == instrument)
+            .where(TradeIntent.state.in_(ACTIVE_INSTRUMENT_OWNERSHIP_STATES))
+            .order_by(desc(TradeIntent.updated_at))
+        )
+        if exclude_intent_id is not None:
+            statement = statement.where(TradeIntent.id != exclude_intent_id)
+        return self.session.exec(statement).first()
+
+    def find_open_trade_intent(
+        self,
+        *,
+        strategy_name: str | None = None,
+        instrument: str | None = None,
+        broker_reference: str | None = None,
+        position_id: int | None = None,
+    ) -> TradeIntent | None:
+        statement = select(TradeIntent).where(
+            TradeIntent.state.in_(
+                {
+                    TradeIntentState.POSITION_OPENED.value,
+                    TradeIntentState.CLOSE_REQUESTED.value,
+                    TradeIntentState.EXTERNAL_POSITION_ADOPTED.value,
+                    TradeIntentState.RECOVERED_POSITION_ATTACHED.value,
+                }
+            )
+        )
+        if strategy_name is not None:
+            statement = statement.where(TradeIntent.strategy_name == strategy_name)
+        if instrument is not None:
+            statement = statement.where(TradeIntent.instrument == instrument)
+        if broker_reference is not None:
+            statement = statement.where(TradeIntent.broker_reference == broker_reference)
+        if position_id is not None:
+            statement = statement.where(TradeIntent.position_id == position_id)
+        statement = statement.order_by(desc(TradeIntent.updated_at))
+        return self.session.exec(statement).first()
+
+    def find_close_admissible_trade_intent(
+        self,
+        *,
+        strategy_name: str,
+        instrument: str,
+        broker_reference: str | None = None,
+        position_id: int | None = None,
+    ) -> TradeIntent | None:
+        statement = select(TradeIntent).where(
+            TradeIntent.strategy_name == strategy_name,
+            TradeIntent.instrument == instrument,
+            TradeIntent.state.in_(
+                {
+                    TradeIntentState.POSITION_OPENED.value,
+                    TradeIntentState.EXTERNAL_POSITION_ADOPTED.value,
+                    TradeIntentState.RECOVERED_POSITION_ATTACHED.value,
+                }
+            ),
+        )
+        if broker_reference is not None:
+            statement = statement.where(TradeIntent.broker_reference == broker_reference)
+        if position_id is not None:
+            statement = statement.where(TradeIntent.position_id == position_id)
+        statement = statement.order_by(desc(TradeIntent.updated_at))
+        return self.session.exec(statement).first()
+
+    def list_recent_trade_intents(
+        self,
+        *,
+        signal_time_from: datetime,
+        strategy_name: str | None = None,
+        instrument: str | None = None,
+    ) -> list[TradeIntent]:
+        statement = (
+            select(TradeIntent)
+            .where(TradeIntent.signal_time >= signal_time_from)
+            .order_by(desc(TradeIntent.signal_time))
+        )
+        if strategy_name is not None:
+            statement = statement.where(TradeIntent.strategy_name == strategy_name)
+        if instrument is not None:
+            statement = statement.where(TradeIntent.instrument == instrument)
+        return list(self.session.exec(statement).all())
+
+    def has_pending_trade_intents(self) -> bool:
+        pending_states = (
+            TradeIntentState.PROPOSED.value,
+            TradeIntentState.APPROVED.value,
+            TradeIntentState.SUBMITTED.value,
+            TradeIntentState.ACKNOWLEDGED.value,
+            TradeIntentState.PARTIALLY_FILLED.value,
+            TradeIntentState.CLOSE_REQUESTED.value,
+            TradeIntentState.EXTERNAL_POSITION_ADOPTED.value,
+            TradeIntentState.RECOVERED_POSITION_ATTACHED.value,
+        )
+        record = self.session.exec(
+            select(TradeIntent.id).where(TradeIntent.state.in_(pending_states)).limit(1)
+        ).first()
+        return record is not None
+
+    def transition_trade_intent(
+        self,
+        intent: TradeIntent,
+        *,
+        state: TradeIntentState | str,
+        allocated_size: float | None = None,
+        allocated_risk_percent: float | None = None,
+        average_fill_price: float | None = None,
+        filled_size: float | None = None,
+        broker_reference: str | None = None,
+        close_broker_reference: str | None = None,
+        position_id: int | None = None,
+        trade_id: int | None = None,
+        decision_reason_code: str | None = None,
+        decision_reason: str | None = None,
+        close_reason_code: str | None = None,
+        close_reason: str | None = None,
+        execution_client_request_id: str | None = None,
+        details: dict[str, object] | None = None,
+        submitted_at: datetime | None = None,
+        acknowledged_at: datetime | None = None,
+        completed_at: datetime | None = None,
+        opened_at: datetime | None = None,
+        closed_at: datetime | None = None,
+    ) -> TradeIntent:
+        intent.state = state.value if isinstance(state, TradeIntentState) else state
+        intent.updated_at = utc_now()
+        if allocated_size is not None:
+            intent.allocated_size = allocated_size
+        if allocated_risk_percent is not None:
+            intent.allocated_risk_percent = allocated_risk_percent
+        if average_fill_price is not None:
+            intent.average_fill_price = average_fill_price
+        if filled_size is not None:
+            intent.filled_size = filled_size
+        if broker_reference is not None:
+            intent.broker_reference = broker_reference
+        if close_broker_reference is not None:
+            intent.close_broker_reference = close_broker_reference
+        if position_id is not None:
+            intent.position_id = position_id
+        if trade_id is not None:
+            intent.trade_id = trade_id
+        if decision_reason_code is not None:
+            intent.decision_reason_code = decision_reason_code
+        if decision_reason is not None:
+            intent.decision_reason = decision_reason
+        if close_reason_code is not None:
+            intent.close_reason_code = close_reason_code
+        if close_reason is not None:
+            intent.close_reason = close_reason
+        if execution_client_request_id is not None:
+            intent.execution_client_request_id = execution_client_request_id
+        if details:
+            intent.details = {**(intent.details or {}), **details}
+        if submitted_at is not None:
+            intent.submitted_at = submitted_at
+        if acknowledged_at is not None:
+            intent.acknowledged_at = acknowledged_at
+        if completed_at is not None:
+            intent.completed_at = completed_at
+        if opened_at is not None:
+            intent.opened_at = opened_at
+        if closed_at is not None:
+            intent.closed_at = closed_at
+        try:
+            self.session.add(intent)
+            self.session.commit()
+            self.session.refresh(intent)
+            return intent
+        except IntegrityError as exc:
+            self.session.rollback()
+            if intent.state in ACTIVE_INSTRUMENT_OWNERSHIP_STATES:
+                conflicting = self.find_active_trade_intent_for_instrument_excluding(
+                    intent.instrument,
+                    exclude_intent_id=intent.id,
+                )
+                raise ActiveTradeIntentConflictError(
+                    instrument=intent.instrument,
+                    conflicting_intent_id=conflicting.id if conflicting is not None else None,
+                ) from exc
+            raise
+
     def create_execution(self, execution: Execution) -> Execution:
         self.session.add(execution)
         self.session.commit()
@@ -114,6 +373,7 @@ class TradeService:
         execution: Execution,
         *,
         status: ExecutionStatus | str,
+        trade_intent_id: int | None = None,
         client_request_id: str | None = None,
         broker_reference: str | None = None,
         local_position_id: int | None = None,
@@ -133,6 +393,8 @@ class TradeService:
         execution.status = status.value if isinstance(status, ExecutionStatus) else status
         execution.last_transition_at = completed_at or acknowledged_at or submitted_at or utc_now()
         execution.updated_at = utc_now()
+        if trade_intent_id is not None:
+            execution.trade_intent_id = trade_intent_id
         if client_request_id is not None:
             execution.client_request_id = client_request_id
         if broker_reference is not None:
@@ -205,6 +467,7 @@ class TradeService:
         )
         if existing is not None:
             for field_name in (
+                "trade_intent_id",
                 "strategy_name",
                 "broker_reference",
                 "direction",
@@ -268,6 +531,7 @@ class TradeService:
         self,
         *,
         event_type: str,
+        trade_intent_id: int | None,
         strategy_name: str | None,
         instrument: str | None,
         broker_reference: str | None,
@@ -276,6 +540,7 @@ class TradeService:
     ) -> ReconciliationEvent:
         event = ReconciliationEvent(
             event_type=event_type,
+            trade_intent_id=trade_intent_id,
             strategy_name=strategy_name,
             instrument=instrument,
             broker_reference=broker_reference,
@@ -292,19 +557,9 @@ class TradeService:
         if previous_status == execution.status:
             return
 
+        # Decision ownership lives on TradeIntent. Execution events begin once an
+        # admitted intent enters broker-attempt orchestration.
         event_metadata = {
-            ExecutionStatus.RISK_APPROVED.value: {
-                "event_type": "risk.entry_approved",
-                "category": "risk",
-                "severity": "info",
-                "title": "Risk approved entry",
-            },
-            ExecutionStatus.RISK_REJECTED.value: {
-                "event_type": "risk.entry_rejected",
-                "category": "risk",
-                "severity": "warning",
-                "title": "Risk rejected entry",
-            },
             ExecutionStatus.ORDER_SUBMITTED.value: {
                 "event_type": "execution.order_submitted",
                 "category": "execution",
@@ -334,12 +589,6 @@ class TradeService:
                 "category": "execution",
                 "severity": "info",
                 "title": "Position opened",
-            },
-            ExecutionStatus.CLOSE_REQUESTED.value: {
-                "event_type": "execution.close_requested",
-                "category": "execution",
-                "severity": "info",
-                "title": "Close requested",
             },
             ExecutionStatus.CLOSE_CONFIRMED.value: {
                 "event_type": "execution.position_closed",
@@ -388,6 +637,7 @@ class TradeService:
             trade_id=execution.local_trade_id,
             execution_id=execution.id,
             payload_json={
+                "trade_intent_id": execution.trade_intent_id,
                 "phase": execution.phase,
                 "status": execution.status,
                 "reason": execution.reason,

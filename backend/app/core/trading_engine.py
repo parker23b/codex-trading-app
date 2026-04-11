@@ -77,6 +77,9 @@ class TradingEngine:
                     "spread": update.spread,
                 },
             )
+            # This is the raw alpha signal boundary. The engine packages strategy
+            # intent into an `EntrySignal`, but it is only a proposal; sizing,
+            # admission, and execution authority now live in TradeDecisionService.
             return EntrySignal(
                 kind=SignalKind.ENTRY,
                 strategy_name=self.strategy.name,
@@ -104,6 +107,8 @@ class TradingEngine:
                     "spread": update.spread,
                 },
             )
+            # Exit signals are also emitted as raw strategy intent and later
+            # linked back to the authoritative TradeIntent lifecycle.
             return ExitSignal(
                 kind=SignalKind.EXIT,
                 strategy_name=self.strategy.name,

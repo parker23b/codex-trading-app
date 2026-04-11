@@ -14,32 +14,49 @@ from app.core.signals import EntrySignal, ExitSignal, SignalCandidate, SignalSta
 from app.core.instrument_catalog import list_instruments
 from app.core.runtime import runtime_manager
 from app.models.strategy_deployment import StrategyDeployment
-from app.models.trade import Execution, ExecutionPhase, ExecutionStatus, Position, Trade, clone_position, utc_now
+from app.models.trade import (
+    Execution,
+    ExecutionPhase,
+    ExecutionStatus,
+    Position,
+    Trade,
+    TradeIntent,
+    TradeIntentState,
+    clone_position,
+    utc_now,
+)
 from app.strategies.registry import strategy_registry
+from app.services.trade_decision_service import TradeDecisionResult, TradeDecisionService
 from app.services.domain_event_service import domain_event_service
 from app.services.health_service import get_health_service
 from app.services.market_status_service import MarketStatus, get_market_status_service
-from app.services.portfolio_risk_service import PortfolioRiskService
 from app.services.runtime_state_service import RuntimeStateService
 from app.services.strategy_governance_service import StrategyGovernanceService
-from app.services.trade_allocator_service import TradeAllocatorService
 from app.services.trade_service import TradeService
 
 logger = get_logger(__name__)
 
 
 class StrategyService:
-    RETRYABLE_EXECUTION_STATUSES = {
+    # Legacy execution statuses are read only so persisted older rows can still
+    # participate in retry suppression. New execution rows must start at
+    # `SUBMISSION_PENDING` and never write these statuses.
+    LEGACY_EXECUTION_COMPAT_STATUSES = {
         ExecutionStatus.SIGNAL_GENERATED.value,
         ExecutionStatus.RISK_APPROVED.value,
         ExecutionStatus.CLOSE_REQUESTED.value,
+    }
+    RETRYABLE_EXECUTION_STATUSES = {
+        ExecutionStatus.SUBMISSION_PENDING.value,
         ExecutionStatus.ORDER_SUBMITTED.value,
         ExecutionStatus.ORDER_ACKNOWLEDGED.value,
         ExecutionStatus.FILL_PARTIAL.value,
         ExecutionStatus.FAILED.value,
         ExecutionStatus.NEEDS_MANUAL_REVIEW.value,
-    }
+    } | LEGACY_EXECUTION_COMPAT_STATUSES
     SAFE_CLOSE_RETRY_STATUSES = {
+        ExecutionStatus.SUBMISSION_PENDING.value,
+    } | {
         ExecutionStatus.SIGNAL_GENERATED.value,
         ExecutionStatus.CLOSE_REQUESTED.value,
     }
@@ -50,8 +67,7 @@ class StrategyService:
         self.event_service = domain_event_service
         self.health_service = get_health_service()
         self.market_status_service = get_market_status_service()
-        self.risk_service = PortfolioRiskService(session)
-        self.trade_allocator = TradeAllocatorService(session)
+        self.trade_decision_service = TradeDecisionService(session) if session is not None else None
         self.runtime_state_service = RuntimeStateService(session) if session is not None else None
 
     def list_strategies(self) -> list[dict[str, object]]:
@@ -62,6 +78,7 @@ class StrategyService:
         trades = trade_service.list_trades()
         positions = trade_service.list_positions()
         executions = trade_service.list_executions(limit=250)
+        intents = trade_service.list_trade_intents(limit=250)
         open_positions_by_strategy: dict[str, list] = defaultdict(list)
         for position in positions:
             open_positions_by_strategy[position.strategy_name].append(position)
@@ -70,11 +87,18 @@ class StrategyService:
             trades_by_strategy[trade.strategy_name].append(trade.pnl)
         latest_execution_warning_by_key: dict[tuple[str, str], Execution] = {}
         for execution in executions:
-            if execution.status not in {ExecutionStatus.FAILED.value, ExecutionStatus.NEEDS_MANUAL_REVIEW.value, ExecutionStatus.RISK_REJECTED.value}:
+            if execution.status not in {ExecutionStatus.FAILED.value, ExecutionStatus.NEEDS_MANUAL_REVIEW.value}:
                 continue
             key = (execution.strategy_name, execution.instrument)
             if key not in latest_execution_warning_by_key:
                 latest_execution_warning_by_key[key] = execution
+        latest_decision_warning_by_key: dict[tuple[str, str], TradeIntent] = {}
+        for intent in intents:
+            if intent.state != TradeIntentState.REJECTED.value:
+                continue
+            key = (intent.strategy_name, intent.instrument)
+            if key not in latest_decision_warning_by_key:
+                latest_decision_warning_by_key[key] = intent
 
         strategies: list[dict[str, object]] = []
         governance_by_name = {
@@ -104,6 +128,15 @@ class StrategyService:
             )
             primary_instrument = primary_engine.instrument if primary_engine else metadata.default_instrument
             primary_warning = latest_execution_warning_by_key.get((metadata.name, primary_instrument))
+            primary_decision_warning = latest_decision_warning_by_key.get((metadata.name, primary_instrument))
+            primary_warning_message = None
+            primary_warning_status = None
+            if primary_warning is not None:
+                primary_warning_message = primary_warning.error_message or primary_warning.reason
+                primary_warning_status = primary_warning.status
+            elif primary_decision_warning is not None:
+                primary_warning_message = primary_decision_warning.decision_reason
+                primary_warning_status = primary_decision_warning.state
             governance = governance_by_name.get(metadata.name)
             deployment = deployment_by_name.get(metadata.name)
             primary_runtime = runtimes_by_key.get((metadata.name, primary_instrument))
@@ -160,13 +193,13 @@ class StrategyService:
                     "active_instruments": [engine.instrument for _, engine in active_engines],
                     "active_runtime_count": len(active_engines),
                     "open_position_count": len(strategy_positions),
-                    "warning_message": (
-                        primary_warning.error_message or primary_warning.reason
+                    "warning_message": primary_warning_message,
+                    "warning_instrument": (
+                        primary_warning.instrument
                         if primary_warning is not None
-                        else None
+                        else primary_decision_warning.instrument if primary_decision_warning is not None else None
                     ),
-                    "warning_instrument": primary_warning.instrument if primary_warning is not None else None,
-                    "warning_status": primary_warning.status if primary_warning is not None else None,
+                    "warning_status": primary_warning_status,
                     "active_runtimes": [
                         {
                             "strategy_name": metadata.name,
@@ -342,6 +375,12 @@ class StrategyService:
         tradable: bool | None = None,
         received_at: datetime | None = None,
     ) -> None:
+        # Ownership chain:
+        # 1. TradingEngine emits raw alpha signals.
+        # 2. TradeDecisionService persists PROPOSED TradeIntents and is the only
+        #    authority that can move them to APPROVED / REJECTED.
+        # 3. StrategyService only executes already-admitted intents and mirrors
+        #    lifecycle changes into execution, position, and trade records.
         candidates = self.evaluate_price_update(
             instrument=instrument,
             price=price,
@@ -354,9 +393,9 @@ class StrategyService:
             received_at=received_at,
             source_tier="TIER1",
         )
-        candidates = self.allocate_signal_candidates(candidates, received_at=received_at)
-        self.orchestrate_signal_candidates(
-            candidates,
+        decisions = self.decide_signal_candidates(candidates, received_at=received_at)
+        self.orchestrate_trade_decisions(
+            decisions,
             price=price,
             bid=bid,
             ask=ask,
@@ -421,24 +460,32 @@ class StrategyService:
             )
         return candidates
 
+    def decide_signal_candidates(
+        self,
+        candidates: list[SignalCandidate],
+        *,
+        received_at: datetime | None = None,
+    ) -> list[TradeDecisionResult]:
+        if self.session is None or self.trade_decision_service is None:
+            raise ValueError("A database session is required to decide signal candidates.")
+        return self.trade_decision_service.decide_signal_candidates(candidates, received_at=received_at)
+
     def allocate_signal_candidates(
         self,
         candidates: list[SignalCandidate],
         *,
         received_at: datetime | None = None,
     ) -> list[SignalCandidate]:
-        if not self.settings.trade_allocator_enabled:
-            return candidates
+        """
+        Backward-compatible wrapper around the centralized decision service.
 
-        decisions = self.trade_allocator.allocate(candidates, received_at=received_at)
-        selected_candidates: list[SignalCandidate] = []
-        for decision in decisions:
-            if decision.selected:
-                self._record_allocator_selection(decision)
-                selected_candidates.append(decision.candidate)
-                continue
-            self._record_allocator_rejection(decision)
-        return selected_candidates
+        Raw strategy signals become `TradeIntent` proposals inside
+        `TradeDecisionService`. This method now only returns the admitted raw
+        candidates for callers that still expect the previous shape.
+        """
+
+        decisions = self.decide_signal_candidates(candidates, received_at=received_at)
+        return [decision.candidate for decision in decisions if decision.admitted]
 
     def orchestrate_signal_candidates(
         self,
@@ -449,96 +496,115 @@ class StrategyService:
         ask: float | None = None,
         received_at: datetime | None = None,
     ) -> None:
+        decisions = self.decide_signal_candidates(candidates, received_at=received_at)
+        self.orchestrate_trade_decisions(
+            decisions,
+            price=price,
+            bid=bid,
+            ask=ask,
+            received_at=received_at,
+        )
+
+    def orchestrate_trade_decisions(
+        self,
+        decisions: list[TradeDecisionResult],
+        *,
+        price: float,
+        bid: float | None = None,
+        ask: float | None = None,
+        received_at: datetime | None = None,
+    ) -> None:
         if self.session is None:
-            raise ValueError("A database session is required to orchestrate signal candidates.")
+            raise ValueError("A database session is required to orchestrate trade decisions.")
 
         trade_service = TradeService(self.session)
         open_positions = trade_service.list_positions()
         trades = trade_service.list_trades()
 
-        for candidate in candidates:
+        for decision in decisions:
+            candidate = decision.candidate
             engine = candidate.engine
             metadata = candidate.metadata
+            intent = decision.intent
             existing_position = trade_service.get_open_position(
                 candidate.instrument,
                 strategy_name=engine.strategy.name,
-                broker_reference=engine.current_position.broker_reference if engine.current_position else None,
+                broker_reference=(
+                    getattr(getattr(engine, "current_position", None), "broker_reference", None)
+                ),
             )
             signal = candidate.signal
 
             if isinstance(signal, EntrySignal):
-                execution, should_submit = self._prepare_execution(
-                    trade_service=trade_service,
-                    strategy_name=signal.strategy_name,
-                    instrument=signal.instrument,
-                    phase=ExecutionPhase.ENTRY.value,
-                    signal_time=signal.signal_at,
-                    requested_size=signal.size,
-                    requested_price=signal.observed_price,
-                    reason="Entry signal generated",
-                    details={
-                        "action_key": self._entry_action_key(signal),
-                        "direction": signal.direction.value,
-                        "market_status": signal.market_status,
-                        "tradable": signal.tradable,
-                    },
-                )
-                if not should_submit:
-                    continue
-                self.event_service.record_event(
-                    event_type="strategy.entry_candidate",
-                    category="strategy",
-                    severity="info",
-                    source="strategy_service.process_price_update",
-                    title="Strategy produced entry candidate",
-                    message=f"{signal.strategy_name} proposed an entry on {signal.instrument}.",
-                    correlation_id=execution.client_request_id,
-                    strategy_name=signal.strategy_name,
-                    instrument=signal.instrument,
-                    execution_id=execution.id,
-                    payload_json={
-                        "direction": signal.direction.value,
-                        "observed_price": signal.observed_price,
-                        "size": signal.size,
-                        "market_status": signal.market_status,
-                        "tradable": signal.tradable,
-                        "source_tier": candidate.source_tier,
-                    },
-                    created_at=signal.signal_at,
-                )
-                signal.risk_percent = metadata.risk_per_trade if metadata else 0.0
-                signal = self._apply_market_status_gate(engine=engine, signal=signal)
-                if signal.status is not SignalStatus.REJECTED:
-                    signal = self.risk_service.assess_entry(
-                        signal,
-                        open_positions=open_positions,
-                        trades=trades,
-                    )
-                if signal.status is SignalStatus.APPROVED:
-                    signal = self._apply_broker_entry_constraints(engine=engine, signal=signal)
-                if signal.status is SignalStatus.APPROVED:
-                    trade_service.transition_execution(
-                        execution,
-                        status=ExecutionStatus.RISK_APPROVED,
-                        client_request_id=execution.client_request_id,
-                        reason=signal.reason or "Risk approved",
+                # The raw signal became a durable proposal in TradeDecisionService.
+                # and only materialize execution rows once an approved intent is
+                # actually entering broker-submission orchestration.
+                if decision.admitted and intent is not None:
+                    execution, should_submit = self._prepare_execution(
+                        trade_service=trade_service,
+                        trade_intent_id=intent.id,
+                        strategy_name=signal.strategy_name,
+                        instrument=signal.instrument,
+                        phase=ExecutionPhase.ENTRY.value,
+                        signal_time=signal.signal_at,
+                        requested_size=signal.size,
+                        requested_price=signal.observed_price,
+                        reason="Execution attempt created for approved entry intent",
                         details={
-                            "risk_percent": signal.risk_percent,
-                            "risk_rejection_layer": signal.rejection_layer,
-                            "risk_audit_summary": signal.audit_summary,
-                            "risk_audit_trail": signal.audit_trail,
+                            "action_key": self._entry_action_key(signal),
+                            "direction": signal.direction.value,
+                            "market_status": signal.market_status,
+                            "tradable": signal.tradable,
+                            "trade_intent_id": intent.id,
+                            "decision_reason_code": intent.decision_reason_code,
+                            "decision_reason": intent.decision_reason,
+                            "allocated_size": intent.allocated_size,
+                            "allocated_risk_percent": intent.allocated_risk_percent,
+                            **(intent.details or {}),
                         },
+                    )
+                    if not should_submit:
+                        continue
+                    self.event_service.record_event(
+                        event_type="strategy.entry_candidate",
+                        category="strategy",
+                        severity="info",
+                        source="strategy_service.process_price_update",
+                        title="Strategy produced entry candidate",
+                        message=f"{signal.strategy_name} proposed an entry on {signal.instrument}.",
+                        correlation_id=execution.client_request_id,
+                        strategy_name=signal.strategy_name,
+                        instrument=signal.instrument,
+                        execution_id=execution.id,
+                        payload_json={
+                            "trade_intent_id": intent.id,
+                            "direction": signal.direction.value,
+                            "observed_price": signal.observed_price,
+                            "size": signal.size,
+                            "market_status": signal.market_status,
+                            "tradable": signal.tradable,
+                            "source_tier": candidate.source_tier,
+                        },
+                        created_at=signal.signal_at,
                     )
                     try:
                         created_position = self._execute_entry_signal(
                             engine=engine,
                             signal=signal,
+                            intent=intent,
                             trade_service=trade_service,
                             execution=execution,
                         )
                     except Exception as exc:
                         engine.current_position = None
                         engine.strategy.on_entry_failed()
+                        if intent.state != TradeIntentState.POSITION_OPENED.value:
+                            trade_service.transition_trade_intent(
+                                intent,
+                                state=TradeIntentState.FAILED,
+                                decision_reason_code="execution_failed",
+                                decision_reason=str(exc),
+                            )
                         logger.exception(
                             "Entry execution failed",
                             extra={
@@ -561,28 +627,6 @@ class StrategyService:
                             )
                         open_positions = trade_service.list_positions()
                 else:
-                    logger.info(
-                        "Entry signal rejected by risk controls",
-                        extra={
-                            "strategy": signal.strategy_name,
-                            "instrument": signal.instrument,
-                            "reason": signal.reason,
-                            "rejection_layer": signal.rejection_layer,
-                        },
-                    )
-                    trade_service.transition_execution(
-                        execution,
-                        status=ExecutionStatus.RISK_REJECTED,
-                        client_request_id=execution.client_request_id,
-                        reason=signal.reason or "Risk rejected",
-                        requires_manual_review=False,
-                        details={
-                            "risk_percent": signal.risk_percent,
-                            "risk_rejection_layer": signal.rejection_layer,
-                            "risk_audit_summary": signal.audit_summary,
-                            "risk_audit_trail": signal.audit_trail,
-                        },
-                    )
                     engine.current_position = None
 
             if engine.current_position is not None:
@@ -593,6 +637,9 @@ class StrategyService:
                 )
 
                 risk_percent = metadata.risk_per_trade if metadata else 0.0
+                current_position_risk = getattr(engine.current_position, "risk_percent", None)
+                if current_position_risk is not None:
+                    risk_percent = current_position_risk
                 mark_price = self._mark_price(direction=engine.current_position.direction, price=price, bid=bid, ask=ask)
                 unrealized_pnl = self._calculate_open_pnl(
                     direction=engine.current_position.direction,
@@ -605,7 +652,8 @@ class StrategyService:
                     engine.current_position.unrealized_pnl = round(unrealized_pnl, 2)
                     engine.current_position.risk_percent = risk_percent
                     engine.current_position.reason = f"{engine.strategy.name} signal active"
-                    trade_service.record_broker_position(engine.current_position)
+                    if isinstance(engine.current_position, Position):
+                        trade_service.record_broker_position(engine.current_position)
                 else:
                     trade_service.update_position_analytics(
                         existing_position,
@@ -634,21 +682,27 @@ class StrategyService:
                 )
 
             if isinstance(signal, ExitSignal):
+                if not decision.admitted or intent is None:
+                    continue
                 execution, should_submit = self._prepare_execution(
                     trade_service=trade_service,
+                    trade_intent_id=intent.id,
                     strategy_name=signal.strategy_name,
                     instrument=signal.instrument,
                     phase=ExecutionPhase.CLOSE.value,
                     signal_time=signal.signal_at,
                     requested_size=signal.position.size if signal.position is not None else None,
                     requested_price=signal.observed_price,
-                    reason="Exit signal generated",
+                    reason="Execution attempt created for admissible close intent",
                     broker_reference=signal.position.broker_reference if signal.position is not None else None,
                     local_position_id=signal.position.id if signal.position is not None else None,
                     details={
                         "action_key": self._close_action_key(signal),
                         "market_status": signal.market_status,
                         "tradable": signal.tradable,
+                        "trade_intent_id": intent.id,
+                        "close_reason_code": intent.close_reason_code,
+                        "close_reason": intent.close_reason,
                     },
                 )
                 if not should_submit:
@@ -666,6 +720,7 @@ class StrategyService:
                     position_id=signal.position.id if signal.position is not None else None,
                     execution_id=execution.id,
                     payload_json={
+                        "trade_intent_id": intent.id,
                         "observed_price": signal.observed_price,
                         "market_status": signal.market_status,
                         "tradable": signal.tradable,
@@ -678,10 +733,18 @@ class StrategyService:
                     trade = self._execute_exit_signal(
                         engine=engine,
                         signal=signal,
+                        intent=intent,
                         trade_service=trade_service,
                         execution=execution,
                     )
-                except Exception:
+                except Exception as exc:
+                    if intent.state != TradeIntentState.CLOSED.value:
+                        trade_service.transition_trade_intent(
+                            intent,
+                            state=TradeIntentState.FAILED,
+                            close_reason_code="execution_failed",
+                            close_reason=str(exc),
+                        )
                     continue
                 trade.outcome = "win" if trade.pnl > 0 else "loss"
                 risk_budget = metadata.risk_per_trade if metadata and metadata.risk_per_trade else 1.0
@@ -704,6 +767,7 @@ class StrategyService:
                     trade_service.transition_execution(
                         execution,
                         status=ExecutionStatus.CLOSE_CONFIRMED,
+                        trade_intent_id=intent.id,
                         client_request_id=execution.client_request_id,
                         local_position_id=closed_position.id,
                         completed_at=trade.close_time,
@@ -712,9 +776,22 @@ class StrategyService:
                         reason="Position close confirmed",
                     )
                 persisted_trade = trade_service.record_trade(trade)
+                trade_service.transition_trade_intent(
+                    intent,
+                    state=TradeIntentState.CLOSED,
+                    trade_id=persisted_trade.id,
+                    close_broker_reference=trade.close_broker_reference,
+                    average_fill_price=trade.close_price,
+                    filled_size=trade.size,
+                    close_reason_code="strategy_exit",
+                    close_reason=trade.reason or "Strategy exit confirmed.",
+                    completed_at=trade.close_time,
+                    closed_at=trade.close_time,
+                )
                 trade_service.transition_execution(
                     execution,
                     status=ExecutionStatus.CLOSE_CONFIRMED,
+                    trade_intent_id=intent.id,
                     client_request_id=execution.client_request_id,
                     local_trade_id=persisted_trade.id,
                     completed_at=trade.close_time,
@@ -908,7 +985,27 @@ class StrategyService:
         return price
 
     @staticmethod
-    def _execute_entry_signal(*, engine, signal: EntrySignal, trade_service: TradeService, execution: Execution) -> Position:
+    def _execute_entry_signal(
+        *,
+        engine,
+        signal: EntrySignal,
+        intent: TradeIntent,
+        trade_service: TradeService,
+        execution: Execution,
+    ) -> Position:
+        if intent.state != TradeIntentState.APPROVED.value:
+            raise ValueError(
+                f"Entry execution requires an APPROVED trade intent; got {intent.state} for intent {intent.id}."
+            )
+        conflicting_active = trade_service.find_active_trade_intent_for_instrument_excluding(
+            signal.instrument,
+            exclude_intent_id=intent.id,
+        )
+        if conflicting_active is not None:
+            raise ValueError(
+                f"Entry execution blocked because instrument {signal.instrument} is already owned by "
+                f"active intent {conflicting_active.id} in state {conflicting_active.state}."
+            )
         status = StrategyService._assert_market_status_allows_execution(
             engine=engine,
             instrument=signal.instrument,
@@ -919,7 +1016,7 @@ class StrategyService:
         order_request = OrderRequest(
             instrument=signal.instrument,
             direction=signal.direction,
-            size=signal.size,
+            size=intent.allocated_size or signal.size,
             price=signal.observed_price,
             strategy_name=signal.strategy_name,
             client_request_id=execution.client_request_id,
@@ -927,10 +1024,17 @@ class StrategyService:
         trade_service.transition_execution(
             execution,
             status=ExecutionStatus.ORDER_SUBMITTED,
+            trade_intent_id=intent.id,
             submitted_at=utc_now(),
             client_request_id=execution.client_request_id,
             reason="Entry order submitted",
             details={"market_status_execution_check": status.model_dump(mode="json")},
+        )
+        trade_service.transition_trade_intent(
+            intent,
+            state=TradeIntentState.SUBMITTED,
+            execution_client_request_id=execution.client_request_id,
+            submitted_at=execution.submitted_at,
         )
         started_at = perf_counter()
         try:
@@ -958,10 +1062,18 @@ class StrategyService:
             trade_service.transition_execution(
                 execution,
                 status=ExecutionStatus.FAILED,
+                trade_intent_id=intent.id,
                 client_request_id=execution.client_request_id,
                 error_message=str(exc),
                 reason="Entry order submission failed",
                 requires_manual_review=False,
+            )
+            trade_service.transition_trade_intent(
+                intent,
+                state=TradeIntentState.FAILED,
+                decision_reason_code="broker_submission_failed",
+                decision_reason="Entry order submission failed.",
+                details={"error_message": str(exc)},
             )
             raise
         get_health_service().update_broker_state(connected=True, latency_ms=(perf_counter() - started_at) * 1000)
@@ -970,6 +1082,7 @@ class StrategyService:
         StrategyService._transition_execution_from_broker_result(
             trade_service=trade_service,
             execution=execution,
+            trade_intent=intent,
             order=order,
             opened_reason="Entry order acknowledged",
             completed_reason="Entry fill received",
@@ -978,6 +1091,7 @@ class StrategyService:
         if order.status in {BrokerOrderStatus.REJECTED, BrokerOrderStatus.FAILED, BrokerOrderStatus.CANCELLED} or filled_size <= 0:
             raise RuntimeError(f"Entry order for {signal.instrument} did not produce an open fill.")
         engine.current_position = Position(
+            trade_intent_id=intent.id,
             instrument=signal.instrument,
             broker_reference=order.broker_reference,
             direction=signal.direction.value,
@@ -987,7 +1101,7 @@ class StrategyService:
             strategy_name=signal.strategy_name,
             account_type=engine.broker.account_type.value,
             is_open=True,
-            risk_percent=signal.risk_percent,
+            risk_percent=intent.allocated_risk_percent or signal.risk_percent,
             current_price=order.average_fill_price or order.price,
             unrealized_pnl=0.0,
             reason=f"{signal.strategy_name} entry approved",
@@ -996,6 +1110,7 @@ class StrategyService:
         trade_service.transition_execution(
             execution,
             status=ExecutionStatus.POSITION_OPENED,
+            trade_intent_id=intent.id,
             client_request_id=execution.client_request_id,
             local_position_id=persisted_position.id,
             broker_reference=persisted_position.broker_reference,
@@ -1004,12 +1119,37 @@ class StrategyService:
             filled_size=persisted_position.size,
             reason="Position opened",
         )
+        trade_service.transition_trade_intent(
+            intent,
+            state=TradeIntentState.POSITION_OPENED,
+            broker_reference=persisted_position.broker_reference,
+            position_id=persisted_position.id,
+            average_fill_price=persisted_position.open_price,
+            filled_size=persisted_position.size,
+            completed_at=persisted_position.broker_open_confirmed_at or persisted_position.open_time,
+            opened_at=persisted_position.open_time,
+        )
         engine.strategy.on_position_opened(direction=signal.direction, entry_price=order.price)
         engine.current_position = clone_position(persisted_position)
         return clone_position(persisted_position)
 
     @staticmethod
-    def _execute_exit_signal(*, engine, signal: ExitSignal, trade_service: TradeService, execution: Execution) -> Trade:
+    def _execute_exit_signal(
+        *,
+        engine,
+        signal: ExitSignal,
+        intent: TradeIntent,
+        trade_service: TradeService,
+        execution: Execution,
+    ) -> Trade:
+        if intent.state not in {
+            TradeIntentState.POSITION_OPENED.value,
+            TradeIntentState.EXTERNAL_POSITION_ADOPTED.value,
+            TradeIntentState.RECOVERED_POSITION_ATTACHED.value,
+        }:
+            raise ValueError(
+                f"Exit execution requires an open linked trade intent; got {intent.state} for intent {intent.id}."
+            )
         if engine.current_position is None:
             raise ValueError(f"No active engine position for {signal.strategy_name} on {signal.instrument}.")
         status = StrategyService._assert_market_status_allows_execution(
@@ -1019,19 +1159,25 @@ class StrategyService:
             trade_service=trade_service,
             phase="exit_execution",
         )
-        trade_service.transition_execution(
-            execution,
-            status=ExecutionStatus.CLOSE_REQUESTED,
-            client_request_id=execution.client_request_id,
-            reason="Close requested",
+        trade_service.transition_trade_intent(
+            intent,
+            state=TradeIntentState.CLOSE_REQUESTED,
+            close_reason_code="strategy_exit_requested",
+            close_reason="Strategy emitted exit signal.",
         )
         trade_service.transition_execution(
             execution,
             status=ExecutionStatus.ORDER_SUBMITTED,
+            trade_intent_id=intent.id,
             submitted_at=utc_now(),
             client_request_id=execution.client_request_id,
             reason="Close order submitted",
             details={"market_status_execution_check": status.model_dump(mode="json")},
+        )
+        trade_service.transition_trade_intent(
+            intent,
+            state=TradeIntentState.SUBMITTED,
+            submitted_at=execution.submitted_at,
         )
         started_at = perf_counter()
         try:
@@ -1063,10 +1209,18 @@ class StrategyService:
             trade_service.transition_execution(
                 execution,
                 status=ExecutionStatus.NEEDS_MANUAL_REVIEW,
+                trade_intent_id=intent.id,
                 client_request_id=execution.client_request_id,
                 error_message=str(exc),
                 reason="Close request failed",
                 requires_manual_review=True,
+            )
+            trade_service.transition_trade_intent(
+                intent,
+                state=TradeIntentState.FAILED,
+                close_reason_code="close_submission_failed",
+                close_reason="Close request failed.",
+                details={"error_message": str(exc)},
             )
             raise
         get_health_service().update_broker_state(connected=True, latency_ms=(perf_counter() - started_at) * 1000)
@@ -1075,6 +1229,7 @@ class StrategyService:
         StrategyService._transition_execution_from_broker_result(
             trade_service=trade_service,
             execution=execution,
+            trade_intent=intent,
             order=closed_order,
             opened_reason="Close order acknowledged",
             completed_reason="Close fill received",
@@ -1083,10 +1238,18 @@ class StrategyService:
             trade_service.transition_execution(
                 execution,
                 status=ExecutionStatus.NEEDS_MANUAL_REVIEW,
+                trade_intent_id=intent.id,
                 client_request_id=execution.client_request_id,
                 completed_at=closed_order.executed_at,
                 reason="Close did not complete fully",
                 requires_manual_review=True,
+            )
+            trade_service.transition_trade_intent(
+                intent,
+                state=TradeIntentState.FAILED,
+                close_reason_code="close_incomplete",
+                close_reason="Close did not complete fully.",
+                completed_at=closed_order.executed_at,
             )
             raise RuntimeError(f"Close order for {signal.instrument} did not complete fully.")
         pnl = StrategyService._calculate_open_pnl(
@@ -1096,6 +1259,7 @@ class StrategyService:
             size=engine.current_position.size,
         )
         trade = Trade(
+            trade_intent_id=intent.id,
             strategy_name=engine.current_position.strategy_name,
             broker_reference=engine.current_position.broker_reference,
             close_broker_reference=closed_order.broker_reference,
@@ -1170,13 +1334,20 @@ class StrategyService:
         *,
         trade_service: TradeService,
         execution: Execution,
+        trade_intent: TradeIntent | None,
         order,
         opened_reason: str,
         completed_reason: str,
     ) -> None:
+        intent_broker_reference_kwargs = (
+            {"close_broker_reference": order.broker_reference}
+            if execution.phase == ExecutionPhase.CLOSE.value
+            else {"broker_reference": order.broker_reference}
+        )
         trade_service.transition_execution(
             execution,
             status=ExecutionStatus.ORDER_ACKNOWLEDGED,
+            trade_intent_id=trade_intent.id if trade_intent is not None else None,
             client_request_id=order.client_request_id,
             broker_reference=order.broker_reference,
             submitted_at=order.submitted_at,
@@ -1186,6 +1357,14 @@ class StrategyService:
             error_message=order.error_message,
             requires_manual_review=order.requires_manual_review,
         )
+        if trade_intent is not None:
+            trade_service.transition_trade_intent(
+                trade_intent,
+                state=TradeIntentState.ACKNOWLEDGED,
+                execution_client_request_id=order.client_request_id,
+                acknowledged_at=order.acknowledged_at or order.executed_at,
+                **intent_broker_reference_kwargs,
+            )
         fill_status = (
             ExecutionStatus.FILL_PARTIAL
             if order.status is BrokerOrderStatus.PARTIALLY_FILLED
@@ -1198,6 +1377,7 @@ class StrategyService:
         trade_service.transition_execution(
             execution,
             status=fill_status,
+            trade_intent_id=trade_intent.id if trade_intent is not None else None,
             client_request_id=order.client_request_id,
             broker_reference=order.broker_reference,
             completed_at=order.executed_at,
@@ -1208,6 +1388,24 @@ class StrategyService:
             error_message=order.error_message,
             requires_manual_review=order.requires_manual_review,
         )
+        if trade_intent is not None:
+            intent_state = (
+                TradeIntentState.PARTIALLY_FILLED
+                if order.status is BrokerOrderStatus.PARTIALLY_FILLED
+                else TradeIntentState.FAILED
+                if order.status in {BrokerOrderStatus.REJECTED, BrokerOrderStatus.FAILED}
+                else TradeIntentState.CANCELLED
+                if order.status is BrokerOrderStatus.CANCELLED
+                else TradeIntentState.FILLED
+            )
+            trade_service.transition_trade_intent(
+                trade_intent,
+                state=intent_state,
+                average_fill_price=order.average_fill_price or order.price,
+                filled_size=order.filled_size or order.size,
+                completed_at=order.executed_at,
+                **intent_broker_reference_kwargs,
+            )
 
     @classmethod
     def _generate_client_request_id(cls, prefix: str) -> str:
@@ -1236,6 +1434,7 @@ class StrategyService:
         requested_price: float | None,
         reason: str,
         details: dict[str, object],
+        trade_intent_id: int | None = None,
         broker_reference: str | None = None,
         local_position_id: int | None = None,
     ) -> tuple[Execution, bool]:
@@ -1287,6 +1486,7 @@ class StrategyService:
                 trade_service.transition_execution(
                     reusable_execution,
                     status=reusable_execution.status,
+                    trade_intent_id=trade_intent_id,
                     client_request_id=reusable_execution.client_request_id,
                     broker_reference=broker_reference,
                     local_position_id=local_position_id,
@@ -1300,10 +1500,11 @@ class StrategyService:
         return (
             trade_service.create_execution(
                 Execution(
+                    trade_intent_id=trade_intent_id,
                     strategy_name=strategy_name,
                     instrument=instrument,
                     phase=phase,
-                    status=ExecutionStatus.SIGNAL_GENERATED.value,
+                    status=ExecutionStatus.SUBMISSION_PENDING.value,
                     client_request_id=client_request_id,
                     broker_reference=broker_reference,
                     local_position_id=local_position_id,

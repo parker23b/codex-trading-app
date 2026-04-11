@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { CompactTable, Panel, SplitPanel, StatusPill, StickyToolbar } from "@/components/console/primitives";
+import { CompactTable, Panel, StatusPill, StickyToolbar } from "@/components/console/primitives";
 import { ResetHistoryButton } from "@/components/testing/reset-history-button";
 import { getDomainEvents } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
@@ -61,6 +61,33 @@ function makeTabHref(current: Record<string, string | string[] | undefined>, tab
   return `/events${suffix ? `?${suffix}` : ""}`;
 }
 
+function makeSelectedHref(current: Record<string, string | string[] | undefined>, eventId: string): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(current)) {
+    const normalized = readParam(value);
+    if (!normalized) {
+      continue;
+    }
+    query.set(key, normalized);
+  }
+  query.set("selected", eventId);
+  const suffix = query.toString();
+  return `/events${suffix ? `?${suffix}` : ""}`;
+}
+
+function makeClearSelectedHref(current: Record<string, string | string[] | undefined>): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(current)) {
+    const normalized = readParam(value);
+    if (!normalized || key === "selected") {
+      continue;
+    }
+    query.set(key, normalized);
+  }
+  const suffix = query.toString();
+  return `/events${suffix ? `?${suffix}` : ""}`;
+}
+
 function payloadPreview(payload: Record<string, unknown>) {
   const text = JSON.stringify(payload);
   if (text === "{}") {
@@ -79,6 +106,7 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
   const strategyName = readParam(resolvedParams.strategy_name);
   const instrument = readParam(resolvedParams.instrument);
   const correlationId = readParam(resolvedParams.correlation_id);
+  const selectedId = readParam(resolvedParams.selected);
   const limitValue = readParam(resolvedParams.limit);
   const limit = Number.parseInt(limitValue || "150", 10);
 
@@ -93,7 +121,7 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
     correlationId: correlationId || undefined,
   });
 
-  const selectedEvent = events[0] ?? null;
+  const selectedEvent = selectedId ? (events.find((event) => String(event.id) === selectedId) ?? null) : null;
 
   return (
     <main className="console-page console-page--dense">
@@ -111,138 +139,152 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
         </div>
       </StickyToolbar>
 
-      <SplitPanel
-        className="layout-events"
-        left={
-          <Panel title="Filters" priority="passive" tone="inactive" compact>
-            <form className="console-form-grid" method="get">
-              <input type="hidden" name="tab" value={tab} />
-              <label>
-                <span className="console-kicker">{tab === "errors" ? "Error" : "Event"}</span>
-                {tab === "errors" ? (
-                  <input className="console-input" name="error_type" defaultValue={errorType} placeholder="IGBrokerError" />
-                ) : (
-                  <select className="console-select" name="event_type" defaultValue={eventType}>
-                    <option value="">All</option>
-                    {EVENT_TYPE_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </label>
-
-              <label>
-                <span className="console-kicker">Category</span>
-                <select className="console-select" name="category" defaultValue={category}>
-                  <option value="">All</option>
-                  {CATEGORY_OPTIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                <span className="console-kicker">Severity</span>
-                <select className="console-select" name="severity" defaultValue={severity} disabled={tab === "errors"}>
-                  <option value="">All</option>
-                  {SEVERITY_OPTIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-                {tab === "errors" ? <input type="hidden" name="severity" value="error" /> : null}
-              </label>
-
-              <label>
-                <span className="console-kicker">Strategy</span>
-                <input className="console-input" name="strategy_name" defaultValue={strategyName} placeholder="mean_reversion" />
-              </label>
-              <label>
-                <span className="console-kicker">Instrument</span>
-                <input className="console-input" name="instrument" defaultValue={instrument} placeholder="CS.D.EURUSD.CFD.IP" />
-              </label>
-              <label>
-                <span className="console-kicker">Correlation</span>
-                <input className="console-input" name="correlation_id" defaultValue={correlationId} placeholder="ent-..." />
-              </label>
-              <label>
-                <span className="console-kicker">Limit</span>
-                <input className="console-input" name="limit" defaultValue={String(limit)} inputMode="numeric" />
-              </label>
-
-              <div className="console-inline-actions">
-                <button type="submit" className="console-button">
-                  Apply
-                </button>
-              </div>
-            </form>
-          </Panel>
-        }
-        center={
-          <Panel title="Event Log" priority="primary" tone={tab === "errors" ? "negative" : "neutral"}>
-            <CompactTable
-              rows={events}
-              emptyLabel="No events match the current filters."
-              getRowTone={(row) => (row.severity === "error" ? "negative" : row.severity === "warning" ? "warning" : "neutral")}
-              getRowActive={(_, index) => index === 0}
-              columns={[
-                { key: "time", header: "Time", render: (row) => formatDateTime(row.created_at) },
-                {
-                  key: "sev",
-                  header: "Severity",
-                  render: (row) => <StatusPill label={row.severity} tone={row.severity === "error" ? "negative" : row.severity === "warning" ? "warning" : "neutral"} />,
-                },
-                { key: "event", header: "Event", render: (row) => row.event_type },
-                { key: "title", header: "Title", render: (row) => row.title },
-                { key: "source", header: "Source", render: (row) => row.strategy_name ?? row.source },
-              ]}
-            />
-          </Panel>
-        }
-        right={
-          <Panel title="Selected Event" priority="secondary" tone={selectedEvent?.severity === "error" ? "negative" : selectedEvent?.severity === "warning" ? "warning" : "neutral"}>
-            {selectedEvent ? (
-              <div className="detail-stack">
-                <div className="summary-bar">
-                  <div className="summary-bar__item">
-                    <span>Severity</span>
-                    <strong>{selectedEvent.severity}</strong>
-                    <em>{selectedEvent.category}</em>
-                  </div>
-                  <div className="summary-bar__item">
-                    <span>Time</span>
-                    <strong>{formatDateTime(selectedEvent.created_at)}</strong>
-                    <em>{selectedEvent.correlation_id ?? "no correlation"}</em>
-                  </div>
-                  <div className="summary-bar__item">
-                    <span>Source</span>
-                    <strong>{selectedEvent.strategy_name ?? selectedEvent.source}</strong>
-                    <em>{selectedEvent.instrument ?? "system"}</em>
-                  </div>
-                </div>
-
-                <div className="detail-block">
-                  <span className="console-kicker">Summary</span>
-                  <p>{selectedEvent.title}</p>
-                  <p>{selectedEvent.message ?? "No message provided."}</p>
-                </div>
-
-                <div className="detail-block">
-                  <span className="console-kicker">Payload</span>
-                  <p>{payloadPreview(selectedEvent.payload_json)}</p>
-                </div>
-              </div>
+      <Panel title="Filters" priority="passive" tone="inactive" compact>
+        <form className="console-form-grid" method="get">
+          <input type="hidden" name="tab" value={tab} />
+          <label>
+            <span className="console-kicker">{tab === "errors" ? "Error" : "Event"}</span>
+            {tab === "errors" ? (
+              <input className="console-input" name="error_type" defaultValue={errorType} placeholder="IGBrokerError" />
             ) : (
-              <div className="console-empty">No event selected.</div>
+              <select className="console-select" name="event_type" defaultValue={eventType}>
+                <option value="">All</option>
+                {EVENT_TYPE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
             )}
-          </Panel>
-        }
-      />
+          </label>
+
+          <label>
+            <span className="console-kicker">Category</span>
+            <select className="console-select" name="category" defaultValue={category}>
+              <option value="">All</option>
+              {CATEGORY_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span className="console-kicker">Severity</span>
+            <select className="console-select" name="severity" defaultValue={severity} disabled={tab === "errors"}>
+              <option value="">All</option>
+              {SEVERITY_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+            {tab === "errors" ? <input type="hidden" name="severity" value="error" /> : null}
+          </label>
+
+          <label>
+            <span className="console-kicker">Strategy</span>
+            <input className="console-input" name="strategy_name" defaultValue={strategyName} placeholder="mean_reversion" />
+          </label>
+          <label>
+            <span className="console-kicker">Instrument</span>
+            <input className="console-input" name="instrument" defaultValue={instrument} placeholder="CS.D.EURUSD.CFD.IP" />
+          </label>
+          <label>
+            <span className="console-kicker">Correlation</span>
+            <input className="console-input" name="correlation_id" defaultValue={correlationId} placeholder="ent-..." />
+          </label>
+          <label>
+            <span className="console-kicker">Limit</span>
+            <input className="console-input" name="limit" defaultValue={String(limit)} inputMode="numeric" />
+          </label>
+
+          <div className="console-inline-actions">
+            <button type="submit" className="console-button">
+              Apply
+            </button>
+          </div>
+        </form>
+      </Panel>
+
+      <Panel title="Event Log" priority="primary" tone={tab === "errors" ? "negative" : "neutral"} compact>
+        <CompactTable
+          rows={events}
+          emptyLabel="No events match the current filters."
+          getRowTone={(row) => (row.severity === "error" ? "negative" : row.severity === "warning" ? "warning" : "neutral")}
+          getRowActive={(row) => row.id === selectedEvent?.id}
+          columns={[
+            { key: "time", header: "Time", render: (row) => formatDateTime(row.created_at) },
+            {
+              key: "sev",
+              header: "Severity",
+              render: (row) => <StatusPill label={row.severity} tone={row.severity === "error" ? "negative" : row.severity === "warning" ? "warning" : "neutral"} />,
+            },
+            { key: "event", header: "Event", render: (row) => row.event_type },
+            {
+              key: "title",
+              header: "Title",
+              render: (row) => (
+                <Link href={makeSelectedHref(resolvedParams, String(row.id))} className="console-link-button">
+                  {row.title}
+                </Link>
+              ),
+            },
+            { key: "source", header: "Source", render: (row) => row.strategy_name ?? row.source },
+          ]}
+        />
+      </Panel>
+
+      {selectedEvent ? (
+        <div className="fixed inset-0 z-40">
+          <Link href={makeClearSelectedHref(resolvedParams)} className="absolute inset-0 bg-[rgba(6,12,18,0.4)]" aria-label="Close event details" />
+          <aside
+            className="absolute right-0 w-full max-w-[560px] border-l border-[color:var(--glass-stroke)] bg-[image:var(--glass-surface)] shadow-[var(--shadow-raised)]"
+            style={{ top: "var(--nav-height)", height: "calc(100vh - var(--nav-height))" }}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-[color:var(--border)] px-5 py-4">
+              <div className="min-w-0 flex-1">
+                <div className="text-[1rem] font-semibold tracking-[-0.01em]">Selected Event</div>
+                <p className="text-[0.82rem] text-[color:var(--text-secondary)]">Event context and payload details.</p>
+              </div>
+              <Link href={makeClearSelectedHref(resolvedParams)} className="console-button console-button--ghost">
+                Close
+              </Link>
+            </div>
+            <div className="flex h-[calc(100%-73px)] flex-col gap-3 overflow-y-auto p-5">
+              <div className="summary-bar">
+                <div className="summary-bar__item">
+                  <span>Severity</span>
+                  <strong>{selectedEvent.severity}</strong>
+                  <em>{selectedEvent.category}</em>
+                </div>
+                <div className="summary-bar__item">
+                  <span>Time</span>
+                  <strong>{formatDateTime(selectedEvent.created_at)}</strong>
+                  <em>{selectedEvent.correlation_id ?? "no correlation"}</em>
+                </div>
+                <div className="summary-bar__item">
+                  <span>Source</span>
+                  <strong>{selectedEvent.strategy_name ?? selectedEvent.source}</strong>
+                  <em>{selectedEvent.instrument ?? "system"}</em>
+                </div>
+              </div>
+
+              <div className="detail-block">
+                <span className="console-kicker">Summary</span>
+                <p>{selectedEvent.title}</p>
+                <p>{selectedEvent.message ?? "No message provided."}</p>
+              </div>
+
+              <div className="detail-block">
+                <span className="console-kicker">Payload</span>
+                <p>{payloadPreview(selectedEvent.payload_json)}</p>
+              </div>
+            </div>
+          </aside>
+        </div>
+      ) : null}
     </main>
   );
 }

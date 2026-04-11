@@ -31,11 +31,11 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body>
-        <div className="console-app">
-          <header className="console-app__header">
+        <div className="min-h-screen">
+          <header className="fixed inset-x-0 top-0 z-20 h-[var(--nav-height)] border-b border-[color:var(--border)] bg-[color:color-mix(in_srgb,var(--bg-shell)_95%,transparent)] shadow-[0_8px_24px_rgba(0,0,0,0.12)] backdrop-blur-[18px]">
             <AppNav />
           </header>
-          <div className="console-app__workspace">{children}</div>
+          <div className="min-h-[calc(100vh-var(--nav-height))] pt-[var(--nav-height)]">{children}</div>
         </div>
         <ThemeToggle />
       </body>

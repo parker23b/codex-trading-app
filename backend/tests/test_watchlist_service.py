@@ -5,12 +5,12 @@ from datetime import UTC, datetime, timedelta
 from sqlmodel import select
 
 from app.core.runtime import runtime_manager
-from app.models.trade import Execution, ExecutionPhase, ExecutionStatus, Position
+from app.models.trade import Position, TradeIntent
 from app.models.watchlist import WatchlistEntry, WatchlistStatus
 from app.services.watchlist_service import WatchlistService
 
 
-def test_streaming_plan_pins_open_positions_and_pending_executions(session):
+def test_streaming_plan_pins_open_positions_and_pending_trade_intents(session):
     session.add(
         Position(
             strategy_name="mean_reversion",
@@ -25,13 +25,12 @@ def test_streaming_plan_pins_open_positions_and_pending_executions(session):
         )
     )
     session.add(
-        Execution(
+        TradeIntent(
             strategy_name="carry_drift",
             instrument="IX.D.NASDAQ.DAILY.IP",
-            phase=ExecutionPhase.ENTRY.value,
-            status=ExecutionStatus.ORDER_SUBMITTED.value,
+            direction="BUY",
+            state="SUBMITTED",
             signal_time=datetime(2026, 4, 9, 10, 1, tzinfo=UTC),
-            last_transition_at=datetime(2026, 4, 9, 10, 1, tzinfo=UTC),
         )
     )
     session.commit()

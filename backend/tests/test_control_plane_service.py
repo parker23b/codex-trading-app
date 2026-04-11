@@ -11,9 +11,33 @@ from app.models.strategy_governance import StrategyFamilyGovernance
 from app.services.control_plane_service import ControlPlaneService
 from app.services.health_service import get_health_service
 from app.services.operator_control_service import OperatorControlService
+from app.services.market_status_service import MarketStatus
+from app.services.regime_suitability_service import DeploymentCandidate
 from app.services.strategy_deployment_manager_service import StrategyDeploymentManagerService
 from app.services.strategy_governance_service import StrategyGovernanceService
 from app.services.strategy_service import StrategyService
+
+
+def _force_deployable_candidate(manager: StrategyDeploymentManagerService, *, instrument: str) -> None:
+    manager.suitability_service.select_best_candidate = lambda **_: DeploymentCandidate(
+        instrument=instrument,
+        asset_class="INDICES",
+        score=0.95,
+        market_status=MarketStatus(
+            instrument=instrument,
+            is_ok=True,
+            market_open=True,
+            tradable=True,
+            quote_fresh=True,
+            spread_ok=True,
+            session_valid=True,
+            dealing_allowed=True,
+            last_price_age_ms=0.0,
+            spread=0.5,
+            reason=None,
+        ),
+        reason="Instrument cleared suitability checks.",
+    )
 
 
 def test_control_plane_seeds_governance_defaults(session):
@@ -86,6 +110,7 @@ def test_reconcile_auto_deploys_approved_autonomous_strategy(session, broker, fi
     )
     manager = StrategyDeploymentManagerService(session)
     manager.settings.autonomous_control_enabled = True
+    _force_deployable_candidate(manager, instrument="IX.D.FTSE.DAILY.IP")
 
     result = manager.reconcile(now=fixed_now)
 
@@ -145,6 +170,7 @@ def test_reconcile_emergency_stop_blocks_and_stops_auto_runtime(session, broker,
     )
     manager = StrategyDeploymentManagerService(session)
     manager.settings.autonomous_control_enabled = True
+    _force_deployable_candidate(manager, instrument="IX.D.FTSE.DAILY.IP")
     manager.reconcile(now=fixed_now)
 
     governance_service.upsert_strategy(
@@ -182,6 +208,7 @@ def test_profile_change_restarts_autonomous_runtime_with_new_parameters(session,
     )
     manager = StrategyDeploymentManagerService(session)
     manager.settings.autonomous_control_enabled = True
+    _force_deployable_candidate(manager, instrument="IX.D.FTSE.DAILY.IP")
     manager.reconcile(now=fixed_now)
 
     first_runtime = session.exec(
@@ -233,6 +260,7 @@ def test_control_plane_reports_runtime_deployment_mismatch(session, broker, fixe
     )
     manager = StrategyDeploymentManagerService(session)
     manager.settings.autonomous_control_enabled = True
+    _force_deployable_candidate(manager, instrument="IX.D.FTSE.DAILY.IP")
     manager.reconcile(now=fixed_now)
 
     runtime = session.exec(

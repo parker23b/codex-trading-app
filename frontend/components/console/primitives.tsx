@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 export type ConsoleTone = "neutral" | "positive" | "warning" | "negative" | "inactive";
 export type PanelPriority = "critical" | "primary" | "secondary" | "passive";
@@ -89,12 +89,68 @@ type StatusPillProps = {
   label: ReactNode;
   tone?: ConsoleTone;
   quiet?: boolean;
+  title?: string;
 };
 
 type DataIndicatorProps = {
   state: "loading" | "error" | "unavailable";
   message?: string | null;
 };
+
+function joinClasses(...values: Array<string | false | null | undefined>) {
+  return values.filter(Boolean).join(" ");
+}
+
+function toneBorderColor(tone: ConsoleTone) {
+  const colors: Record<ConsoleTone, string> = {
+    neutral: "var(--glass-stroke)",
+    positive: "color-mix(in srgb, var(--positive) 34%, var(--border))",
+    warning: "color-mix(in srgb, var(--warning) 38%, var(--border))",
+    negative: "color-mix(in srgb, var(--negative) 40%, var(--border))",
+    inactive: "color-mix(in srgb, var(--inactive) 34%, var(--border))",
+  };
+
+  return colors[tone];
+}
+
+function statusItemStyle(tone: ConsoleTone | undefined, emphasis: "strong" | "normal" | undefined): CSSProperties | undefined {
+  if (!tone || tone === "neutral") {
+    return emphasis === "strong" ? { boxShadow: "var(--shadow-panel)" } : undefined;
+  }
+
+  return {
+    borderColor: toneBorderColor(tone),
+    boxShadow:
+      tone === "negative"
+        ? "var(--shadow-raised)"
+        : emphasis === "strong"
+          ? "var(--shadow-panel)"
+          : undefined,
+  };
+}
+
+function toneDotClass(tone: ConsoleTone) {
+  const toneStyles: Record<ConsoleTone, string> = {
+    neutral: "border-[color:var(--border-strong)] bg-[color:var(--bg-muted)]",
+    positive: "bg-[color:var(--positive)] shadow-[0_0_0_4px_var(--positive-soft)]",
+    warning: "bg-[color:var(--warning)] shadow-[0_0_0_4px_var(--warning-soft)]",
+    negative: "bg-[color:var(--negative)] shadow-[0_0_0_4px_var(--negative-soft)]",
+    inactive: "bg-[color:var(--inactive)] shadow-[0_0_0_4px_var(--inactive-soft)]",
+  };
+
+  return joinClasses("inline-flex h-[9px] w-[9px] rounded-full border", toneStyles[tone]);
+}
+
+function panelPriorityClass(priority: PanelPriority) {
+  const priorities: Record<PanelPriority, string> = {
+    critical: "bg-[image:var(--glass-surface)] shadow-[var(--shadow-raised)]",
+    primary: "bg-[image:var(--glass-surface)] shadow-[var(--shadow-panel)]",
+    secondary: "bg-[image:var(--glass-surface-soft)] shadow-[var(--shadow-soft)]",
+    passive: "bg-[image:var(--glass-surface-passive)] shadow-[var(--shadow-soft)]",
+  };
+
+  return priorities[priority];
+}
 
 export function Panel({
   title,
@@ -108,51 +164,46 @@ export function Panel({
 }: PanelProps) {
   return (
     <section
-      className={[
-        "console-panel",
-        `console-panel--${priority}`,
-        `console-panel--tone-${tone}`,
-        compact ? "console-panel--compact" : "",
+      className={joinClasses(
+        "rounded-[18px] border border-[color:var(--glass-stroke)]",
+        panelPriorityClass(priority),
+        compact ? "overflow-hidden" : "",
         className,
-      ]
-        .filter(Boolean)
-        .join(" ")}
+      )}
+      style={tone === "neutral" ? undefined : { borderColor: toneBorderColor(tone) }}
     >
-      <header className="console-panel__header">
-        <div className="console-panel__heading">
-          <div className="console-panel__title-row">
-            <span className={`state-dot state-dot--${tone}`} aria-hidden="true" />
-            <div className="console-panel__title">{title}</div>
+      <header className={joinClasses("flex items-start justify-between gap-3", compact ? "px-4 pt-3 pb-0" : "px-[18px] pt-4 pb-0")}>
+        <div className="flex min-w-0 flex-1 flex-col gap-[7px]">
+          <div className="flex items-center gap-2">
+            <span className={toneDotClass(tone)} aria-hidden="true" />
+            <div className="text-[1rem] font-semibold tracking-[-0.01em]">{title}</div>
           </div>
-          {subtitle ? <p className="console-panel__subtitle">{subtitle}</p> : null}
+          {subtitle ? <p className="text-[0.82rem] text-[color:var(--text-secondary)]">{subtitle}</p> : null}
         </div>
-        {actions ? <div className="console-panel__actions">{actions}</div> : null}
+        {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
       </header>
-      <div className="console-panel__body">{children}</div>
+      <div className={joinClasses("flex flex-col gap-3", compact ? "p-4" : "p-[18px]")}>{children}</div>
     </section>
   );
 }
 
 export function StatusStrip({ items }: StatusStripProps) {
   return (
-    <section className="status-strip" aria-label="System status strip">
+    <section className="grid flex-none grid-cols-6 gap-[10px] max-[1200px]:grid-cols-3 max-[720px]:grid-cols-2" aria-label="System status strip">
       {items.map((item) => (
         <div
           key={item.label}
-          className={[
-            "status-strip__item",
-            `status-strip__item--${item.tone ?? "neutral"}`,
-            item.emphasis === "strong" ? "status-strip__item--strong" : "",
-          ]
-            .filter(Boolean)
-            .join(" ")}
+          className={joinClasses(
+            "min-h-[84px] overflow-hidden rounded-[14px] border border-[color:var(--glass-stroke)] bg-[image:var(--glass-surface)] px-3 py-[11px] shadow-[var(--shadow-soft)]",
+          )}
+          style={statusItemStyle(item.tone, item.emphasis)}
         >
-          <div className="status-strip__label-row">
-            <span className={`state-dot state-dot--${item.tone ?? "neutral"}`} aria-hidden="true" />
-            <span className="status-strip__label">{item.label}</span>
+          <div className="flex items-center gap-2">
+            <span className={toneDotClass(item.tone ?? "neutral")} aria-hidden="true" />
+            <span className="text-[0.68rem] uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">{item.label}</span>
           </div>
-          <strong className="status-strip__value">{item.value}</strong>
-          {item.meta ? <span className="status-strip__meta">{item.meta}</span> : null}
+          <strong className="mt-1 block overflow-hidden text-ellipsis whitespace-nowrap text-[1rem] font-semibold tracking-[-0.01em]">{item.value}</strong>
+          {item.meta ? <span className="mt-1 line-clamp-2 block text-[0.76rem] text-[color:var(--text-secondary)]">{item.meta}</span> : null}
         </div>
       ))}
     </section>
@@ -161,10 +212,10 @@ export function StatusStrip({ items }: StatusStripProps) {
 
 export function BoardLayout({ left, center, right, className }: BoardLayoutProps) {
   return (
-    <section className={["board-layout", className].filter(Boolean).join(" ")}>
-      <div className="board-layout__column">{left}</div>
-      <div className="board-layout__column">{center}</div>
-      <div className="board-layout__column">{right}</div>
+    <section className={joinClasses("grid grid-cols-3 gap-3 max-[1200px]:grid-cols-1", className)}>
+      <div className="flex min-h-0 flex-col gap-3">{left}</div>
+      <div className="flex min-h-0 flex-col gap-3">{center}</div>
+      <div className="flex min-h-0 flex-col gap-3">{right}</div>
     </section>
   );
 }
@@ -172,23 +223,58 @@ export function BoardLayout({ left, center, right, className }: BoardLayoutProps
 export function SplitPanel({ left, center, right, className }: SplitPanelProps) {
   const mode = center && right ? "triple" : right ? "dual" : "single";
   return (
-    <section className={["split-panel", `split-panel--${mode}`, className].filter(Boolean).join(" ")}>
-      <div className="split-panel__pane">{left}</div>
-      {center ? <div className="split-panel__pane">{center}</div> : null}
-      {right ? <div className="split-panel__pane">{right}</div> : null}
+    <section
+      className={joinClasses(
+        "grid gap-3",
+        mode === "triple" ? "grid-cols-3 max-[1200px]:grid-cols-1" : mode === "dual" ? "grid-cols-2 max-[1200px]:grid-cols-1" : "grid-cols-1",
+        className,
+      )}
+    >
+      <div className="flex min-h-0 flex-col gap-3">{left}</div>
+      {center ? <div className="flex min-h-0 flex-col gap-3">{center}</div> : null}
+      {right ? <div className="flex min-h-0 flex-col gap-3">{right}</div> : null}
     </section>
   );
 }
 
 export function StickyToolbar({ children, className }: StickyToolbarProps) {
-  return <div className={["sticky-toolbar", className].filter(Boolean).join(" ")}>{children}</div>;
+  return (
+    <div
+      className={joinClasses(
+        "sticky top-2 z-10 mb-1 flex flex-wrap items-center justify-between gap-2 rounded-[16px] border border-[color:var(--border)] bg-[color:color-mix(in_srgb,var(--bg-shell)_92%,transparent)] px-3 py-2 shadow-[var(--shadow-soft)] backdrop-blur-[16px]",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
 }
 
-export function StatusPill({ label, tone = "neutral", quiet = false }: StatusPillProps) {
+export function StatusPill({ label, tone = "neutral", quiet = false, title }: StatusPillProps) {
   return (
-    <span className={`console-pill console-pill--${tone}${quiet ? " console-pill--quiet" : ""}`}>
-      <span className={`state-dot state-dot--${tone}`} aria-hidden="true" />
-      {label}
+    <span className="group relative inline-flex max-w-full">
+      <span
+        className={joinClasses(
+          "inline-flex max-w-full items-center gap-2 rounded-full border px-[10px] py-1 text-[0.72rem] font-medium leading-none whitespace-nowrap",
+          tone === "positive" && "bg-[color:var(--positive-soft)] text-[color:var(--positive)]",
+          tone === "warning" && "bg-[color:var(--warning-soft)] text-[color:var(--warning)]",
+          tone === "negative" && "bg-[color:var(--negative-soft)] text-[color:var(--negative)]",
+          tone === "inactive" && "bg-[color:var(--inactive-soft)] text-[color:var(--inactive)]",
+          tone === "neutral" && "border-[color:var(--border)] bg-[color:var(--bg-muted)] text-[color:var(--text-secondary)]",
+          quiet && "bg-transparent",
+        )}
+        style={tone === "neutral" ? undefined : { borderColor: toneBorderColor(tone) }}
+        aria-label={typeof label === "string" ? `${label}${title ? `. ${title}` : ""}` : title}
+        tabIndex={title ? 0 : undefined}
+      >
+        <span className={toneDotClass(tone)} aria-hidden="true" />
+        {label}
+      </span>
+      {title ? (
+        <span className="pointer-events-none absolute top-[calc(100%+8px)] left-1/2 z-30 w-max max-w-[220px] -translate-x-1/2 rounded-[10px] border border-[color:var(--border)] bg-[color:var(--bg-surface-strong)] px-3 py-2 text-center text-[0.74rem] leading-[1.35] text-[color:var(--text-primary)] opacity-0 shadow-[var(--shadow-panel)] transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+          {title}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -197,11 +283,21 @@ export function DataIndicator({ state, message }: DataIndicatorProps) {
   const label = state === "loading" ? "Loading" : state === "error" ? "Error" : "Unavailable";
   return (
     <span
-      className={`data-indicator data-indicator--${state}`}
+      className={joinClasses(
+        "ml-[0.35rem] inline-flex h-4 w-4 min-w-4 items-center justify-center rounded-full border align-middle text-[color:var(--text-secondary)]",
+        state === "error" && "border-[color:color-mix(in_srgb,var(--negative)_48%,var(--border))] bg-[color:var(--negative-soft)] text-[color:var(--negative)]",
+        state === "unavailable" && "border-[color:color-mix(in_srgb,var(--inactive)_48%,var(--border))] bg-[color:var(--inactive-soft)] text-[color:var(--inactive)]",
+        state === "loading" && "border-[color:color-mix(in_srgb,var(--accent)_42%,var(--border))] bg-[color:var(--accent-soft)]",
+      )}
       title={message ?? label}
       aria-label={message ?? label}
     >
-      {state === "loading" ? <span className="data-indicator__spinner" aria-hidden="true" /> : state === "error" ? "!" : "-"}
+      {state === "loading" ? (
+        <span
+          className="h-[0.55rem] w-[0.55rem] animate-spin rounded-full border-2 border-[color:color-mix(in_srgb,var(--accent)_28%,transparent)] border-t-[color:var(--accent)]"
+          aria-hidden="true"
+        />
+      ) : state === "error" ? "!" : "-"}
     </span>
   );
 }
@@ -215,18 +311,26 @@ export function ExceptionList({
 }: ExceptionListProps) {
   return (
     <Panel title={title} subtitle={subtitle} priority={priority} tone={items.length ? items[0]?.tone ?? "warning" : "positive"}>
-      <div className="exception-list">
+      <div className="flex flex-col gap-3">
         {items.length ? (
           items.map((item) => (
-            <article key={item.id} className={`exception-list__item exception-list__item--${item.tone ?? "neutral"}`}>
-              <div className="exception-list__main">
-                <div className="exception-list__title-row">
-                  <span className={`state-dot state-dot--${item.tone ?? "neutral"}`} aria-hidden="true" />
+            <article
+              key={item.id}
+              className={joinClasses(
+                "flex items-start justify-between gap-3 rounded-[14px] border border-[color:var(--border)] bg-[color:var(--bg-surface-muted)] px-3 py-3",
+                item.tone === "positive" && "border-[color:color-mix(in_srgb,var(--positive)_34%,var(--border))]",
+                item.tone === "warning" && "border-[color:color-mix(in_srgb,var(--warning)_34%,var(--border))]",
+                item.tone === "negative" && "border-[color:color-mix(in_srgb,var(--negative)_34%,var(--border))]",
+              )}
+            >
+              <div className="flex min-w-0 flex-1 flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <span className={toneDotClass(item.tone ?? "neutral")} aria-hidden="true" />
                   <strong>{item.title}</strong>
                 </div>
-                {item.detail ? <p>{item.detail}</p> : null}
+                {item.detail ? <p className="text-[0.85rem] text-[color:var(--text-secondary)]">{item.detail}</p> : null}
               </div>
-              {item.meta ? <div className="exception-list__meta">{item.meta}</div> : null}
+              {item.meta ? <div className="text-right text-[0.75rem] text-[color:var(--text-tertiary)]">{item.meta}</div> : null}
             </article>
           ))
         ) : (
@@ -291,22 +395,41 @@ export function CompactTable<T>({
 
 export function InspectorDrawer({ title, subtitle, open, onClose, children }: InspectorDrawerProps) {
   return (
-    <div className={`inspector-drawer${open ? " inspector-drawer--open" : ""}`} aria-hidden={!open}>
-      <div className="inspector-drawer__scrim" onClick={onClose} />
-      <aside className="inspector-drawer__panel" aria-label={title}>
-        <header className="inspector-drawer__header">
-          <div className="console-panel__heading">
-            <div className="console-panel__title-row">
-              <span className="state-dot state-dot--neutral" aria-hidden="true" />
-              <div className="console-panel__title">{title}</div>
+    <div
+      className={joinClasses(
+        "pointer-events-none fixed inset-0 z-40",
+        open ? "visible" : "invisible",
+      )}
+      aria-hidden={!open}
+    >
+      <div
+        className={joinClasses(
+          "absolute inset-0 bg-[rgba(6,12,18,0.4)] opacity-0 transition-opacity duration-200",
+          open && "pointer-events-auto opacity-100",
+        )}
+        onClick={onClose}
+      />
+      <aside
+        className={joinClasses(
+          "absolute right-0 w-full max-w-[560px] border-l border-[color:var(--glass-stroke)] bg-[image:var(--glass-surface)] shadow-[var(--shadow-raised)] transition-transform duration-200 ease-out pointer-events-auto",
+          open ? "translate-x-0" : "translate-x-full",
+        )}
+        style={{ top: "var(--nav-height)", height: "calc(100vh - var(--nav-height))" }}
+        aria-label={title}
+      >
+        <header className="flex items-start justify-between gap-3 border-b border-[color:var(--border)] px-5 py-4">
+          <div className="flex min-w-0 flex-1 flex-col gap-[7px]">
+            <div className="flex items-center gap-2">
+              <span className={toneDotClass("neutral")} aria-hidden="true" />
+              <div className="text-[1rem] font-semibold tracking-[-0.01em]">{title}</div>
             </div>
-            {subtitle ? <p className="console-panel__subtitle">{subtitle}</p> : null}
+            {subtitle ? <p className="text-[0.82rem] text-[color:var(--text-secondary)]">{subtitle}</p> : null}
           </div>
           <button type="button" className="console-button console-button--ghost" onClick={onClose}>
             Close
           </button>
         </header>
-        <div className="inspector-drawer__body">{children}</div>
+        <div className="flex h-[calc(100%-73px)] flex-col gap-3 overflow-y-auto p-5">{children}</div>
       </aside>
     </div>
   );

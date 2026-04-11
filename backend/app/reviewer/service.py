@@ -9,7 +9,7 @@ from sqlmodel import Session, desc, select
 
 from app.core.config import get_settings
 from app.models.review import GeneratedReviewRecord
-from app.models.trade import Execution, ExecutionStatus, ReconciliationEvent, Trade
+from app.models.trade import Execution, ExecutionStatus, ReconciliationEvent, Trade, TradeIntent, TradeIntentState
 from app.reviewer.llm import ReviewLLMRequest, get_review_llm_client
 from app.reviewer.models import (
     AIReviewProvenance,
@@ -64,6 +64,7 @@ class AIReviewerService:
         trades = self.trade_service.list_trades(date_from=since)
         positions = self.trade_service.list_positions()
         executions = self.trade_service.list_executions(limit=250)
+        rejected_intents = self._list_rejected_trade_intents(start=since, end=now, limit=500)
         runtimes = self.runtime_state_service.list_runtimes()
         recon_events = self.trade_service.list_reconciliation_events(date_from=since)
         stream_health = self.stream_service.get_health()
@@ -116,7 +117,7 @@ class AIReviewerService:
                 )
                 for strategy_name, strategy_trades in sorted(strategy_trade_groups.items())
             ],
-            risk_rejections_24h=len([execution for execution in executions if self._is_since(execution.last_transition_at, since) and execution.status == ExecutionStatus.RISK_REJECTED.value]),
+            risk_rejections_24h=len(rejected_intents),
             execution_failures_24h=len([execution for execution in executions if self._is_since(execution.last_transition_at, since) and execution.status in {ExecutionStatus.FAILED.value, ExecutionStatus.NEEDS_MANUAL_REVIEW.value}]),
             reconciliation_issues_24h=len(self._reconciliation_issues(recon_events)),
             stale_runtimes=len(stale_runtimes),
@@ -137,7 +138,7 @@ class AIReviewerService:
             self._metric("stale_runtimes", "Stale Runtimes", facts.stale_runtimes),
         ]
         derived_observations = self._operator_observations(facts, trades, executions, recon_events, stale_runtimes, now)
-        possible_contributors = self._operator_contributors(facts, executions, stale_runtimes, stream_health)
+        possible_contributors = self._operator_contributors(facts, executions, rejected_intents, stale_runtimes, stream_health)
         warnings = self._default_warnings(stream_health=stream_health, stale_runtimes=len(stale_runtimes))
 
         response = OperatorSummaryReview(
@@ -159,9 +160,9 @@ class AIReviewerService:
         baseline_trades = self.trade_service.list_trades(date_from=previous_start, date_to=previous_end)
         positions = self.trade_service.list_positions()
         executions = self.trade_service.list_executions(limit=500)
+        risk_rejections = self._list_rejected_trade_intents(start=start, end=end, limit=500)
         runtimes = self.runtime_state_service.list_runtimes()
         recon_events = self.trade_service.list_reconciliation_events(date_from=start, date_to=end)
-        risk_rejections = [execution for execution in executions if self._in_period(execution.last_transition_at, start, end) and execution.status == ExecutionStatus.RISK_REJECTED.value]
         failures = [execution for execution in executions if self._in_period(execution.last_transition_at, start, end) and execution.status in {ExecutionStatus.FAILED.value, ExecutionStatus.NEEDS_MANUAL_REVIEW.value}]
         runtime_issues = [runtime for runtime in self._stale_runtimes(runtimes, end) if self._in_period(runtime.updated_at, start, end)]
         facts = DailyReviewFacts(
@@ -207,6 +208,7 @@ class AIReviewerService:
         previous_trades = [trade for trade in trades if previous_start <= self._utc_datetime(trade.close_time) < previous_end]
         positions = [position for position in self.trade_service.list_positions() if position.strategy_name == strategy_name]
         executions = [execution for execution in self.trade_service.list_executions(limit=500) if execution.strategy_name == strategy_name and self._is_since(execution.last_transition_at, start)]
+        risk_rejections = self._list_rejected_trade_intents(start=start, end=now, strategy_name=strategy_name, limit=500)
         runtimes = [runtime for runtime in self.runtime_state_service.list_runtimes() if runtime.strategy_name == strategy_name]
         stale_runtimes = self._stale_runtimes(runtimes, now)
         facts = StrategyReviewFacts(
@@ -225,14 +227,14 @@ class AIReviewerService:
             baseline_trade_count=float(len(previous_trades)) if previous_trades else None,
             baseline_win_rate=self._win_rate(previous_trades),
             stale_price_events=len(stale_runtimes),
-            risk_rejections=len([execution for execution in executions if execution.status == ExecutionStatus.RISK_REJECTED.value]),
+            risk_rejections=len(risk_rejections),
             execution_failures=len([execution for execution in executions if execution.status in {ExecutionStatus.FAILED.value, ExecutionStatus.NEEDS_MANUAL_REVIEW.value}]),
         )
         response = StrategyReviewResponse(
             metadata=self._metadata("strategy_review", now, start, now, {"strategy_name": strategy_name, "period_days": period_days}),
             facts=facts,
             derived_observations=self._strategy_observations(facts),
-            possible_contributors=self._strategy_contributors(facts, executions, stale_runtimes),
+            possible_contributors=self._strategy_contributors(facts, executions, risk_rejections, stale_runtimes),
             warnings=self._default_warnings(stream_health=self.stream_service.get_health(), stale_runtimes=len(stale_runtimes)),
             supporting_metrics=[
                 self._metric("trade_count", "Trades", facts.trade_count, baseline=facts.baseline_trade_count),
@@ -249,6 +251,7 @@ class AIReviewerService:
         runtimes = self.runtime_state_service.list_runtimes()
         recon_events = self.trade_service.list_reconciliation_events(date_from=start)
         executions = [execution for execution in self.trade_service.list_executions(limit=500) if self._is_since(execution.last_transition_at, start)]
+        risk_rejections = self._list_rejected_trade_intents(start=start, end=now, limit=500)
         stream_health = self.stream_service.get_health()
         stale_runtimes = self._stale_runtimes(runtimes, now)
         heartbeat_issues = [
@@ -287,7 +290,7 @@ class AIReviewerService:
             polling_fallback_suspected=stream_health.enabled and not stream_health.connected and len(stale_runtimes) == 0,
             reconciliation_issue_count=len(self._reconciliation_issues(recon_events)),
             execution_failure_count=len([execution for execution in executions if execution.status in {ExecutionStatus.FAILED.value, ExecutionStatus.NEEDS_MANUAL_REVIEW.value}]),
-            risk_rejection_count=len([execution for execution in executions if execution.status == ExecutionStatus.RISK_REJECTED.value]),
+            risk_rejection_count=len(risk_rejections),
             issues=issues,
         )
         response = RuntimeHealthReviewResponse(
@@ -509,7 +512,7 @@ class AIReviewerService:
         )
 
     def _coverage_notes(self) -> list[str]:
-        notes = ["Reviews are grounded in persisted trades, open positions, executions, runtime state, reconciliation events, and stream health."]
+        notes = ["Reviews are grounded in persisted trade intents, trades, open positions, execution attempts, runtime state, reconciliation events, and stream health."]
         if not self.settings.ai_reviewer_llm_enabled:
             notes.append("LLM explanation is disabled; reviews remain deterministic and audit-ready.")
         return notes
@@ -620,9 +623,16 @@ class AIReviewerService:
             ))
         return self._rank_observations(observations)
 
-    def _operator_contributors(self, facts: OperatorSummaryFacts, executions: list[Execution], stale_runtimes: list[Any], stream_health: Any) -> list[PossibleContributor]:
+    def _operator_contributors(
+        self,
+        facts: OperatorSummaryFacts,
+        executions: list[Execution],
+        rejected_intents: list[TradeIntent],
+        stale_runtimes: list[Any],
+        stream_health: Any,
+    ) -> list[PossibleContributor]:
         contributors: list[PossibleContributor] = []
-        if facts.risk_rejections_24h > 0:
+        if rejected_intents:
             contributors.append(PossibleContributor(
                 code="risk_gating_activity",
                 label="Risk gating was active",
@@ -680,7 +690,13 @@ class AIReviewerService:
             observations.append(self._obs("reconciliation_issue_pattern", "warning", "Reconciliation issues were present", "Reconciliation events show operational drift during the review day.", 0.85, "review day", [self._obs_metric("reconciliation_issues", "Reconciliation Issues", facts.reconciliation_issues)]))
         return self._rank_observations(observations)
 
-    def _daily_contributors(self, facts: DailyReviewFacts, failures: list[Execution], risk_rejections: list[Execution], runtime_issues: list[Any]) -> list[PossibleContributor]:
+    def _daily_contributors(
+        self,
+        facts: DailyReviewFacts,
+        failures: list[Execution],
+        risk_rejections: list[TradeIntent],
+        runtime_issues: list[Any],
+    ) -> list[PossibleContributor]:
         contributors: list[PossibleContributor] = []
         if risk_rejections:
             contributors.append(PossibleContributor(code="risk_rule_pressure", label="Risk rules blocked flow", detail="Risk rejections likely reduced realised trade count.", confidence=0.8, time_scope="review day", related_observation_codes=["trade_frequency_shift"], supporting_metrics=[self._obs_metric("risk_rejections", "Risk Rejections", facts.risk_rejections)]))
@@ -704,11 +720,17 @@ class AIReviewerService:
             observations.append(self._obs("execution_failure_cluster", "warning", "Execution issues affected the strategy", f"{facts.execution_failures} execution issue(s) were recorded in the selected period.", 0.86, f"last {facts.period_days}d", [self._obs_metric("execution_failures", "Execution Failures", facts.execution_failures)]))
         return self._rank_observations(observations)
 
-    def _strategy_contributors(self, facts: StrategyReviewFacts, executions: list[Execution], stale_runtimes: list[Any]) -> list[PossibleContributor]:
+    def _strategy_contributors(
+        self,
+        facts: StrategyReviewFacts,
+        executions: list[Execution],
+        rejected_intents: list[TradeIntent],
+        stale_runtimes: list[Any],
+    ) -> list[PossibleContributor]:
         contributors: list[PossibleContributor] = []
         if stale_runtimes:
             contributors.append(PossibleContributor(code="stale_price_pressure", label="Stale pricing may be suppressing normal behaviour", detail="Price freshness degraded for active runtimes tied to the strategy.", confidence=0.85, time_scope=f"last {facts.period_days}d", related_observation_codes=["stale_price_severity"]))
-        if any(execution.status == ExecutionStatus.RISK_REJECTED.value for execution in executions):
+        if rejected_intents:
             contributors.append(PossibleContributor(code="risk_gating_activity", label="Risk gating blocked candidate entries", detail="Risk rejections may explain some reduction in strategy activity.", confidence=0.81, time_scope=f"last {facts.period_days}d", related_observation_codes=["trade_frequency_shift"]))
         if facts.execution_failures > 0:
             contributors.append(PossibleContributor(code="execution_friction", label="Execution issues may have affected realised outcomes", detail="Execution failures can distort both trade count and realised PnL.", confidence=0.76, time_scope=f"last {facts.period_days}d", related_observation_codes=["execution_failure_cluster"]))
@@ -868,22 +890,36 @@ class AIReviewerService:
         patterns = Counter(event.event_type for event in self._reconciliation_issues(events))
         return dict(patterns)
 
+    def _list_rejected_trade_intents(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        strategy_name: str | None = None,
+        limit: int = 500,
+    ) -> list[TradeIntent]:
+        return self.trade_service.list_trade_intents(
+            limit=limit,
+            strategy_name=strategy_name,
+            date_from=start,
+            date_to=end,
+            states={TradeIntentState.REJECTED.value},
+        )
+
     def _execution_failure_clusters(self, executions: list[Execution]) -> dict[str, int]:
         clusters = Counter(f"{execution.strategy_name}:{execution.instrument}" for execution in executions if execution.status in {ExecutionStatus.FAILED.value, ExecutionStatus.NEEDS_MANUAL_REVIEW.value})
         return dict(clusters)
 
-    def _risk_rejection_breakdown(self, executions: list[Execution]) -> dict[str, int]:
+    def _risk_rejection_breakdown(self, intents: list[TradeIntent]) -> dict[str, int]:
         counter: Counter[str] = Counter()
-        for execution in executions:
-            rule = str(execution.details.get("risk_rule") or execution.error_code or execution.reason or "unspecified")
+        for intent in intents:
+            rule = str(intent.decision_reason_code or intent.decision_reason or "unspecified")
             counter[rule] += 1
         return dict(counter)
 
     def _execution_warning_messages(self, executions: list[Execution]) -> list[str]:
         warnings: list[str] = []
         for execution in executions:
-            if execution.status == ExecutionStatus.RISK_REJECTED.value:
-                warnings.append(f"Risk rejected: {execution.reason or execution.error_code or 'unspecified rule'}")
             if execution.status in {ExecutionStatus.FAILED.value, ExecutionStatus.NEEDS_MANUAL_REVIEW.value}:
                 warnings.append(f"Execution issue: {execution.error_message or execution.reason or execution.status}")
         return warnings

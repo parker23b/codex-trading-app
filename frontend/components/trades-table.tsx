@@ -18,31 +18,33 @@ export function TradesTable({ trades }: TradesTableProps) {
   }
 
   return (
-    <table className="table">
-      <thead>
-        <tr>
-          <th>Strategy</th>
-          <th>Instrument</th>
-          <th>Direction</th>
-          <th>Open</th>
-          <th>Close</th>
-          <th>PnL</th>
-        </tr>
-      </thead>
-      <tbody>
-        {trades.map((trade) => (
-          <tr key={trade.id}>
-            <td>{trade.strategy_name}</td>
-            <td>{trade.instrument}</td>
-            <td>
-              <span className={`pill ${trade.direction.toLowerCase()}`}>{trade.direction}</span>
-            </td>
-            <td>{formatNumber(trade.open_price)}</td>
-            <td>{formatNumber(trade.close_price)}</td>
-            <td className={trade.pnl >= 0 ? "value-positive" : "value-negative"}>{formatSignedNumber(trade.pnl)}</td>
+    <div className="table-shell">
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Strategy</th>
+            <th>Instrument</th>
+            <th>Direction</th>
+            <th>Open</th>
+            <th>Close</th>
+            <th>PnL</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {trades.map((trade) => (
+            <tr key={trade.id}>
+              <td data-label="Strategy">{trade.strategy_name}</td>
+              <td data-label="Instrument">{trade.instrument}</td>
+              <td data-label="Direction">
+                <span className={`pill ${trade.direction.toLowerCase()}`}>{trade.direction}</span>
+              </td>
+              <td data-label="Open">{formatNumber(trade.open_price)}</td>
+              <td data-label="Close">{formatNumber(trade.close_price)}</td>
+              <td data-label="PnL" className={trade.pnl >= 0 ? "value-positive" : "value-negative"}>{formatSignedNumber(trade.pnl)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

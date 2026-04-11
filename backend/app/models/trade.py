@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
-from sqlalchemy import Column
+from sqlalchemy import Column, Index, text
 from sqlalchemy.types import JSON
 from sqlmodel import Field, SQLModel
 
@@ -15,6 +15,7 @@ def utc_now() -> datetime:
 
 class Trade(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    trade_intent_id: int | None = Field(default=None, index=True)
     strategy_name: str
     broker_reference: str | None = Field(default=None, index=True)
     close_broker_reference: str | None = Field(default=None, index=True)
@@ -39,6 +40,17 @@ class ExecutionPhase(str, Enum):
 
 
 class ExecutionStatus(str, Enum):
+    """
+    Execution-attempt lifecycle states.
+
+    New execution rows are written only with execution-oriented states, starting
+    at `SUBMISSION_PENDING`. Legacy decision-style values remain only for
+    backward compatibility with older persisted rows and should not be written
+    by new code paths.
+    """
+
+    SUBMISSION_PENDING = "SUBMISSION_PENDING"
+    # Deprecated legacy decision states; retained for old rows only.
     SIGNAL_GENERATED = "SIGNAL_GENERATED"
     RISK_APPROVED = "RISK_APPROVED"
     RISK_REJECTED = "RISK_REJECTED"
@@ -47,6 +59,7 @@ class ExecutionStatus(str, Enum):
     FILL_PARTIAL = "FILL_PARTIAL"
     FILL_FULL = "FILL_FULL"
     POSITION_OPENED = "POSITION_OPENED"
+    # Deprecated legacy bridge state; close intent authority lives on TradeIntent.
     CLOSE_REQUESTED = "CLOSE_REQUESTED"
     CLOSE_CONFIRMED = "CLOSE_CONFIRMED"
     FAILED = "FAILED"
@@ -54,8 +67,43 @@ class ExecutionStatus(str, Enum):
     NEEDS_MANUAL_REVIEW = "NEEDS_MANUAL_REVIEW"
 
 
+class TradeIntentState(str, Enum):
+    PROPOSED = "PROPOSED"
+    REJECTED = "REJECTED"
+    APPROVED = "APPROVED"
+    SUBMITTED = "SUBMITTED"
+    ACKNOWLEDGED = "ACKNOWLEDGED"
+    PARTIALLY_FILLED = "PARTIALLY_FILLED"
+    FILLED = "FILLED"
+    POSITION_OPENED = "POSITION_OPENED"
+    CLOSE_REQUESTED = "CLOSE_REQUESTED"
+    CLOSED = "CLOSED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+    EXTERNAL_POSITION_ADOPTED = "EXTERNAL_POSITION_ADOPTED"
+    RECOVERED_POSITION_ATTACHED = "RECOVERED_POSITION_ATTACHED"
+    FORCED_RECONCILIATION_CLOSE = "FORCED_RECONCILIATION_CLOSE"
+
+
+ACTIVE_INSTRUMENT_OWNERSHIP_STATES = (
+    TradeIntentState.PROPOSED.value,
+    TradeIntentState.APPROVED.value,
+    TradeIntentState.SUBMITTED.value,
+    TradeIntentState.ACKNOWLEDGED.value,
+    TradeIntentState.PARTIALLY_FILLED.value,
+    TradeIntentState.FILLED.value,
+    TradeIntentState.POSITION_OPENED.value,
+    TradeIntentState.CLOSE_REQUESTED.value,
+    TradeIntentState.EXTERNAL_POSITION_ADOPTED.value,
+    TradeIntentState.RECOVERED_POSITION_ATTACHED.value,
+)
+
+_ACTIVE_INSTRUMENT_OWNERSHIP_SQL = ", ".join(f"'{state}'" for state in ACTIVE_INSTRUMENT_OWNERSHIP_STATES)
+
+
 class Position(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    trade_intent_id: int | None = Field(default=None, index=True)
     strategy_name: str
     broker_reference: str | None = Field(default=None, index=True)
     instrument: str = Field(index=True)
@@ -81,7 +129,16 @@ class Position(SQLModel, table=True):
 
 
 class Execution(SQLModel, table=True):
+    """
+    Broker-attempt audit record linked to a TradeIntent.
+
+    New writes begin at `SUBMISSION_PENDING` once an intent has already been
+    admitted. Legacy decision-style statuses may still exist in older rows, but
+    TradeIntent is the authoritative source of decision truth.
+    """
+
     id: Optional[int] = Field(default=None, primary_key=True)
+    trade_intent_id: int | None = Field(default=None, index=True)
     strategy_name: str = Field(index=True)
     instrument: str = Field(index=True)
     phase: str = Field(index=True)
@@ -111,6 +168,7 @@ class Execution(SQLModel, table=True):
 class ReconciliationEvent(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     event_type: str = Field(index=True)
+    trade_intent_id: int | None = Field(default=None, index=True)
     strategy_name: str | None = Field(default=None, index=True)
     instrument: str | None = Field(default=None, index=True)
     broker_reference: str | None = Field(default=None, index=True)
@@ -119,11 +177,67 @@ class ReconciliationEvent(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now, nullable=False)
 
 
+class TradeIntent(SQLModel, table=True):
+    """
+    Authoritative lifecycle record for a trade decision.
+
+    A raw strategy signal becomes durable when it is persisted here as
+    `PROPOSED`. Only intents transitioned to `APPROVED` may become execution
+    attempts. Broker submission, fills, position-open events, closes, and
+    reconciliation-only outcomes all attach back to this record.
+    """
+
+    __table_args__ = (
+        Index(
+            "uq_trade_intent_active_instrument",
+            "instrument",
+            unique=True,
+            sqlite_where=text(f"state IN ({_ACTIVE_INSTRUMENT_OWNERSHIP_SQL})"),
+            postgresql_where=text(f"state IN ({_ACTIVE_INSTRUMENT_OWNERSHIP_SQL})"),
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    strategy_name: str = Field(index=True)
+    instrument: str = Field(index=True)
+    direction: str = Field(index=True)
+    state: str = Field(default=TradeIntentState.PROPOSED.value, index=True)
+    signal_time: datetime
+    proposed_size: float | None = None
+    allocated_size: float | None = None
+    proposed_risk_percent: float | None = None
+    allocated_risk_percent: float | None = None
+    confidence: float | None = None
+    observed_price: float | None = None
+    average_fill_price: float | None = None
+    filled_size: float | None = None
+    broker_reference: str | None = Field(default=None, index=True)
+    close_broker_reference: str | None = Field(default=None, index=True)
+    position_id: int | None = Field(default=None, index=True)
+    trade_id: int | None = Field(default=None, index=True)
+    decision_reason_code: str | None = Field(default=None, index=True)
+    decision_reason: str | None = None
+    close_reason_code: str | None = Field(default=None, index=True)
+    close_reason: str | None = None
+    execution_client_request_id: str | None = Field(default=None, index=True)
+    market_status: str | None = None
+    tradable: bool | None = None
+    details: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    submitted_at: datetime | None = None
+    acknowledged_at: datetime | None = None
+    completed_at: datetime | None = None
+    opened_at: datetime | None = None
+    closed_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now, nullable=False)
+    updated_at: datetime = Field(default_factory=utc_now, nullable=False)
+
+
 def clone_position(position: Position | None) -> Position | None:
     if position is None:
         return None
     return Position(
         id=position.id,
+        trade_intent_id=position.trade_intent_id,
         strategy_name=position.strategy_name,
         broker_reference=position.broker_reference,
         instrument=position.instrument,

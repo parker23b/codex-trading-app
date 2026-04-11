@@ -10,8 +10,9 @@ from app.core.config import get_settings
 from app.core.runtime import runtime_manager
 from app.core.signals import EntrySignal, SignalStatus
 from app.models.runtime import StrategyRuntimeState
-from app.models.trade import Execution, ExecutionPhase, ExecutionStatus, Position, Trade
+from app.models.trade import Position, Trade, TradeIntent, TradeIntentState
 from app.services.runtime_state_service import RuntimeStateService
+from app.services.trade_service import TradeService
 
 
 class PortfolioRiskService:
@@ -23,6 +24,7 @@ class PortfolioRiskService:
         self.settings = get_settings()
         self.session = session
         self.runtime_state_service = RuntimeStateService(session) if session is not None else None
+        self.trade_service = TradeService(session) if session is not None else None
 
     def assess_entry(
         self,
@@ -31,11 +33,11 @@ class PortfolioRiskService:
         open_positions: list[Position],
         trades: list[Trade],
     ) -> EntrySignal:
-        recent_executions = self._load_recent_entry_executions(signal)
+        recent_intents = self._load_recent_entry_trade_intents(signal)
         runtimes = self.runtime_state_service.list_active_runtimes() if self.runtime_state_service is not None else []
 
         layers = [
-            self._evaluate_pre_trade(signal, open_positions, trades, recent_executions),
+            self._evaluate_pre_trade(signal, open_positions, trades, recent_intents),
             self._evaluate_portfolio(signal, open_positions, trades),
             self._evaluate_market_quality(signal),
             self._evaluate_platform_health(signal, runtimes),
@@ -70,7 +72,7 @@ class PortfolioRiskService:
             open_positions=open_positions,
             trades=trades,
             runtimes=runtimes,
-            recent_executions=recent_executions,
+            recent_intents=recent_intents,
             approved=approved,
             rejection_layer=rejection_layer,
         )
@@ -97,7 +99,7 @@ class PortfolioRiskService:
         signal: EntrySignal,
         open_positions: list[Position],
         trades: list[Trade],
-        recent_executions: list[Execution],
+        recent_intents: list[TradeIntent],
     ) -> dict[str, object]:
         checks: list[dict[str, object]] = []
         checks.append(
@@ -194,14 +196,15 @@ class PortfolioRiskService:
 
         duplicate_cutoff = signal.signal_at - timedelta(seconds=self.settings.runtime_duplicate_signal_window_seconds)
         duplicate_signals = [
-            execution
-            for execution in recent_executions
-            if execution.created_at.astimezone(UTC) >= duplicate_cutoff.astimezone(UTC)
-            and execution.signal_time.astimezone(UTC) < signal.signal_at.astimezone(UTC)
-            and execution.strategy_name == signal.strategy_name
-            and execution.instrument == signal.instrument
-            and (execution.details or {}).get("direction") == signal.direction.value
-            and execution.status != ExecutionStatus.RISK_REJECTED.value
+            intent
+            for intent in recent_intents
+            if intent.created_at.astimezone(UTC) >= duplicate_cutoff.astimezone(UTC)
+            and intent.signal_time.astimezone(UTC) < signal.signal_at.astimezone(UTC)
+            and intent.strategy_name == signal.strategy_name
+            and intent.instrument == signal.instrument
+            and intent.direction == signal.direction.value
+            and intent.state != TradeIntentState.PROPOSED.value
+            and intent.state != TradeIntentState.REJECTED.value
         ]
         duplicate_suppression_enabled = signal.strategy_name not in self.SMOKE_TEST_STRATEGIES
         checks.append(
@@ -221,11 +224,12 @@ class PortfolioRiskService:
 
         burst_cutoff = signal.signal_at - timedelta(seconds=self.settings.runtime_entry_burst_window_seconds)
         concurrent_entries = [
-            execution
-            for execution in recent_executions
-            if execution.created_at.astimezone(UTC) >= burst_cutoff.astimezone(UTC)
-            and execution.signal_time.astimezone(UTC) < signal.signal_at.astimezone(UTC)
-            and execution.status != ExecutionStatus.RISK_REJECTED.value
+            intent
+            for intent in recent_intents
+            if intent.created_at.astimezone(UTC) >= burst_cutoff.astimezone(UTC)
+            and intent.signal_time.astimezone(UTC) < signal.signal_at.astimezone(UTC)
+            and intent.state != TradeIntentState.PROPOSED.value
+            and intent.state != TradeIntentState.REJECTED.value
         ]
         burst_limit_enabled = signal.strategy_name not in self.SMOKE_TEST_STRATEGIES
         checks.append(
@@ -249,12 +253,13 @@ class PortfolioRiskService:
 
         failed_entry_cutoff = signal.signal_at - timedelta(seconds=self.settings.runtime_failed_entry_retry_cooldown_seconds)
         recent_failed_entries = [
-            execution
-            for execution in recent_executions
-            if execution.created_at.astimezone(UTC) >= failed_entry_cutoff.astimezone(UTC)
-            and execution.strategy_name == signal.strategy_name
-            and execution.instrument == signal.instrument
-            and execution.status in {ExecutionStatus.FAILED.value, ExecutionStatus.NEEDS_MANUAL_REVIEW.value}
+            intent
+            for intent in recent_intents
+            if intent.created_at.astimezone(UTC) >= failed_entry_cutoff.astimezone(UTC)
+            and intent.strategy_name == signal.strategy_name
+            and intent.instrument == signal.instrument
+            and intent.state == TradeIntentState.FAILED.value
+            and intent.position_id is None
         ]
         checks.append(
             self._check(
@@ -462,7 +467,7 @@ class PortfolioRiskService:
         open_positions: list[Position],
         trades: list[Trade],
         runtimes: list[StrategyRuntimeState],
-        recent_executions: list[Execution],
+        recent_intents: list[TradeIntent],
         approved: bool,
         rejection_layer: str | None,
     ) -> dict[str, object]:
@@ -488,13 +493,13 @@ class PortfolioRiskService:
             "open_positions": len(open_positions),
             "open_risk_percent": round(open_risk, 4),
             "daily_closed_pnl": round(daily_pnl, 2),
-            "recent_entry_attempts": len(recent_executions),
+            "recent_entry_attempts": len(recent_intents),
             "unhealthy_runtimes": unhealthy_count,
             "market_status": signal.market_status,
             "tradable": signal.tradable,
         }
 
-    def _load_recent_entry_executions(self, signal: EntrySignal) -> list[Execution]:
+    def _load_recent_entry_trade_intents(self, signal: EntrySignal) -> list[TradeIntent]:
         if self.session is None:
             return []
         lookback_seconds = max(
@@ -505,12 +510,13 @@ class PortfolioRiskService:
             self.settings.runtime_cooldown_after_exit_seconds,
         )
         cutoff = signal.signal_at.astimezone(UTC) - timedelta(seconds=lookback_seconds)
-        statement = (
-            select(Execution)
-            .where(Execution.phase == ExecutionPhase.ENTRY.value)
-            .where(Execution.created_at >= cutoff)
+        if self.trade_service is None:
+            return []
+        return self.trade_service.list_recent_trade_intents(
+            signal_time_from=cutoff,
+            strategy_name=None,
+            instrument=None,
         )
-        return list(self.session.exec(statement).all())
 
     @staticmethod
     def _latest_closed_trade(trades: list[Trade], signal: EntrySignal) -> Trade | None:

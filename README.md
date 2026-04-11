@@ -58,6 +58,78 @@ Frontend operator console
             -> SQLModel persistence + broker state
 ```
 
+## Trade Decision Architecture
+
+This backend now uses an intent-first ownership model:
+
+- `TradeIntent` is the sole decision-lifecycle authority.
+- `Execution` is broker-attempt and execution-audit only.
+- `Position` is live exposure.
+- `Trade` is the closed realised outcome.
+
+### End-To-End Ownership Chain
+
+1. Raw strategy signal generation
+   Strategy logic decides raw alpha intent inside [backend/app/core/trading_engine.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/trading_engine.py), which creates `EntrySignal` and `ExitSignal` objects from strategy conditions.
+2. TradeIntent proposal and admission
+   [backend/app/services/trade_decision_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/trade_decision_service.py) converts raw entry candidates into durable `TradeIntent` records, resolves same-instrument conflicts, applies market/risk/sizing/broker-size gates, and transitions intents to `APPROVED` or `REJECTED`.
+3. Execution creation and broker-attempt lifecycle
+   [backend/app/services/strategy_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/strategy_service.py) only creates an `Execution` after an admitted intent is ready to enter broker orchestration. New execution rows begin at `SUBMISSION_PENDING`, then progress through broker-attempt states such as `ORDER_SUBMITTED`, `ORDER_ACKNOWLEDGED`, `FILL_PARTIAL` / `FILL_FULL`, `FAILED`, `CANCELLED`, `NEEDS_MANUAL_REVIEW`, and terminal execution outcomes like `POSITION_OPENED` / `CLOSE_CONFIRMED`.
+4. Position as live exposure
+   [backend/app/services/trade_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/trade_service.py) persists `Position` when a filled execution opens live exposure. `Position` remains the source of truth for current open exposure.
+5. Trade as closed realised outcome
+   On close completion, [backend/app/services/strategy_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/strategy_service.py) persists a `Trade`, closes the `Position`, and transitions the linked `TradeIntent` to `CLOSED`.
+
+### File And Service Boundaries
+
+- Raw strategy signals are created in [backend/app/core/trading_engine.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/trading_engine.py).
+- Strategy candidate collection and runtime orchestration live in [backend/app/services/strategy_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/strategy_service.py).
+- `TradeIntent` creation plus proposal/admission/rejection live in [backend/app/services/trade_decision_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/trade_decision_service.py).
+- `TradeIntent`, `Execution`, `Position`, and `Trade` models live in [backend/app/models/trade.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/models/trade.py).
+- Persistence helpers for intents, executions, positions, trades, and reconciliation events live in [backend/app/services/trade_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/trade_service.py).
+- Recovery attaches broker-confirmed positions to explicit intents in [backend/app/services/runtime_recovery_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/runtime_recovery_service.py).
+- Reconciliation adopts external positions and records forced reconciliation closes in [backend/app/services/reconciliation_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/reconciliation_service.py).
+
+### Authoritative Ownership
+
+- `TradeIntent` owns decision lifecycle only:
+  proposal, approval, rejection, close intent, recovery/adoption states, and final close outcome.
+- `Execution` owns execution-attempt lifecycle only:
+  creation of a broker attempt, submission, acknowledgment, fill/failure/cancel/manual review, and execution terminal audit milestones.
+- Rejected trade decisions do not create `Execution` rows.
+- No order submission is allowed without a linked authoritative `TradeIntent`.
+
+### Same-Instrument Exclusivity
+
+The backend enforces one active instrument owner at a time.
+
+- Application-level conflict resolution happens first in [backend/app/services/trade_decision_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/trade_decision_service.py).
+- Persistence-level enforcement lives in [backend/app/models/trade.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/models/trade.py) as the partial unique index `uq_trade_intent_active_instrument`.
+- The index applies to active ownership states:
+  `PROPOSED`, `APPROVED`, `SUBMITTED`, `ACKNOWLEDGED`, `PARTIALLY_FILLED`, `FILLED`, `POSITION_OPENED`, `CLOSE_REQUESTED`, `EXTERNAL_POSITION_ADOPTED`, `RECOVERED_POSITION_ATTACHED`.
+- If two concurrent workers race to admit the same instrument, the database rejects the second active owner and [backend/app/services/trade_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/trade_service.py) raises `ActiveTradeIntentConflictError`, which [backend/app/services/trade_decision_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/trade_decision_service.py) converts into a structured `instrument_already_allocated` rejection.
+
+### Recovery And Reconciliation
+
+- Runtime recovery in [backend/app/services/runtime_recovery_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/runtime_recovery_service.py) never resumes or persists a live recovered `Position` without first creating or linking a `TradeIntent`. Recovered broker-confirmed positions use `RECOVERED_POSITION_ATTACHED`.
+- Reconciliation in [backend/app/services/reconciliation_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/reconciliation_service.py) never silently mutates exposure:
+  unmatched broker positions create explicit adopted lifecycle records such as `EXTERNAL_POSITION_ADOPTED`, and broker-missing local positions create explicit forced-close lifecycle records such as `FORCED_RECONCILIATION_CLOSE`.
+
+### Core Invariants
+
+- No order submission without an authoritative `TradeIntent`.
+- No exit without a linked close-valid intent.
+- No recovered live position without a linked `TradeIntent`.
+- One active instrument owner at a time.
+
+### Compatibility Notes
+
+- `ExecutionStatus` still retains a small set of deprecated legacy values in [backend/app/models/trade.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/models/trade.py):
+  `SIGNAL_GENERATED`, `RISK_APPROVED`, `RISK_REJECTED`, and `CLOSE_REQUESTED`.
+- Those values remain only for compatibility with older persisted rows. New code paths do not write them.
+- New execution rows start at `SUBMISSION_PENDING`.
+- At this stage the developer SQLite database can be safely recreated instead of migrated. The codebase is still moving quickly enough that dropping and recreating the dev DB is the simpler path.
+
 ## Autonomous Operating Model
 
 The product is built around supervised autonomy rather than a purely manual "pick a strategy and launch it" workflow.

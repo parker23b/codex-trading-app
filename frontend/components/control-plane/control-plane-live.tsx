@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { CompactTable, DataIndicator, Panel, SplitPanel, StatusPill, StatusStrip } from "@/components/console/primitives";
+import { CompactTable, DataIndicator, Panel, StatusPill, StatusStrip } from "@/components/console/primitives";
 import { getControlPlaneSummary, updateOperatorControlState, updateStrategyGovernance } from "@/lib/api";
 import { ControlPlaneFamily, ControlPlaneSummary } from "@/lib/types";
 
@@ -175,115 +175,96 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
         ]}
       />
 
-      <SplitPanel
-        className="layout-control-plane"
-        left={
-          <Panel
-            title="Intervention Queue"
-            subtitle="Highest-priority families first."
-            priority="critical"
-            tone={exceptionFamilies.length ? "warning" : "positive"}
-            actions={
-              <div className="console-inline-actions">
+      <section className="grid gap-3 lg:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.95fr)]">
+        <Panel
+          title="Family Alignment"
+          subtitle="Exceptions are surfaced first, then stable families."
+          priority="primary"
+          tone={exceptionFamilies.length ? "warning" : "neutral"}
+          actions={
+            <div className="console-inline-actions">
               <button
-                  type="button"
-                  className="console-button"
-                  disabled={summaryError !== null || pendingGlobalAction !== null || summary.effective_autonomous_control_enabled}
-                  onClick={() => handleGlobalAutonomy(true)}
-                >
-                  {pendingGlobalAction === "enable" ? "Arming..." : "Arm"}
-                </button>
-                <button
-                  type="button"
-                  className="console-button console-button--ghost"
-                  disabled={summaryError !== null || pendingGlobalAction !== null || !summary.effective_autonomous_control_enabled}
-                  onClick={() => handleGlobalAutonomy(false)}
-                >
-                  {pendingGlobalAction === "disable" ? "Pausing..." : "Pause"}
-                </button>
-              </div>
-            }
-          >
-            <CompactTable
-              rows={exceptionFamilies}
-              emptyLabel={summaryError ? "Control plane unavailable." : "No intervention-required families."}
-              getRowTone={(family) => familyTone(summary, family)}
-              getRowActive={(family) => family.strategy_name === selectedStrategyName}
-              columns={[
-                {
-                  key: "family",
-                  header: "Family",
-                  render: (family) => (
-                    <button
-                      type="button"
-                      className={`console-link-button${family.strategy_name === selectedStrategyName ? " is-active" : ""}`}
-                      onClick={() => setSelectedStrategyName(family.strategy_name)}
-                    >
-                      {family.strategy_name}
-                    </button>
-                  ),
-                },
-                {
-                  key: "alignment",
-                  header: "Alignment",
-                  render: (family) => <StatusPill label={family.alignment.status} tone={familyTone(summary, family)} />,
-                },
-                {
-                  key: "state",
-                  header: "State",
-                  render: (family) => family.deployment?.state ?? "UNASSIGNED",
-                },
-              ]}
-            />
-          </Panel>
-        }
-        center={
-          <Panel title="Alignment Matrix" subtitle="Full family comparison." priority="primary" tone={exceptionFamilies.length ? "warning" : "neutral"}>
-            <CompactTable
-              rows={summary.families}
-              emptyLabel={summaryError ? "Control plane unavailable." : "No families configured."}
-              getRowTone={(family) => familyTone(summary, family)}
-              getRowActive={(family) => family.strategy_name === selectedStrategyName}
-              columns={[
-                {
-                  key: "family",
-                  header: "Family",
-                  render: (family) => (
-                    <button
-                      type="button"
-                      className={`console-link-button${family.strategy_name === selectedStrategyName ? " is-active" : ""}`}
-                      onClick={() => setSelectedStrategyName(family.strategy_name)}
-                    >
-                      {family.strategy_name}
-                    </button>
-                  ),
-                },
-                {
-                  key: "intent",
-                  header: "Selected",
-                  render: (family) => `${family.deployment?.selected_profile ?? "n/a"} · ${family.deployment?.selected_instrument ?? "n/a"}`,
-                },
-                {
-                  key: "runtime",
-                  header: "Runtime",
-                  render: (family) =>
-                    family.runtime.is_running
-                      ? `${family.runtime.active_profile_name ?? "n/a"} · ${family.runtime.active_instrument ?? "n/a"}`
-                      : "not running",
-                },
-                {
-                  key: "state",
-                  header: "Deploy",
-                  render: (family) => family.deployment?.state ?? "UNASSIGNED",
-                },
-              ]}
-            />
-          </Panel>
-        }
-        right={
-          <Panel title="Lead Inspection" subtitle="Current highest-priority target." priority="critical" tone={selectedTone}>
+                type="button"
+                className="console-button"
+                disabled={summaryError !== null || pendingGlobalAction !== null || summary.effective_autonomous_control_enabled}
+                onClick={() => handleGlobalAutonomy(true)}
+              >
+                {pendingGlobalAction === "enable" ? "Arming..." : "Arm"}
+              </button>
+              <button
+                type="button"
+                className="console-button console-button--ghost"
+                disabled={summaryError !== null || pendingGlobalAction !== null || !summary.effective_autonomous_control_enabled}
+                onClick={() => handleGlobalAutonomy(false)}
+              >
+                {pendingGlobalAction === "disable" ? "Pausing..." : "Pause"}
+              </button>
+            </div>
+          }
+        >
+          <CompactTable
+            rows={[...exceptionFamilies, ...healthyFamilies]}
+            emptyLabel={summaryError ? "Control plane unavailable." : "No families configured."}
+            getRowTone={(family) => familyTone(summary, family)}
+            getRowActive={(family) => family.strategy_name === selectedStrategyName}
+            columns={[
+              {
+                key: "family",
+                header: "Strategy",
+                className: "w-[24%]",
+                render: (family) => (
+                  <button
+                    type="button"
+                    className={`console-link-button${family.strategy_name === selectedStrategyName ? " is-active" : ""}`}
+                    onClick={() => setSelectedStrategyName(family.strategy_name)}
+                    title={family.strategy_name}
+                  >
+                    <span className="block truncate">{family.strategy_name}</span>
+                  </button>
+                ),
+              },
+              {
+                key: "alignment",
+                header: "Alignment",
+                render: (family) => (
+                  <StatusPill
+                    label={family.alignment.status}
+                    tone={familyTone(summary, family)}
+                    title={family.alignment.reason ?? undefined}
+                  />
+                ),
+              },
+              {
+                key: "intent",
+                header: "Selected",
+                render: (family) => `${family.deployment?.selected_profile ?? "n/a"} · ${family.deployment?.selected_instrument ?? "n/a"}`,
+              },
+              {
+                key: "runtime",
+                header: "Runtime",
+                render: (family) =>
+                  family.runtime.is_running
+                    ? `${family.runtime.active_profile_name ?? "n/a"} · ${family.runtime.active_instrument ?? "n/a"}`
+                    : "not running",
+              },
+              {
+                key: "state",
+                header: "Deploy",
+                render: (family) => family.deployment?.state ?? "UNASSIGNED",
+              },
+            ]}
+          />
+        </Panel>
+
+        <Panel title="Lead Inspection" subtitle="Selected family details and intervention controls." priority="critical" tone={selectedTone}>
             {selectedFamily ? (
               <div className="detail-stack">
+                <div className="status-note status-note--inline">
+                  {exceptionFamilies.length
+                    ? `${exceptionFamilies.length} family${exceptionFamilies.length === 1 ? "" : "ies"} currently need intervention.`
+                    : "No families currently need intervention."}
+                </div>
+
                 <div className="summary-bar">
                   <div className="summary-bar__item">
                     <span>Family</span>
@@ -347,22 +328,8 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
             ) : (
               <div className="console-empty">No family selected.</div>
             )}
-          </Panel>
-        }
-      />
-
-      <Panel title="Stable Families" priority="passive" tone="inactive" compact>
-        <CompactTable
-          dense
-          rows={healthyFamilies}
-          emptyLabel={summaryError ? "Control plane unavailable." : "No stable families."}
-          columns={[
-            { key: "family", header: "Family", render: (family) => family.strategy_name },
-            { key: "profile", header: "Profile", render: (family) => family.deployment?.selected_profile ?? "n/a" },
-            { key: "instrument", header: "Instrument", render: (family) => family.runtime.active_instrument ?? family.deployment?.selected_instrument ?? "n/a" },
-          ]}
-        />
-      </Panel>
+        </Panel>
+      </section>
       {statusMessage ? <div className="console-alert console-alert--neutral">{statusMessage}</div> : null}
     </main>
   );

@@ -7,7 +7,7 @@ from sqlmodel import Session
 from app.core.broker_factory import get_broker
 from app.core.logging import get_logger
 from app.core.runtime import runtime_manager
-from app.models.trade import Position, clone_position, utc_now
+from app.models.trade import Position, TradeIntent, TradeIntentState, clone_position, utc_now
 from app.services.domain_event_service import domain_event_service
 from app.services.runtime_state_service import RuntimeStateService
 from app.services.trade_service import TradeService
@@ -87,6 +87,7 @@ class RuntimeRecoveryService:
             if broker_error is not None:
                 self.trade_service.record_reconciliation_event(
                     event_type="RUNTIME_RECOVERY_REQUIRED",
+                    trade_intent_id=local_position.trade_intent_id if local_position is not None else None,
                     strategy_name=runtime.strategy_name,
                     instrument=runtime.instrument,
                     broker_reference=runtime.current_position_broker_reference,
@@ -124,6 +125,7 @@ class RuntimeRecoveryService:
             if runtime.current_position_broker_reference and remote_position is None:
                 self.trade_service.record_reconciliation_event(
                     event_type="RUNTIME_RECOVERY_REQUIRED",
+                    trade_intent_id=local_position.trade_intent_id if local_position is not None else None,
                     strategy_name=runtime.strategy_name,
                     instrument=runtime.instrument,
                     broker_reference=runtime.current_position_broker_reference,
@@ -164,7 +166,34 @@ class RuntimeRecoveryService:
             current_position = local_position
             if current_position is None and remote_position is not None:
                 current_position = self._position_from_remote(runtime.strategy_name, remote_position)
+                recovery_intent = self._resolve_recovered_trade_intent(runtime=runtime, position=current_position)
+                current_position.trade_intent_id = recovery_intent.id
                 current_position = self.trade_service.record_broker_position(current_position)
+                self.trade_service.transition_trade_intent(
+                    recovery_intent,
+                    state=TradeIntentState.RECOVERED_POSITION_ATTACHED,
+                    broker_reference=current_position.broker_reference,
+                    position_id=current_position.id,
+                    average_fill_price=current_position.open_price,
+                    filled_size=current_position.size,
+                    opened_at=current_position.open_time,
+                )
+            elif current_position is not None and (
+                current_position.trade_intent_id is None
+                or self.trade_service.get_trade_intent(current_position.trade_intent_id) is None
+            ):
+                recovery_intent = self._resolve_recovered_trade_intent(runtime=runtime, position=current_position)
+                current_position.trade_intent_id = recovery_intent.id
+                current_position = self.trade_service.upsert_position(current_position)
+                self.trade_service.transition_trade_intent(
+                    recovery_intent,
+                    state=TradeIntentState.RECOVERED_POSITION_ATTACHED,
+                    broker_reference=current_position.broker_reference,
+                    position_id=current_position.id,
+                    average_fill_price=current_position.open_price,
+                    filled_size=current_position.size,
+                    opened_at=current_position.open_time,
+                )
 
             engine = runtime_manager.start(
                 runtime.strategy_name,
@@ -236,6 +265,42 @@ class RuntimeRecoveryService:
             if position is not None:
                 return position
         return local_by_key.get((runtime.strategy_name, runtime.instrument))
+
+    def _resolve_recovered_trade_intent(self, *, runtime, position: Position) -> TradeIntent:
+        if position.trade_intent_id is not None:
+            existing = self.trade_service.get_trade_intent(position.trade_intent_id)
+            if existing is not None:
+                return existing
+        if position.broker_reference is not None:
+            existing = self.trade_service.find_open_trade_intent(
+                strategy_name=runtime.strategy_name,
+                instrument=runtime.instrument,
+                broker_reference=position.broker_reference,
+                position_id=position.id,
+            )
+            if existing is not None:
+                return existing
+        return self.trade_service.create_trade_intent(
+            TradeIntent(
+                strategy_name=runtime.strategy_name,
+                instrument=runtime.instrument,
+                direction=position.direction,
+                state=TradeIntentState.RECOVERED_POSITION_ATTACHED.value,
+                signal_time=position.open_time,
+                proposed_size=position.size,
+                allocated_size=position.size,
+                proposed_risk_percent=position.risk_percent,
+                allocated_risk_percent=position.risk_percent,
+                observed_price=position.open_price,
+                average_fill_price=position.open_price,
+                filled_size=position.size,
+                broker_reference=position.broker_reference,
+                decision_reason_code="RECOVERED_POSITION_ATTACHED",
+                decision_reason="Runtime recovery attached a broker-confirmed position to an explicit trade intent.",
+                opened_at=position.open_time,
+                details={"runtime_recovery_created": True},
+            )
+        )
 
     def _position_from_remote(self, strategy_name: str, remote_position) -> Position:
         now = datetime.now(UTC)

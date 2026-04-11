@@ -12,7 +12,7 @@ from sqlmodel import select
 
 from app.core.broker import BrokerOrderResult, BrokerOrderStatus
 from app.models.runtime import StrategyRuntimeState
-from app.models.trade import Execution, ExecutionPhase, ExecutionStatus
+from app.models.trade import Execution, ExecutionPhase, ExecutionStatus, TradeIntent, TradeIntentState
 from app.services.health_service import get_health_service
 from app.services.market_status_service import get_market_status_service
 from app.services.strategy_service import StrategyService
@@ -125,6 +125,62 @@ def test_prepare_execution_blocks_unsafe_duplicate_close_retry(session, fixed_no
     assert len(executions) == 1
 
 
+def test_execute_entry_signal_requires_approved_trade_intent(session, broker, fixed_now):
+    trade_service = TradeService(session)
+    intent = trade_service.create_trade_intent(
+        TradeIntent(
+            strategy_name="smoke_test_hold",
+            instrument=INSTRUMENT,
+            direction="BUY",
+            state=TradeIntentState.PROPOSED.value,
+            signal_time=fixed_now,
+            proposed_size=0.2,
+            allocated_size=0.2,
+            proposed_risk_percent=0.1,
+            allocated_risk_percent=0.1,
+        )
+    )
+    execution = trade_service.create_execution(
+        Execution(
+            trade_intent_id=intent.id,
+            strategy_name="smoke_test_hold",
+            instrument=INSTRUMENT,
+            phase=ExecutionPhase.ENTRY.value,
+            status=ExecutionStatus.SUBMISSION_PENDING.value,
+            client_request_id="ent-unapproved",
+            signal_time=fixed_now,
+            requested_size=0.2,
+            requested_price=100.0,
+        )
+    )
+    signal = EntrySignal(
+        kind=SignalKind.ENTRY,
+        strategy_name="smoke_test_hold",
+        instrument=INSTRUMENT,
+        observed_price=100.0,
+        signal_at=fixed_now,
+        direction=OrderDirection.BUY,
+        size=0.2,
+        risk_percent=0.1,
+        bid=99.9,
+        ask=100.1,
+        market_status="TRADEABLE",
+        tradable=True,
+    )
+    engine = runtime_manager.start(strategy_name="smoke_test_hold", instrument=INSTRUMENT)
+
+    with pytest.raises(ValueError, match="APPROVED trade intent"):
+        StrategyService._execute_entry_signal(
+            engine=engine,
+            signal=signal,
+            intent=intent,
+            trade_service=trade_service,
+            execution=execution,
+        )
+
+    assert broker.placed_orders == []
+
+
 def test_process_price_update_runs_entry_to_close_lifecycle(session, broker, fixed_now):
     service = StrategyService(session)
     trade_service = TradeService(session)
@@ -173,6 +229,14 @@ def test_process_price_update_runs_entry_to_close_lifecycle(session, broker, fix
         ExecutionStatus.POSITION_OPENED.value,
         ExecutionStatus.CLOSE_CONFIRMED.value,
     }
+    assert {execution.status for execution in executions}.isdisjoint(
+        {
+            ExecutionStatus.SIGNAL_GENERATED.value,
+            ExecutionStatus.RISK_APPROVED.value,
+            ExecutionStatus.RISK_REJECTED.value,
+            ExecutionStatus.CLOSE_REQUESTED.value,
+        }
+    )
 
 
 def test_evaluate_price_update_is_decoupled_from_execution_orchestration(session, broker, fixed_now):
@@ -232,9 +296,29 @@ def test_evaluate_price_update_is_decoupled_from_execution_orchestration(session
     assert executions[0].status == ExecutionStatus.POSITION_OPENED.value
 
 
+def test_new_execution_rows_start_at_submission_pending(session, fixed_now):
+    trade_service = TradeService(session)
+
+    execution, should_submit = StrategyService._prepare_execution(
+        trade_service=trade_service,
+        strategy_name="mean_reversion",
+        instrument=INSTRUMENT,
+        phase=ExecutionPhase.ENTRY.value,
+        signal_time=fixed_now,
+        requested_size=1.0,
+        requested_price=100.0,
+        reason="Execution attempt created for approved entry intent",
+        details={"action_key": f"entry:mean_reversion:{INSTRUMENT}:BUY", "direction": "BUY"},
+    )
+
+    assert should_submit is True
+    assert execution.status == ExecutionStatus.SUBMISSION_PENDING.value
+
+
 def test_allocate_signal_candidates_filters_weaker_conflicting_entries(session, broker, fixed_now):
     service = StrategyService(session)
     instrument = INSTRUMENT
+    runtime_manager.last_price_updated_at[instrument] = fixed_now
     broker.market_details_by_instrument[instrument] = BrokerMarketDetails(
         instrument=instrument,
         name=instrument,
@@ -367,14 +451,14 @@ def test_entry_below_broker_minimum_is_risk_rejected_before_submission(session, 
         received_at=fixed_now + timedelta(seconds=1),
     )
 
-    executions = trade_service.list_executions(limit=10)
-
     assert broker.placed_orders == []
     assert len(trade_service.list_positions()) == 0
-    assert executions[0].status == ExecutionStatus.RISK_REJECTED.value
-    assert executions[0].reason == "Requested size 0.6 is below broker minimum deal size 1.0 for CS.D.EURUSD.CFD.IP."
-    assert executions[0].details["risk_rejection_layer"] == "broker_constraints"
-    assert executions[0].details["risk_audit_summary"]["min_deal_size"] == 1.0
+    assert trade_service.list_executions(limit=10) == []
+    intents = trade_service.list_trade_intents(limit=10)
+    assert intents[0].state == TradeIntentState.REJECTED.value
+    assert intents[0].decision_reason == "Requested size 0.2 is below broker minimum deal size 1.0 for CS.D.EURUSD.CFD.IP."
+    assert intents[0].details["risk_rejection_layer"] == "broker_constraints"
+    assert intents[0].details["risk_audit_summary"]["min_deal_size"] == 1.0
 
 
 def test_entry_is_blocked_when_market_quote_is_stale(session, broker, fixed_now):
@@ -411,12 +495,13 @@ def test_entry_is_blocked_when_market_quote_is_stale(session, broker, fixed_now)
     finally:
         market_status_service.get_status = original_get_status
 
-    executions = trade_service.list_executions(limit=10)
     assert broker.placed_orders == []
     assert len(trade_service.list_positions()) == 0
-    assert executions[0].status == ExecutionStatus.RISK_REJECTED.value
-    assert executions[0].details["risk_rejection_layer"] == "market_status"
-    assert "stale" in executions[0].reason.lower()
+    assert trade_service.list_executions(limit=10) == []
+    intents = trade_service.list_trade_intents(limit=10)
+    assert intents[0].state == TradeIntentState.REJECTED.value
+    assert intents[0].details["risk_rejection_layer"] == "market_status"
+    assert "stale" in (intents[0].decision_reason or "").lower()
 
 
 def test_entry_is_blocked_when_spread_exceeds_threshold(session, broker, fixed_now):
@@ -451,10 +536,11 @@ def test_entry_is_blocked_when_spread_exceeds_threshold(session, broker, fixed_n
         received_at=fixed_now + timedelta(seconds=1),
     )
 
-    executions = trade_service.list_executions(limit=10)
     assert broker.placed_orders == []
-    assert executions[0].status == ExecutionStatus.RISK_REJECTED.value
-    assert "spread" in executions[0].reason.lower()
+    assert trade_service.list_executions(limit=10) == []
+    intents = trade_service.list_trade_intents(limit=10)
+    assert intents[0].state == TradeIntentState.REJECTED.value
+    assert "spread" in (intents[0].decision_reason or "").lower()
 
 
 def test_execution_rechecks_market_status_before_order_submission(session, broker, fixed_now):

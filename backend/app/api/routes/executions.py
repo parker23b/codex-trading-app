@@ -13,6 +13,7 @@ router = APIRouter()
 
 class ExecutionResponse(BaseModel):
     id: int
+    trade_intent_id: int | None
     strategy_name: str
     instrument: str
     phase: str
@@ -42,6 +43,7 @@ class ExecutionResponse(BaseModel):
 def _serialize_execution(execution: Execution) -> ExecutionResponse:
     return ExecutionResponse(
         id=execution.id or 0,
+        trade_intent_id=execution.trade_intent_id,
         strategy_name=execution.strategy_name,
         instrument=execution.instrument,
         phase=execution.phase,

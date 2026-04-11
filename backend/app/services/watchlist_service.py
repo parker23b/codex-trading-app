@@ -13,8 +13,9 @@ from app.core.instrument_catalog import list_market_instruments
 from app.core.logging import get_logger
 from app.core.runtime import runtime_manager
 from app.db.session import engine
-from app.models.trade import Execution, ExecutionStatus, Position
+from app.models.trade import Position
 from app.models.watchlist import WatchlistEntry, WatchlistStatus, WatchlistTier
+from app.services.trade_service import TradeService
 logger = get_logger(__name__)
 
 
@@ -34,14 +35,6 @@ class Tier2RefreshPlan:
 
 
 class WatchlistService:
-    PENDING_EXECUTION_STATUSES = {
-        ExecutionStatus.SIGNAL_GENERATED.value,
-        ExecutionStatus.RISK_APPROVED.value,
-        ExecutionStatus.CLOSE_REQUESTED.value,
-        ExecutionStatus.ORDER_SUBMITTED.value,
-        ExecutionStatus.ORDER_ACKNOWLEDGED.value,
-        ExecutionStatus.FILL_PARTIAL.value,
-    }
     PIN_PRIORITY = 100.0
     SEED_PRIORITY = 75.0
     RUNTIME_PRIORITY = 50.0
@@ -379,11 +372,19 @@ class WatchlistService:
         for position in positions:
             reasons[position.instrument].add("open_position")
 
-        pending_executions = session.exec(
-            select(Execution).where(Execution.status.in_(tuple(self.PENDING_EXECUTION_STATUSES)))
-        ).all()
-        for execution in pending_executions:
-            reasons[execution.instrument].add("pending_execution")
+        pending_intents = TradeService(session).list_trade_intents(limit=500)
+        for intent in pending_intents:
+            if intent.state in {
+                "PROPOSED",
+                "APPROVED",
+                "SUBMITTED",
+                "ACKNOWLEDGED",
+                "PARTIALLY_FILLED",
+                "CLOSE_REQUESTED",
+                "EXTERNAL_POSITION_ADOPTED",
+                "RECOVERED_POSITION_ATTACHED",
+            }:
+                reasons[intent.instrument].add("pending_trade_intent")
 
         return {
             instrument: ",".join(sorted(reason_set))

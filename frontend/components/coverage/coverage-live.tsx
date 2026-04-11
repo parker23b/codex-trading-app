@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { CompactTable, DataIndicator, Panel, SplitPanel, StatusPill, StatusStrip } from "@/components/console/primitives";
+import { CompactTable, DataIndicator, InspectorDrawer, Panel, SplitPanel, StatusPill, StatusStrip } from "@/components/console/primitives";
 import { getCoverageSummary, getOperationalTelemetry, getSystemOperatingLimits } from "@/lib/api";
 import { formatRelativeDuration } from "@/lib/format";
 import { CoverageSummary, OperationalTelemetry, SystemOperatingLimits } from "@/lib/types";
@@ -35,6 +35,7 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
   const [telemetry, setTelemetry] = useState(initialTelemetry);
   const [operatingLimits, setOperatingLimits] = useState(initialOperatingLimits);
   const [errors, setErrors] = useState(initialErrors);
+  const [allocatorDrawerOpen, setAllocatorDrawerOpen] = useState(false);
 
   useEffect(() => {
     setCoverage(initialCoverage);
@@ -137,7 +138,7 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
       />
 
       <SplitPanel
-        className="layout-coverage"
+        className="layout-coverage items-start"
         left={
           <Panel title="Monitored Universe" subtitle="Primary watch state." priority="primary" tone={blockedReadiness.length ? "warning" : "positive"}>
             <CompactTable
@@ -201,7 +202,17 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
               />
             </Panel>
 
-            <Panel title="Telemetry" priority="passive" tone="inactive" compact>
+            <Panel
+              title="Telemetry"
+              priority="passive"
+              tone="inactive"
+              compact
+              actions={
+                <button type="button" className="console-button console-button--ghost" onClick={() => setAllocatorDrawerOpen(true)}>
+                  Allocator Decisions
+                </button>
+              }
+            >
               <div className="metric-stack">
                 <div className="metric-stack__row">
                   <span>Heartbeat</span>
@@ -229,7 +240,12 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
         }
       />
 
-      <Panel title="Allocator Decisions" priority="passive" tone="inactive" compact>
+      <InspectorDrawer
+        title="Allocator Decisions"
+        subtitle="Recent allocator selections and rejects."
+        open={allocatorDrawerOpen}
+        onClose={() => setAllocatorDrawerOpen(false)}
+      >
         <CompactTable
           dense
           rows={coverage.trade_allocator.recent_decisions.slice(0, 10)}
@@ -243,7 +259,7 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
             { key: "reason", header: "Reason", render: (row) => row.reason_code ?? row.reason ?? "n/a" },
           ]}
         />
-      </Panel>
+      </InspectorDrawer>
     </main>
   );
 }
