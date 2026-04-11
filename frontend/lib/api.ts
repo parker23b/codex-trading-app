@@ -155,13 +155,12 @@ export const EMPTY_SYSTEM_OPERATING_LIMITS: SystemOperatingLimits = {
 };
 
 export const EMPTY_DASHBOARD_SNAPSHOT: DashboardSnapshot = {
-  accountValue: 100000,
-  accountValuePercent: 0,
-  dailyPnl: 0,
-  dailyPnlPercent: 0,
+  dailyPnl: null,
+  dailyPnlPercent: null,
   openRisk: 0,
-  winRate: 0,
-  riskReward: 0,
+  winRate: null,
+  riskReward: null,
+  brokerInfo: null,
   runningStrategies: [],
 };
 

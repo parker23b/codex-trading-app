@@ -158,8 +158,8 @@ export function MarketOverviewDashboard({ initialOverview, initialOverviewError 
         : "positive";
 
   return (
-    <main className="console-page">
-      <StickyToolbar>
+    <main className="console-page console-page--dense">
+      <StickyToolbar className="toolbar-markets">
         <div className="toolbar-group">
               {summaries.map((summary) => (
             <button
@@ -200,6 +200,7 @@ export function MarketOverviewDashboard({ initialOverview, initialOverviewError 
       </StickyToolbar>
 
       <SplitPanel
+        className="layout-markets"
         left={
           <Panel title="Instrument List" priority="secondary" tone="neutral" compact>
             <div className="list-panel">

@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
-  BoardLayout,
   CompactTable,
   DataIndicator,
   ExceptionList,
@@ -79,6 +78,21 @@ function formatTimestamp(value?: string | null) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function renderMetricOrUnavailable(
+  value: string,
+  unavailable: boolean,
+  message: string,
+) {
+  if (!unavailable) {
+    return value;
+  }
+  return (
+    <>
+      -<DataIndicator state="unavailable" message={message} />
+    </>
+  );
 }
 
 export function DashboardLive({
@@ -236,7 +250,6 @@ export function DashboardLive({
   const netExposure = longExposure - shortExposure;
   const largestPositionNotional = exposureRows.length ? Math.max(...exposureRows.map((position) => position.notional)) : 0;
   const concentrationPercent = grossExposure > 0 ? (largestPositionNotional / grossExposure) * 100 : 0;
-  const lastTrade = sortedTrades[0];
   const topExposure = exposureRows.slice().sort((left, right) => right.notional - left.notional)[0];
 
   const manualReviewExecutions = recentExecutions.filter(
@@ -321,84 +334,85 @@ export function DashboardLive({
   return (
     <>
       <main className="console-page console-page--board">
-        <StatusStrip
-          items={[
-            {
-              label: "Autonomy",
-              value: errors.controlPlane ? (
-                <>
-                  -<DataIndicator state="error" message={errors.controlPlane} />
-                </>
-              ) : controlPlane.effective_autonomous_control_enabled ? (
-                "Running"
-              ) : (
-                "Stopped"
-              ),
-              tone: errors.controlPlane ? "inactive" : healthTone,
-              meta: errors.controlPlane ?? `${runningCount} runtimes active`,
-              emphasis: "strong",
-            },
-            {
-              label: "Alerts",
-              value: errors.executions || errors.controlPlane ? "-" : manualReviewExecutions.length + strategyExceptions.length,
-              tone: errors.executions || errors.controlPlane ? "inactive" : manualReviewExecutions.length ? "negative" : strategyExceptions.length ? "warning" : "positive",
-              meta: errors.executions ?? errors.controlPlane ?? (manualReviewExecutions.length ? "intervention likely" : "none urgent"),
-              emphasis: "strong",
-            },
-            {
-              label: "Broker",
-              value: errors.brokerAuth ? (
-                <>
-                  -<DataIndicator state="error" message={errors.brokerAuth} />
-                </>
-              ) : brokerAuth.state === "connected" ? (
-                "Connected"
-              ) : (
-                brokerAuth.label
-              ),
-              tone: errors.brokerAuth
-                ? "inactive"
-                :
-                brokerAuth.state === "connected"
-                  ? "positive"
-                  : brokerAuth.state === "disconnected"
-                    ? "warning"
-                    : "inactive",
-              meta: errors.brokerAuth ?? brokerAuth.detail,
-            },
-            {
-              label: "Stream",
-              value: errors.streamHealth ? (
-                <>
-                  -<DataIndicator state="error" message={errors.streamHealth} />
-                </>
-              ) : streamHealth.connected ? (
-                "Live"
-              ) : streamHealth.enabled ? (
-                "Interrupted"
-              ) : (
-                "Unavailable"
-              ),
-              tone: errors.streamHealth ? "inactive" : streamHealth.connected ? "positive" : streamHealth.enabled ? "negative" : "inactive",
-              meta: errors.streamHealth ?? streamHealth.last_status ?? "no status",
-            },
-            {
-              label: "Coverage",
-              value: errors.coverage ? "-" : `${coverage.streaming.active_instruments.length}/${coverage.streaming.desired_instruments.length}`,
-              tone: errors.coverage ? "inactive" : staleCoverage.length ? "warning" : "neutral",
-              meta: errors.coverage ?? (staleCoverage.length ? `${staleCoverage.length} blocked` : "ready"),
-            },
-            {
-              label: "Open Risk",
-              value: errors.dashboard || errors.operatingLimits ? "-" : formatPercent(dashboard.openRisk),
-              tone: errors.dashboard || errors.operatingLimits ? "inactive" : dashboard.openRisk > operatingLimits.risk.max_open_risk_percent ? "negative" : "neutral",
-              meta: errors.dashboard ?? errors.operatingLimits ?? `limit ${formatPercent(operatingLimits.risk.max_open_risk_percent)}`,
-            },
-          ]}
-        />
+        <section className="dashboard-status-strip">
+          <StatusStrip
+            items={[
+              {
+                label: "Autonomy",
+                value: errors.controlPlane ? (
+                  <>
+                    -<DataIndicator state="error" message={errors.controlPlane} />
+                  </>
+                ) : controlPlane.effective_autonomous_control_enabled ? (
+                  "Running"
+                ) : (
+                  "Stopped"
+                ),
+                tone: errors.controlPlane ? "inactive" : healthTone,
+                meta: errors.controlPlane ?? `${runningCount} runtimes active`,
+                emphasis: "strong",
+              },
+              {
+                label: "Alerts",
+                value: errors.executions || errors.controlPlane ? "-" : manualReviewExecutions.length + strategyExceptions.length,
+                tone: errors.executions || errors.controlPlane ? "inactive" : manualReviewExecutions.length ? "negative" : strategyExceptions.length ? "warning" : "positive",
+                meta: errors.executions ?? errors.controlPlane ?? (manualReviewExecutions.length ? "intervention likely" : "none urgent"),
+                emphasis: "strong",
+              },
+              {
+                label: "Broker",
+                value: errors.brokerAuth ? (
+                  <>
+                    -<DataIndicator state="error" message={errors.brokerAuth} />
+                  </>
+                ) : brokerAuth.state === "connected" ? (
+                  "Connected"
+                ) : (
+                  brokerAuth.label
+                ),
+                tone: errors.brokerAuth
+                  ? "inactive"
+                  : brokerAuth.state === "connected"
+                    ? "positive"
+                    : brokerAuth.state === "disconnected"
+                      ? "warning"
+                      : "inactive",
+                meta: errors.brokerAuth ?? brokerAuth.detail,
+              },
+              {
+                label: "Stream",
+                value: errors.streamHealth ? (
+                  <>
+                    -<DataIndicator state="error" message={errors.streamHealth} />
+                  </>
+                ) : streamHealth.connected ? (
+                  "Live"
+                ) : streamHealth.enabled ? (
+                  "Interrupted"
+                ) : (
+                  "Unavailable"
+                ),
+                tone: errors.streamHealth ? "inactive" : streamHealth.connected ? "positive" : streamHealth.enabled ? "negative" : "inactive",
+                meta: errors.streamHealth ?? streamHealth.last_status ?? "no status",
+              },
+              {
+                label: "Coverage",
+                value: errors.coverage ? "-" : `${coverage.streaming.active_instruments.length}/${coverage.streaming.desired_instruments.length}`,
+                tone: errors.coverage ? "inactive" : staleCoverage.length ? "warning" : "neutral",
+                meta: errors.coverage ?? (staleCoverage.length ? `${staleCoverage.length} blocked` : "ready"),
+              },
+              {
+                label: "Open Risk",
+                value: errors.dashboard || errors.operatingLimits ? "-" : formatPercent(dashboard.openRisk),
+                tone: errors.dashboard || errors.operatingLimits ? "inactive" : dashboard.openRisk > operatingLimits.risk.max_open_risk_percent ? "negative" : "neutral",
+                meta: errors.dashboard ?? errors.operatingLimits ?? `limit ${formatPercent(operatingLimits.risk.max_open_risk_percent)}`,
+              },
+            ]}
+          />
+        </section>
 
-        <BoardLayout
-          left={
+        <section className="dashboard-main-layout">
+          <div className="dashboard-main-layout__sidebar">
             <ExceptionList
               title="Exceptions"
               subtitle="Anything here deserves attention before normal monitoring."
@@ -410,108 +424,193 @@ export function DashboardLive({
               }
               priority="critical"
             />
-          }
-          center={
-            <>
-              <Panel title="System Health" priority="primary" tone={healthTone}>
-                <div className="summary-bar">
-                  <div className="summary-bar__item">
-                    <span>Account</span>
-                    <strong>{errors.dashboard ? "-" : formatCurrency(dashboard.accountValue)}</strong>
-                    <em>{errors.dashboard ? errors.dashboard : formatSignedPercent(dashboard.accountValuePercent)}</em>
-                  </div>
-                  <div className="summary-bar__item">
-                    <span>Daily PnL</span>
-                    <strong>{errors.dashboard ? "-" : formatSignedCurrency(dashboard.dailyPnl)}</strong>
-                    <em>{errors.dashboard ? "unavailable" : formatSignedPercent(dashboard.dailyPnlPercent)}</em>
-                  </div>
-                  <div className="summary-bar__item">
-                    <span>Win / R:R</span>
-                    <strong>{errors.dashboard ? "-" : `${formatPercent(dashboard.winRate)} / ${dashboard.riskReward.toFixed(2)}`}</strong>
-                    <em>{errors.dashboard ? "KPI feed unavailable" : "recent closed trades"}</em>
-                  </div>
-                </div>
-                <div className="console-inline-actions">
-                  <StatusPill
-                    label={errors.controlPlane ? "autonomy unknown" : controlPlane.effective_autonomous_control_enabled ? "autonomy armed" : "autonomy stopped"}
-                    tone={errors.controlPlane ? "inactive" : controlPlane.effective_autonomous_control_enabled ? "positive" : "negative"}
-                  />
-                  <StatusPill
-                    label={errors.streamHealth ? "market data unknown" : streamHealth.connected ? "market data live" : "feed degraded"}
-                    tone={errors.streamHealth ? "inactive" : streamHealth.connected ? "positive" : "warning"}
-                  />
-                  <StatusPill
-                    label={errors.brokerAuth ? "broker unknown" : brokerAuth.state === "connected" ? "broker ready" : "broker unavailable"}
-                    tone={errors.brokerAuth ? "inactive" : brokerAuth.state === "connected" ? "positive" : "inactive"}
-                  />
-                </div>
-              </Panel>
 
-              <Panel title="Runtime Summary" priority="secondary" tone={degradedCount ? "warning" : "neutral"} compact>
-                <div className="metric-matrix">
-                  <div className="metric-matrix__item">
-                    <span>Running</span>
-                    <strong>{errors.dashboard ? "-" : runningCount}</strong>
-                    <em>{errors.dashboard ? "runtime summary unavailable" : "active runtimes"}</em>
-                  </div>
-                  <div className="metric-matrix__item">
-                    <span>Degraded</span>
-                    <strong>{errors.controlPlane ? "-" : degradedCount}</strong>
-                    <em>{errors.controlPlane ? "control plane unavailable" : "families mismatched"}</em>
-                  </div>
-                  <div className="metric-matrix__item">
-                    <span>Paused</span>
-                    <strong>{errors.controlPlane || errors.dashboard ? "-" : pausedCount}</strong>
-                    <em>{errors.controlPlane || errors.dashboard ? "runtime summary unavailable" : "idle or stopped"}</em>
-                  </div>
-                  <div className="metric-matrix__item">
-                    <span>Last trade</span>
-                    <strong>{errors.trades ? "-" : lastTrade ? formatTimestamp(lastTrade.close_time) : "none"}</strong>
-                    <em>{errors.trades ? errors.trades : lastTrade ? formatInstrumentLabel(lastTrade.instrument) : "no closes yet"}</em>
-                  </div>
-                </div>
-              </Panel>
-            </>
-          }
-          right={
-            <>
-              <Panel title="Exposure" priority="secondary" tone={concentrationPercent > 45 ? "warning" : "neutral"} compact>
-                <div className="summary-cluster">
-                  <div className="summary-cluster__row">
-                    <span>Gross</span>
-                    <strong>{errors.positions ? "-" : formatCurrency(grossExposure)}</strong>
-                  </div>
-                  <div className="summary-cluster__row">
-                    <span>Bias</span>
-                    <strong>{errors.positions ? "-" : `${netExposure >= 0 ? "Long" : "Short"} ${formatCurrency(Math.abs(netExposure))}`}</strong>
-                  </div>
-                  <div className="summary-cluster__row">
-                    <span>Concentration</span>
-                    <strong>{errors.positions ? "-" : formatPercent(concentrationPercent)}</strong>
-                  </div>
-                  <div className="summary-cluster__row">
-                    <span>Top line</span>
-                    <strong>{errors.positions ? "-" : topExposure ? formatInstrumentLabel(topExposure.instrument) : "none"}</strong>
-                  </div>
-                </div>
-              </Panel>
+            <Panel title="Inspect" priority="passive" tone="inactive" compact>
+              <div className="console-inline-actions">
+                <button type="button" className="console-button console-button--ghost" onClick={() => setInspectorMode("positions")}>
+                  Positions
+                </button>
+                <button type="button" className="console-button console-button--ghost" onClick={() => setInspectorMode("trades")}>
+                  Trades
+                </button>
+                <button type="button" className="console-button console-button--ghost" onClick={() => setInspectorMode("activity")}>
+                  Activity
+                </button>
+              </div>
+            </Panel>
+          </div>
 
-              <Panel title="Inspect" priority="passive" tone="inactive" compact>
-                <div className="console-inline-actions">
-                  <button type="button" className="console-button console-button--ghost" onClick={() => setInspectorMode("positions")}>
-                    Positions
-                  </button>
-                  <button type="button" className="console-button console-button--ghost" onClick={() => setInspectorMode("trades")}>
-                    Trades
-                  </button>
-                  <button type="button" className="console-button console-button--ghost" onClick={() => setInspectorMode("activity")}>
-                    Activity
-                  </button>
-                </div>
-              </Panel>
-            </>
-          }
-        />
+          <div className="dashboard-main-layout__content">
+            <Panel title="Operational Overview" priority="primary" tone={healthTone}>
+              <div className="dashboard-overview-grid">
+                <section className="dashboard-overview-section">
+                  <div className="dashboard-overview-section__header">
+                    <span className="console-kicker">System Health</span>
+                    <div className="console-inline-actions">
+                      <StatusPill
+                        label={errors.controlPlane ? "autonomy unknown" : controlPlane.effective_autonomous_control_enabled ? "autonomy armed" : "autonomy stopped"}
+                        tone={errors.controlPlane ? "inactive" : controlPlane.effective_autonomous_control_enabled ? "positive" : "negative"}
+                      />
+                      <StatusPill
+                        label={errors.streamHealth ? "market data unknown" : streamHealth.connected ? "market data live" : "feed degraded"}
+                        tone={errors.streamHealth ? "inactive" : streamHealth.connected ? "positive" : "warning"}
+                      />
+                      <StatusPill
+                        label={errors.brokerAuth ? "broker unknown" : brokerAuth.state === "connected" ? "broker ready" : "broker unavailable"}
+                        tone={errors.brokerAuth ? "inactive" : brokerAuth.state === "connected" ? "positive" : "inactive"}
+                      />
+                    </div>
+                  </div>
+                  <div className="summary-bar">
+                    <div className="summary-bar__item">
+                      <span>System P/L</span>
+                      <strong>
+                        {errors.dashboard
+                          ? "-"
+                          : dashboard.dailyPnl != null
+                            ? formatSignedCurrency(dashboard.dailyPnl)
+                            : renderMetricOrUnavailable("-", true, "System daily P/L is unavailable.")}
+                      </strong>
+                      <em>
+                        {errors.dashboard
+                          ? errors.dashboard
+                          : dashboard.dailyPnlPercent != null
+                            ? formatSignedPercent(dashboard.dailyPnlPercent)
+                            : "derived from local trades and open positions"}
+                      </em>
+                    </div>
+                    <div className="summary-bar__item">
+                      <span>Win Rate</span>
+                      <strong>
+                        {errors.dashboard
+                          ? "-"
+                          : dashboard.winRate != null
+                            ? formatPercent(dashboard.winRate)
+                            : renderMetricOrUnavailable("-", true, "Win rate is unavailable.")}
+                      </strong>
+                      <em>{errors.dashboard ? "unavailable" : "recent closed trades"}</em>
+                    </div>
+                    <div className="summary-bar__item">
+                      <span>Risk / Reward</span>
+                      <strong>
+                        {errors.dashboard
+                          ? "-"
+                          : dashboard.riskReward != null
+                            ? `${dashboard.riskReward.toFixed(2)}R`
+                            : renderMetricOrUnavailable("-", true, "Risk / reward is unavailable.")}
+                      </strong>
+                      <em>{errors.dashboard ? "KPI feed unavailable" : "recent closed trades"}</em>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="dashboard-overview-section">
+                  <div className="dashboard-overview-section__header">
+                    <span className="console-kicker">Broker Info</span>
+                  </div>
+                  <div className="metric-matrix">
+                    <div className="metric-matrix__item">
+                      <span>Equity</span>
+                      <strong>
+                        {errors.dashboard
+                          ? "-"
+                          : dashboard.brokerInfo
+                            ? formatCurrency(dashboard.brokerInfo.equity)
+                            : renderMetricOrUnavailable("-", true, "Broker equity is unavailable.")}
+                      </strong>
+                      <em>{dashboard.brokerInfo ? `${dashboard.brokerInfo.accountType} account` : "broker metrics unavailable"}</em>
+                    </div>
+                    <div className="metric-matrix__item">
+                      <span>Available</span>
+                      <strong>
+                        {errors.dashboard
+                          ? "-"
+                          : dashboard.brokerInfo
+                            ? formatCurrency(dashboard.brokerInfo.available)
+                            : renderMetricOrUnavailable("-", true, "Broker available funds are unavailable.")}
+                      </strong>
+                      <em>{dashboard.brokerInfo ? "available to deal" : "broker metrics unavailable"}</em>
+                    </div>
+                    <div className="metric-matrix__item">
+                      <span>Balance</span>
+                      <strong>
+                        {errors.dashboard
+                          ? "-"
+                          : dashboard.brokerInfo
+                            ? formatCurrency(dashboard.brokerInfo.balance)
+                            : renderMetricOrUnavailable("-", true, "Broker balance is unavailable.")}
+                      </strong>
+                      <em>{dashboard.brokerInfo ? "cash balance" : "broker metrics unavailable"}</em>
+                    </div>
+                    <div className="metric-matrix__item">
+                      <span>Account Id</span>
+                      <strong>
+                        {errors.dashboard
+                          ? "-"
+                          : dashboard.brokerInfo
+                            ? dashboard.brokerInfo.accountId
+                            : renderMetricOrUnavailable("-", true, "Broker account id is unavailable.")}
+                      </strong>
+                      <em>{dashboard.brokerInfo ? formatSignedCurrency(dashboard.brokerInfo.profitLoss) : "broker metrics unavailable"}</em>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="dashboard-overview-section">
+                  <div className="dashboard-overview-section__header">
+                    <span className="console-kicker">Runtime Summary</span>
+                  </div>
+                  <div className="metric-matrix">
+                    <div className="metric-matrix__item">
+                      <span>Running</span>
+                      <strong>{errors.dashboard ? "-" : runningCount}</strong>
+                      <em>{errors.dashboard ? "runtime summary unavailable" : "active runtimes"}</em>
+                    </div>
+                    <div className="metric-matrix__item">
+                      <span>Degraded</span>
+                      <strong>{errors.controlPlane ? "-" : degradedCount}</strong>
+                      <em>{errors.controlPlane ? "control plane unavailable" : "families mismatched"}</em>
+                    </div>
+                    <div className="metric-matrix__item">
+                      <span>Paused</span>
+                      <strong>{errors.controlPlane || errors.dashboard ? "-" : pausedCount}</strong>
+                      <em>{errors.controlPlane || errors.dashboard ? "runtime summary unavailable" : "idle or stopped"}</em>
+                    </div>
+                    <div className="metric-matrix__item">
+                      <span>Last trade</span>
+                      <strong>{errors.trades ? "-" : sortedTrades[0] ? formatTimestamp(sortedTrades[0].close_time) : "none"}</strong>
+                      <em>{errors.trades ? errors.trades : sortedTrades[0] ? formatInstrumentLabel(sortedTrades[0].instrument) : "no closes yet"}</em>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="dashboard-overview-section">
+                  <div className="dashboard-overview-section__header">
+                    <span className="console-kicker">Exposure</span>
+                  </div>
+                  <div className="summary-cluster">
+                    <div className="summary-cluster__row">
+                      <span>Gross</span>
+                      <strong>{errors.positions ? "-" : formatCurrency(grossExposure)}</strong>
+                    </div>
+                    <div className="summary-cluster__row">
+                      <span>Bias</span>
+                      <strong>{errors.positions ? "-" : `${netExposure >= 0 ? "Long" : "Short"} ${formatCurrency(Math.abs(netExposure))}`}</strong>
+                    </div>
+                    <div className="summary-cluster__row">
+                      <span>Concentration</span>
+                      <strong>{errors.positions ? "-" : formatPercent(concentrationPercent)}</strong>
+                    </div>
+                    <div className="summary-cluster__row">
+                      <span>Top line</span>
+                      <strong>{errors.positions ? "-" : topExposure ? formatInstrumentLabel(topExposure.instrument) : "none"}</strong>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </Panel>
+          </div>
+        </section>
       </main>
 
       <InspectorDrawer

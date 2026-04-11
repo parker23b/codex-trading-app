@@ -96,8 +96,8 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
   const selectedEvent = events[0] ?? null;
 
   return (
-    <main className="console-page">
-      <StickyToolbar>
+    <main className="console-page console-page--dense">
+      <StickyToolbar className="toolbar-events">
         <div className="toolbar-group">
           <Link href={makeTabHref(resolvedParams, "all")} className={`console-chip${tab === "all" ? " is-active" : ""}`}>
             All
@@ -112,6 +112,7 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
       </StickyToolbar>
 
       <SplitPanel
+        className="layout-events"
         left={
           <Panel title="Filters" priority="passive" tone="inactive" compact>
             <form className="console-form-grid" method="get">

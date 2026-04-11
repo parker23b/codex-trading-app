@@ -80,8 +80,8 @@ export function AppNav() {
           <span />
         </div>
         <div>
-          <div className="top-nav__product">Investmate Ops</div>
-          <div className="top-nav__product-subtitle">Autonomous system operator console</div>
+          <div className="top-nav__product">Investmate</div>
+          <div className="top-nav__product-subtitle">Smart Investing. Made Simple.</div>
         </div>
       </div>
 

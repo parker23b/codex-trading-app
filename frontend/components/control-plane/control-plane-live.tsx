@@ -138,7 +138,7 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
   };
 
   return (
-    <main className="console-page">
+    <main className="console-page console-page--dense">
       <StatusStrip
         items={[
           {
@@ -176,6 +176,7 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
       />
 
       <SplitPanel
+        className="layout-control-plane"
         left={
           <Panel
             title="Intervention Queue"

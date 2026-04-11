@@ -13,7 +13,7 @@ from app.services.trade_service import TradeService
 
 
 class DashboardService:
-    """Aggregates frontend KPIs from persisted trades and open positions."""
+    """Aggregates dashboard KPIs, keeping account metrics broker-sourced only."""
 
     def __init__(self, trade_service: TradeService):
         self.trade_service = trade_service
@@ -23,42 +23,30 @@ class DashboardService:
         trades = self.trade_service.list_trades()
         positions = self.trade_service.list_positions()
         recent_trades = trades[: self.settings.dashboard_recent_trade_window]
-
-        closed_pnl = sum(trade.pnl for trade in trades)
-        account_value = self.settings.starting_account_value + closed_pnl + sum(position.unrealized_pnl or 0.0 for position in positions)
-        daily_pnl = self._daily_pnl(trades, positions)
-        account_value_percent = ((account_value - self.settings.starting_account_value) / self.settings.starting_account_value) * 100
+        system_daily_pnl = self._daily_pnl(trades, positions)
+        broker_info: dict[str, object] | None = None
 
         try:
             account_summary = get_broker().get_account_summary()
-            account_value = account_summary.equity
-            daily_pnl = account_summary.profit_loss
-            baseline = account_summary.equity - account_summary.profit_loss
-            daily_pnl_percent = (account_summary.profit_loss / baseline) * 100 if baseline else 0.0
-        except IGBrokerError:
-            daily_pnl_percent = (daily_pnl / self.settings.starting_account_value) * 100
-        else:
-            account_value_percent = ((account_summary.equity - self.settings.starting_account_value) / self.settings.starting_account_value) * 100
-            return {
-                "accountValue": round(account_value, 2),
-                "accountValuePercent": round(account_value_percent, 2),
-                "dailyPnl": round(daily_pnl, 2),
-                "dailyPnlPercent": round(daily_pnl_percent, 2),
-                "openRisk": round(sum(position.risk_percent or 0.0 for position in positions), 2),
-                "winRate": round(self._win_rate(recent_trades), 2),
-                "riskReward": round(self._risk_reward(recent_trades), 2),
-                "runningStrategies": self._running_strategies(),
+            broker_info = {
+                "accountId": account_summary.account_id,
+                "accountType": account_summary.account_type.value,
+                "balance": round(account_summary.balance, 2),
+                "available": round(account_summary.available, 2),
+                "equity": round(account_summary.equity, 2),
+                "profitLoss": round(account_summary.profit_loss, 2),
             }
+        except IGBrokerError:
+            pass
 
         return {
-            "accountValue": round(account_value, 2),
-            "accountValuePercent": round(account_value_percent, 2),
-            "dailyPnl": round(daily_pnl, 2),
-            "dailyPnlPercent": round((daily_pnl / self.settings.starting_account_value) * 100, 2),
+            "dailyPnl": round(system_daily_pnl, 2),
+            "dailyPnlPercent": None,
             "openRisk": round(sum(position.risk_percent or 0.0 for position in positions), 2),
             "winRate": round(self._win_rate(recent_trades), 2),
             "riskReward": round(self._risk_reward(recent_trades), 2),
             "runningStrategies": self._running_strategies(),
+            "brokerInfo": broker_info,
         }
 
     def build_equity_curve(self) -> list[dict[str, float | str]]:

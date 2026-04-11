@@ -207,7 +207,7 @@ export function StrategyLive({
   };
 
   return (
-    <main className="console-page">
+    <main className="console-page console-page--dense">
       <StatusStrip
         items={[
           { label: "Strategies", value: strategyCountValue, tone: errors.strategies ? "inactive" : "neutral", meta: errors.strategies ?? undefined },
@@ -239,6 +239,7 @@ export function StrategyLive({
       />
 
       <SplitPanel
+        className="layout-strategies"
         left={
           <Panel title="Strategy Matrix" priority="primary" tone="neutral">
             <CompactTable

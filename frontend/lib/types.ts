@@ -434,13 +434,19 @@ export type DomainEvent = {
 };
 
 export type DashboardSnapshot = {
-  accountValue: number;
-  accountValuePercent: number;
-  dailyPnl: number;
-  dailyPnlPercent: number;
+  dailyPnl?: number | null;
+  dailyPnlPercent?: number | null;
   openRisk: number;
-  winRate: number;
-  riskReward: number;
+  winRate?: number | null;
+  riskReward?: number | null;
+  brokerInfo?: {
+    accountId: string;
+    accountType: "DEMO" | "LIVE";
+    balance: number;
+    available: number;
+    equity: number;
+    profitLoss: number;
+  } | null;
   runningStrategies?: {
     name: string;
     instrument: string;

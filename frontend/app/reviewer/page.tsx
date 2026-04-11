@@ -30,7 +30,7 @@ export default async function ReviewerPage() {
   const leadTone = leadObservation?.severity === "critical" ? "negative" : leadObservation?.severity === "warning" ? "warning" : "neutral";
 
   return (
-    <main className="console-page">
+    <main className="console-page console-page--dense">
       <StatusStrip
         items={[
           { label: "Review", value: `#${review.metadata.review_id ?? "pending"}`, tone: "neutral" },
@@ -55,6 +55,7 @@ export default async function ReviewerPage() {
       />
 
       <SplitPanel
+        className="layout-reviewer"
         left={
           <Panel title="History" priority="passive" tone="inactive" compact>
             <CompactTable

@@ -89,7 +89,7 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
   });
 
   return (
-    <main className="console-page">
+    <main className="console-page console-page--dense">
       <StatusStrip
         items={[
           {
@@ -137,6 +137,7 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
       />
 
       <SplitPanel
+        className="layout-coverage"
         left={
           <Panel title="Monitored Universe" subtitle="Primary watch state." priority="primary" tone={blockedReadiness.length ? "warning" : "positive"}>
             <CompactTable

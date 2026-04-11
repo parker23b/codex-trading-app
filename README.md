@@ -1,139 +1,99 @@
 # Investmate Trading Platform
 
-Monorepo for a personal algorithmic trading platform with:
+Personal algorithmic trading monorepo with a FastAPI backend, a Next.js operator console, IG broker integration, a governed autonomous control plane, bounded market-data coverage, runtime persistence and recovery, and an AI reviewer for operational summaries and audit history.
 
-- a FastAPI backend for strategy runtime, broker access, market snapshots, and portfolio data
-- a Next.js frontend for dashboard, market readiness, and strategy controls
-- a simulation mode that makes the product usable without live broker credentials
+## Short Version
 
-The codebase is structured so strategy logic stays isolated from HTTP, persistence, and broker-specific code. That separation is the main architectural idea in this repo.
+This system is an operator console for supervised autonomous trading.
 
-## What The App Does
+- Strategy code generates signals.
+- A control plane decides which strategy families are allowed to run, where they should be deployed, and which approved profile they should use.
+- A coverage layer decides which instruments deserve scarce streaming attention.
+- A trade allocator and risk controls decide which signals are allowed to take risk.
+- The broker adapter handles market reads and order execution.
+- The frontend is primarily a live operations UI for supervision, investigation, review, and intervention.
 
-Today the product exposes four main operator workflows:
+The platform is best understood as:
 
-1. Dashboard
-   View account KPIs, equity trend, open positions, risk concentration, and recent trades.
-2. Markets
-   Inspect market categories such as forex or indices, see whether instruments are tradable, and understand which instruments are active or strategy-compatible.
-3. Strategies
-   Inspect strategy families, review runtime and deployment state, and use manual runtime overrides when supervised intervention is needed.
-4. AI Reviewer
-   Inspect a read-only operator summary, deterministic review observations, warnings, provenance, and persisted review history for audit follow-up.
+`governed autonomy -> bounded market coverage -> risk-filtered execution -> broker reconciliation -> operator supervision`
 
-There are two distinct operating modes:
+## What The System Does
 
-- `SIMULATION_MODE=true`
-  The backend generates synthetic prices, starts default runtimes, and persists trades and positions locally.
-- `SIMULATION_MODE=false`
-  The backend authenticates against IG, polls market data for running strategies, and reconciles local state against broker-truth positions.
+The current app exposes these main operator surfaces:
+
+1. Operate
+   Dashboard for PnL, open risk, executions, positions, broker state, stream health, coverage summary, and control-plane summary.
+2. Control Plane
+   Governance, autonomous-control state, deployment alignment, and family-level deployment detail.
+3. Coverage
+   Tier 1 streaming coverage, Tier 2 refresh activity, promotion requests, allocator output, and operating limits.
+4. Investigate
+   Market-category overview for deployability, tradability, and strategy fit.
+5. Events
+   Domain-event timeline with filters for operational, risk, reconciliation, and health events.
+6. AI Reviewer
+   Deterministic operator summary plus persisted review history, with optional future LLM augmentation.
+7. Strategies
+   Strategy registry, deployment/runtime state, warnings, executions, and manual runtime start or stop actions.
+
+## Overall Architecture
+
+The codebase is organized around a few boundaries:
+
+- Strategies are pure trading or screening logic.
+- The trading engine connects strategy decisions to broker actions.
+- Services own orchestration, persistence, governance, recovery, reconciliation, and derived summaries.
+- Routes stay thin and expose service results over HTTP.
+- Broker-specific behavior stays behind the normalized broker interface.
+
+High-level flow:
+
+```text
+Frontend operator console
+  -> FastAPI routes
+    -> application services
+      -> runtime manager / control plane / coverage allocator / trade allocator
+        -> trading engine
+          -> strategies + broker adapter
+            -> SQLModel persistence + broker state
+```
 
 ## Autonomous Operating Model
 
-The platform is designed around a governed autonomous control plane rather than a pure manual "pick a strategy and instrument" workflow.
+The product is built around supervised autonomy rather than a purely manual "pick a strategy and launch it" workflow.
 
-The intended flow is:
+The intended control flow is:
 
-1. Governance boundaries are operator-owned.
-2. Deployment, market assignment, profile selection, and runtime activation are system-owned.
-3. Coverage allocation decides what deserves scarce live market-data attention.
-4. Trade allocation decides which approved signals deserve capital and risk.
-5. Execution only acts on deployments and signals that survived those upstream control layers.
+1. Governance defines what each strategy family is allowed to do.
+2. Operator controls decide whether global autonomous control is enabled.
+3. The deployment manager selects approved instruments and profiles for governed families.
+4. Coverage allocation decides which instruments receive scarce Tier 1 streaming capacity.
+5. Price updates and screening refreshes create candidate opportunities.
+6. Risk controls and the trade allocator decide which signals deserve capital.
+7. The execution path places or simulates orders through the broker adapter.
+8. Reconciliation and recovery keep local state aligned with broker truth.
 
-### Control Plane Structure
+### Control Plane Layers
 
 - Governance layer
-  Defines approved strategy families, approved asset classes or instruments, approved parameter profiles, hard risk boundaries, and emergency controls.
+  Family approvals, asset-class limits, approved instruments, approved profiles, emergency stop, and concurrency limits.
+- Operator control layer
+  Global autonomous-control enablement plus temporary override state and reason.
 - Strategy deployment manager
-  Decides which governed strategy family should be deployed, on which governed instrument, with which approved profile, and whether that deployment should be `AUTO_DEPLOYED`, `AUTO_PAUSED`, `DEGRADED`, `BLOCKED`, or `EMERGENCY_STOPPED`.
-- Regime and suitability engine
-  Scores candidate instruments using market status, tradability, spread quality, session validity, and operational health.
+  Chooses deployment state such as `AUTO_DEPLOYED`, `AUTO_PAUSED`, `DEGRADED`, `BLOCKED`, or `EMERGENCY_STOPPED`.
 - Coverage allocator
-  Owns the bounded IG live watchlist and promotion or demotion of instruments into Tier 1 streaming.
+  Manages bounded Tier 1 streaming slots and Tier 2 promotion flow.
 - Trade allocator
-  Filters competing signals, suppresses duplicates, resolves conflicts, and decides which opportunities actually deserve risk.
+  Filters competing signals and limits simultaneous risk concentration.
 
-### Default Autonomy Posture
+### Current Operator Posture
 
-The system now defaults toward allowed autonomy unless explicitly disabled.
+The app currently defaults toward allowed autonomy unless explicitly disabled.
 
-- Global autonomy is enabled by default.
-- Newly seeded strategy family governance defaults to `autonomous_operation_allowed=true`.
-- The operator or controller can still explicitly disable global autonomy or disallow autonomous deployment for a specific family.
-- Emergency stop remains stronger than the autonomy defaults.
-
-This means the platform should be understood as "autonomous unless governed otherwise," not "manual unless manually enabled."
-
-### Current User Flow For Autonomous Trading
-
-The current autonomous user flow is:
-
-1. Start the backend and frontend.
-2. Open the Control Plane page.
-3. Verify global autonomy is enabled.
-4. Verify one or more strategy families are allowed for autonomous deployment.
-5. Let the control plane reconcile continuously.
-6. Monitor whether families are `AUTO_DEPLOYED`, `AUTO_PAUSED`, `DEGRADED`, `BLOCKED`, or `EMERGENCY_STOPPED`.
-
-Once those conditions are satisfied, the intended operator workflow is mostly "run the app and supervise," not "manually assign strategies to instruments every day."
-
-### Health States In The Autonomous Model
-
-The system health model distinguishes between an idle platform and a broken one:
-
-- `idle`
-  No live operational demand exists and autonomy is not currently armed.
-- `armed`
-  Autonomy is enabled, but no deployment is currently live yet.
-- `ok`
-  Live demand exists and broker or stream prerequisites are healthy.
-- `degraded`
-  Live demand exists, but stale prices, order failures, or similar operational issues are present.
-- `critical`
-  Live demand exists, but core prerequisites such as broker connectivity, stream connectivity, or fresh price updates are missing.
-
-This prevents the UI from calling the system broken merely because it is currently unarmed or intentionally idle.
-
-### Manual Runtime Controls
-
-The `Start Runtime` control on the Strategies page is not the primary autonomous trading workflow.
-
-Its current purpose is:
-
-- manual override
-- supervised testing
-- smoke runs
-- debugging a specific strategy-family and instrument combination
-
-It starts a `MANUAL` runtime directly and records an operator action event. That path exists for intervention and diagnostics, but the intended autonomous path is through the control plane, not through day-to-day manual runtime launching.
-
-## State Ownership
-
-The backend now treats state ownership as a first-class boundary:
-
-- Broker is the source of truth for actual open positions and confirmed closes.
-- Local database is the source of truth for app metadata, runtime assignments, analytics overlays, historical trades, and reconciliation audit events.
-- Runtime memory is temporary strategy computation state only. It can cache a current position reference, but it is not authoritative on whether exposure really exists at the broker.
-
-That boundary maps to the current tables like this:
-
-- `position`
-  Stores broker-confirmed open exposure plus local metadata such as `risk_percent`, `reason`, and `manual_override`. The broker-owned fields are `broker_reference`, size, direction, open/close timestamps, and sync markers like `broker_sync_status`.
-- `trade`
-  Stores closed trades after a broker close has been confirmed by the execution path.
-- `execution`
-  Stores the execution lifecycle for both entry and close attempts, including signal generation, layered risk approval or rejection, order submission, acknowledgement, fill progress, confirmed open or close, and failure or manual-review states. Risk outcomes are written into `details` so every rejection stays auditable.
-- `strategyruntimestate`
-  Stores runtime assignment, recovery status, cached prices, and serialized strategy state. It does not own broker exposure.
-- `reconciliationevent`
-  Stores an audit trail of broker/local drift detection and recovery actions.
-- `generatedreviewrecord`
-  Stores persisted AI Reviewer outputs, including structured facts, ranked derived observations, possible contributors, warnings, optional AI explanation metadata, and raw provenance fields for audit/history use.
-
-Two important current limits are worth calling out explicitly:
-
-- The broker adapters still resolve most demo flows synchronously, so many executions will move through multiple lifecycle states in a single service call.
-- Partial fills, stale quotes, rejection reasons, and manual-review cases now have a place in the model, but richer broker-specific recovery policies still need to be implemented adapter by adapter.
+- Global autonomous control is enabled by default.
+- Strategy governance can still disallow autonomous operation per family.
+- Emergency stop still overrides the autonomy default.
+- Manual runtime controls remain available for supervised intervention, smoke runs, and debugging.
 
 ## Repository Layout
 
@@ -141,46 +101,73 @@ Two important current limits are worth calling out explicitly:
 backend/
   app/
     api/
-      router.py                # Top-level API router
-      routes/                  # HTTP endpoints
+      router.py
+      routes/
     core/
-      broker.py                # Shared broker contract and domain dataclasses
-      broker_factory.py        # Concrete broker selection
-      config.py                # Environment-driven settings
-      ig_broker.py             # IG adapter
-      instrument_catalog.py    # Supported instruments and metadata
-      runtime.py               # In-memory runtime manager
-      trading_engine.py        # Strategy-to-broker coordinator
-      websocket_manager.py     # Stub for future streaming
-      BROKER_INTEGRATION.md    # Adapter design notes
+      broker.py
+      broker_factory.py
+      config.py
+      ig_broker.py
+      instrument_catalog.py
+      runtime.py
+      trading_engine.py
+      websocket_manager.py
+      BROKER_INTEGRATION.md
     db/
-      session.py               # SQLModel engine and sessions
-      init_db.py               # Table creation
+      init_db.py
+      session.py
     models/
-      trade.py                 # Trade and Position tables
-      review.py                # Persisted generated review records
-    reviewer/                  # Deterministic review layer and prompt scaffolding
-    services/                  # Application service layer
-    strategies/                # Pure strategy implementations and registry
-    main.py                    # FastAPI app entrypoint
+      domain_event.py
+      operator_control.py
+      promotion_request.py
+      review.py
+      runtime.py
+      strategy_deployment.py
+      strategy_governance.py
+      trade.py
+      watchlist.py
+    reviewer/
+    services/
+    strategies/
+    main.py
   pyproject.toml
   .env.example
-  trading_platform.db          # Local SQLite DB used by default
 
 frontend/
   app/
-    layout.tsx                 # Shell, nav, theme bootstrapping
-    page.tsx                   # Dashboard page
-    markets/page.tsx           # Markets page
-    strategies/page.tsx        # Strategies page
-  components/                  # Dashboard, market, strategy, and shared UI
+    page.tsx
+    control-plane/page.tsx
+    coverage/page.tsx
+    events/page.tsx
+    markets/page.tsx
+    reviewer/page.tsx
+    strategies/page.tsx
+    layout.tsx
+  components/
   lib/
-    api.ts                     # Backend client and dev fallback behavior
-    types.ts                   # Frontend domain types
-    format.ts                  # Display formatters
+    api.ts
+    types.ts
+    format.ts
   package.json
   .env.example
 ```
+
+## Backend Startup
+
+On startup, [backend/app/main.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/main.py) currently:
+
+1. configures logging
+2. initializes database tables
+3. runs runtime recovery against persisted runtime state
+4. starts the market-data loop
+5. starts the system health heartbeat loop
+6. starts the IG streaming loop if streaming is enabled
+
+This means the backend is stateful on boot:
+
+- it restores persisted runtime state where possible
+- it immediately begins health tracking
+- it may start polling or streaming based on configuration
 
 ## Quick Start
 
@@ -195,22 +182,25 @@ cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
-Default backend behavior:
+Default backend behavior from the current code and env example:
 
 - uses SQLite at `backend/trading_platform.db`
 - creates tables automatically on startup
-- runs in simulation mode
-- boots with seeded strategy runtimes and synthetic market movement
+- uses the IG broker adapter in `DEMO` mode
+- keeps `IG_TRADING_ENABLED=false` by default
+- enables IG streaming by default
+- keeps AI reviewer LLM augmentation disabled by default
 
 Backend URL: [http://localhost:8000](http://localhost:8000)
 
 Useful endpoints to sanity-check startup:
 
 - [http://localhost:8000/health](http://localhost:8000/health)
+- [http://localhost:8000/system/health](http://localhost:8000/system/health)
+- [http://localhost:8000/control-plane/summary](http://localhost:8000/control-plane/summary)
+- [http://localhost:8000/coverage/summary](http://localhost:8000/coverage/summary)
 - [http://localhost:8000/dashboard](http://localhost:8000/dashboard)
-- [http://localhost:8000/strategies](http://localhost:8000/strategies)
 - [http://localhost:8000/reviews/operator-summary](http://localhost:8000/reviews/operator-summary)
-- [http://localhost:8000/reviews/history](http://localhost:8000/reviews/history)
 
 ### 2. Start The Frontend
 
@@ -223,12 +213,11 @@ npm run dev
 
 Frontend URL: [http://localhost:3000](http://localhost:3000)
 
-### 3. Run With Live IG Connectivity
+### 3. Configure IG Demo Connectivity
 
-Update `backend/.env`:
+Update `backend/.env` with your IG demo credentials:
 
 ```env
-SIMULATION_MODE=false
 BROKER_PROVIDER=IG
 BROKER_MODE=DEMO
 IG_API_KEY=your-demo-api-key
@@ -246,14 +235,19 @@ Recommended progression:
 1. Keep `IG_TRADING_ENABLED=false`.
 2. Start the backend.
 3. Verify auth via `GET /broker/positions`.
-4. Verify market snapshots via `GET /markets/overview?category=forex`.
-5. Only then consider implementing or enabling real order placement.
+4. Verify stream or market health via `GET /health/stream` and `GET /system/health`.
+5. Verify market inspection via `GET /markets/overview?category=forex`.
+6. Only then consider enabling real dealing behavior.
 
-`IG_TRADING_ENABLED=true` and `SIMULATION_MODE=true` cannot be used together.
+Important current behavior:
+
+- The backend always uses the IG broker adapter.
+- When `IG_TRADING_ENABLED=false`, order placement and close requests are simulated locally inside the IG adapter.
+- Market reads, auth, account state, and positions are still broker-oriented.
 
 ## Environment Variables
 
-The backend loads variables from `backend/.env`. The frontend loads variables from `frontend/.env.local`.
+The backend loads from `backend/.env`. The frontend loads from `frontend/.env.local`.
 
 Reference files:
 
@@ -272,14 +266,9 @@ DATABASE_URL=sqlite:///./trading_platform.db
 BROKER_PROVIDER=IG
 BROKER_MODE=DEMO
 CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
-SIMULATION_MODE=true
-SIMULATION_SEED=20260320
 STARTING_ACCOUNT_VALUE=100000
 DASHBOARD_RECENT_TRADE_WINDOW=30
 MARKET_DATA_POLL_INTERVAL_SECONDS=2
-AI_REVIEWER_LLM_ENABLED=false
-AI_REVIEWER_LLM_PROVIDER=disabled
-AI_REVIEWER_LLM_MODEL=unconfigured
 IG_API_KEY=
 IG_USERNAME=
 IG_PASSWORD=
@@ -287,169 +276,35 @@ IG_ACCOUNT_ID=
 IG_API_BASE_URL=https://demo-api.ig.com/gateway/deal
 IG_REQUEST_TIMEOUT_SECONDS=10
 IG_TRADING_ENABLED=false
+IG_STREAMING_ENABLED=true
+IG_STREAMING_WATCH_INTERVAL_SECONDS=1
 IG_MARKET_CACHE_TTL_SECONDS=30
 IG_MARKET_CACHE_STALE_TTL_SECONDS=300
 IG_VERIFY_SSL=true
 IG_CA_BUNDLE_PATH=
+AI_REVIEWER_LLM_ENABLED=false
+AI_REVIEWER_LLM_PROVIDER=disabled
+AI_REVIEWER_LLM_MODEL=unconfigured
 ```
 
-### Backend Variable Reference
-
-- `APP_NAME`
-  Example: `Algo Trading Platform API`
-  Meaning: Human-readable app name used by FastAPI metadata and logs.
-  Change it when: You want the API title or deployment branding to differ.
-
-- `APP_ENV`
-  Example: `development`
-  Meaning: General environment label for the app. It is not heavily branched on yet, but it is useful for deployment conventions and logging.
-  Common values: `development`, `staging`, `production`.
-
-- `APP_HOST`
-  Example: `0.0.0.0`
-  Meaning: Intended bind host for the backend process.
-  Change it when: Running the app behind a specific host binding. Note that `uvicorn app.main:app --reload` still needs matching CLI flags if you want to bind somewhere else.
-
-- `APP_PORT`
-  Example: `8000`
-  Meaning: Intended backend port.
-  Change it when: You want the API on a different port. As with `APP_HOST`, your process launcher must actually use that port.
-
-- `LOG_LEVEL`
-  Example: `INFO`
-  Meaning: Root log verbosity used by [backend/app/core/logging.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/logging.py).
-  Common values: `DEBUG`, `INFO`, `WARNING`, `ERROR`.
+### Backend Variables That Matter Most
 
 - `DATABASE_URL`
-  Example: `sqlite:///./trading_platform.db`
-  Meaning: SQLModel/SQLAlchemy connection string.
-  Local default: SQLite file inside `backend/`, with relative SQLite paths resolved against `backend/.env` so startup cwd does not fork state.
-  Production-style example: `postgresql+psycopg://user:password@localhost:5432/trading_platform`
-  Change it when: Moving from local development to a real database.
-
+  SQLModel connection string. Relative SQLite paths are normalized against `backend/`.
 - `BROKER_PROVIDER`
-  Example: `IG`
-  Meaning: Broker implementation selected by the broker factory.
-  Allowed values today: `IG`
-  Change it when: Only if a new broker adapter is added.
-
+  Current allowed value is `IG`.
 - `BROKER_MODE`
-  Example: `DEMO`
-  Meaning: Tells the broker adapter whether it should behave as demo or live account infrastructure.
-  Allowed values: `DEMO`, `LIVE`
-  Change it when: Switching from paper/demo usage to a real account environment.
-
-- `CORS_ORIGINS`
-  Example: `http://localhost:3000,http://127.0.0.1:3000`
-  Meaning: Comma-separated list of browser origins allowed to call the backend.
-  Change it when: Adding deployed frontend URLs or alternate local ports.
-
-- `SIMULATION_MODE`
-  Example: `true`
-  Meaning: Enables synthetic market generation instead of live broker polling.
-  `true`: backend bootstraps demo state, seeded strategies, and simulated prices.
-  `false`: backend uses broker-backed market data and reconciliation.
-  Important: Cannot be `true` while `IG_TRADING_ENABLED=true`.
-
-- `SIMULATION_SEED`
-  Example: `20260320`
-  Meaning: Seed for the pseudo-random simulator.
-  Change it when: You want different but still repeatable simulation behavior.
-
-- `STARTING_ACCOUNT_VALUE`
-  Example: `100000`
-  Meaning: Baseline account value used by dashboard calculations in simulation mode and as a reference for account change percentages.
-  Change it when: You want the demo account to represent a different starting capital base.
-
-- `DASHBOARD_RECENT_TRADE_WINDOW`
-  Example: `30`
-  Meaning: Number of recent trades used for dashboard metrics such as win rate and risk/reward.
-  Change it when: You want a shorter or longer rolling performance window.
-
-- `MARKET_DATA_POLL_INTERVAL_SECONDS`
-  Example: `2`
-  Meaning: Interval for live broker price polling when simulation mode is off.
-  Change it when: Tuning responsiveness versus broker/API load.
-  Constraint: Must be greater than `0`.
-
-- `AI_REVIEWER_LLM_ENABLED`
-  Example: `false`
-  Meaning: Enables the optional LLM explanation step for the AI Reviewer.
-  Default-safe behavior: `false`, which keeps the review layer deterministic while still generating persisted review records and audit payloads.
-
-- `AI_REVIEWER_LLM_PROVIDER`
-  Example: `disabled`
-  Meaning: Reserved provider label for the future reviewer LLM integration path.
-  Current state: Informational only until a concrete provider-backed client is wired in.
-
-- `AI_REVIEWER_LLM_MODEL`
-  Example: `unconfigured`
-  Meaning: Reserved model identifier for the future reviewer explanation layer.
-  Current state: Informational only while the backend uses the null reviewer client.
-
-- `IG_API_KEY`
-  Example: `abc123demoapikey`
-  Meaning: IG REST API key used during authentication.
-  Change it when: Rotating credentials or switching accounts/environments.
-  Note: Leave blank in pure simulation mode.
-
-- `IG_USERNAME`
-  Example: `demo.user@example.com`
-  Meaning: IG account username used for session creation.
-  Change it when: Using a different IG account.
-
-- `IG_PASSWORD`
-  Example: `super-secret-password`
-  Meaning: IG account password used for session creation.
-  Change it when: Rotating or replacing IG credentials.
-  Note: Treat this as a secret and do not commit real values.
-
-- `IG_ACCOUNT_ID`
-  Example: `ABC123`
-  Meaning: IG account identifier selected after login.
-  Change it when: Switching between demo/live or between different IG sub-accounts.
-
-- `IG_API_BASE_URL`
-  Example: `https://demo-api.ig.com/gateway/deal`
-  Meaning: Base URL for IG REST calls.
-  Demo example: `https://demo-api.ig.com/gateway/deal`
-  Live example: IG live dealing endpoint for your live environment.
-  Change it when: Switching between demo and live APIs or when IG changes endpoints.
-
-- `IG_REQUEST_TIMEOUT_SECONDS`
-  Example: `10`
-  Meaning: Timeout used for IG HTTP requests.
-  Change it when: Your network is slow or you want faster failure on upstream issues.
-
+  `DEMO` or `LIVE`.
 - `IG_TRADING_ENABLED`
-  Example: `false`
-  Meaning: Safety switch for real order placement and close requests.
-  `false`: order actions are simulated locally in the IG adapter.
-  `true`: the adapter is allowed to hit live IG dealing endpoints.
-  Recommended default: keep this `false` until you have verified auth, positions, and market reads.
-
-- `IG_MARKET_CACHE_TTL_SECONDS`
-  Example: `30`
-  Meaning: Fresh-cache lifetime for IG market detail responses.
-  Change it when: You want fewer upstream calls or fresher market snapshots.
-  Constraint: Must be greater than `0`.
-
-- `IG_MARKET_CACHE_STALE_TTL_SECONDS`
-  Example: `300`
-  Meaning: Maximum age for stale IG market data that can still be reused after an upstream failure.
-  Change it when: You want a shorter stale window for stricter freshness, or a longer one for resilience.
-  Constraint: Must be greater than `0`.
-
-- `IG_VERIFY_SSL`
-  Example: `true`
-  Meaning: Controls SSL certificate verification for IG HTTPS requests.
-  Recommended value: `true`
-  Change it when: Only for local troubleshooting if your Python trust store is broken.
-
-- `IG_CA_BUNDLE_PATH`
-  Example: `/etc/ssl/certs/ca-certificates.crt`
-  Meaning: Optional path to a custom CA bundle for IG HTTPS verification.
-  Change it when: Your environment requires a non-default trust store.
+  Safety switch for live dealing endpoints.
+- `IG_STREAMING_ENABLED`
+  Enables the streaming loop and affects whether the market-data service relies on polling fallback.
+- `MARKET_DATA_POLL_INTERVAL_SECONDS`
+  Main market-data loop cadence.
+- `AI_REVIEWER_LLM_ENABLED`
+  Keeps the reviewer deterministic by default when `false`.
+- `STARTING_ACCOUNT_VALUE`
+  Baseline account value used in dashboard calculations.
 
 ### Frontend Example
 
@@ -458,420 +313,400 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 NEXT_PUBLIC_ENABLE_DEV_FALLBACK=true
 ```
 
-### Frontend Variable Reference
+### Frontend Variables
 
 - `NEXT_PUBLIC_API_BASE_URL`
-  Example: `http://localhost:8000`
-  Meaning: Base URL used by [frontend/lib/api.ts](/Users/benparker/Documents/repos/codex-trading-app/frontend/lib/api.ts) for all backend requests.
-  Change it when: The backend runs on another host, port, or deployed domain.
-
+  Base URL used for backend requests.
 - `NEXT_PUBLIC_ENABLE_DEV_FALLBACK`
-  Example: `true`
-  Meaning: Enables development-only fallback data when the backend cannot be reached.
-  `true`: dashboard, strategies, and markets can render with mock data in development.
-  `false`: frontend fails fast instead of falling back.
-  Change it when: You want to force the UI to use the real backend during local development.
+  Present in the frontend env example, but the current frontend code does not actively branch on this variable. Request failures fall back to empty placeholder data through the shared loader helpers.
 
-### Recommended Config Sets
+## Persistence And State Ownership
 
-Local simulation:
+The backend treats state ownership as an explicit boundary:
 
-```env
-DATABASE_URL=sqlite:///./trading_platform.db
-SIMULATION_MODE=true
-BROKER_MODE=DEMO
-IG_TRADING_ENABLED=false
-```
+- Broker state is authoritative for actual open positions and confirmed closes.
+- The local database is authoritative for app metadata, governance, deployments, runtime snapshots, executions, review history, and event history.
+- In-memory runtime state is active process state and cached pricing, not long-term source of truth.
 
-Local IG demo connectivity without real dealing:
-
-```env
-SIMULATION_MODE=false
-BROKER_MODE=DEMO
-IG_API_KEY=your-demo-api-key
-IG_USERNAME=your-demo-username
-IG_PASSWORD=your-demo-password
-IG_ACCOUNT_ID=your-demo-account-id
-IG_API_BASE_URL=https://demo-api.ig.com/gateway/deal
-IG_TRADING_ENABLED=false
-IG_VERIFY_SSL=true
-```
-
-Frontend strict real-backend mode:
-
-```env
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
-NEXT_PUBLIC_ENABLE_DEV_FALLBACK=false
-```
-
-## Codebase Tour
-
-### Backend Architecture
-
-The backend follows a layered flow:
-
-```text
-FastAPI route
-  -> service
-    -> runtime manager / trade service / broker service
-      -> trading engine
-        -> strategy + broker adapter
-          -> database persistence
-```
-
-Core rules the codebase tries to preserve:
-
-- strategies are pure signal generators
-- the trading engine coordinates decisions and broker actions
-- services own orchestration and persistence concerns
-- routes stay thin
-- broker-specific behavior stays behind the shared broker interface
-
-### App Startup
-
-[backend/app/main.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/main.py) does four important things:
-
-1. configures logging
-2. initializes database tables
-3. bootstraps simulation state
-4. starts the live market polling loop when simulation is off
-
-That means the backend is stateful even in development: startup changes runtime state and may populate the database.
-
-### Core Modules
-
-- [backend/app/core/config.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/config.py)
-  Central settings model loaded from `.env`.
-- [backend/app/core/broker.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/broker.py)
-  Abstract broker contract plus normalized dataclasses such as `OrderRequest`, `BrokerPosition`, and `BrokerMarketDetails`.
-- [backend/app/core/broker_factory.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/broker_factory.py)
-  Creates the current broker implementation.
-- [backend/app/core/ig_broker.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/ig_broker.py)
-  Handles IG auth, positions lookup, account summary, and market details. Real order endpoints exist in the adapter, but trading is guarded by `IG_TRADING_ENABLED`.
-- [backend/app/core/runtime.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/runtime.py)
-  In-memory registry of running engines, strategy-to-instrument assignments, and last seen prices.
-- [backend/app/core/trading_engine.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/trading_engine.py)
-  Feeds price updates into a strategy, opens positions through the broker, and creates closed `Trade` records when exits fire.
-- [backend/app/core/instrument_catalog.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/instrument_catalog.py)
-  Static catalog for instrument metadata, categories, symbols, and compatible strategies.
-
-### Persistence Layer
-
-The database is intentionally small right now.
-
-[backend/app/models/trade.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/models/trade.py) defines:
+Key tables:
 
 - `Trade`
-  Closed trade history with PnL, `r_multiple`, outcome, and reason.
+  Closed trade history with PnL, `r_multiple`, outcome, and broker references.
 - `Position`
-  Open position state with unrealized PnL, risk %, current price, and manual override flag.
+  Open-position record plus local metadata such as `risk_percent`, `reason`, `manual_override`, and reconciliation markers.
+- `Execution`
+  Auditable entry and close lifecycle with status transitions and rejection details.
+- `StrategyRuntimeState`
+  Persisted runtime assignment, profile, parameters, recovery state, cached price, and serialized strategy snapshot.
+- `ReconciliationEvent`
+  Audit trail for broker-vs-local drift detection and recovery.
+- `DomainEvent`
+  Operational event stream across strategy, health, reconciliation, coverage, and operator actions.
+- `GeneratedReviewRecord`
+  Persisted AI reviewer outputs and review history.
+- `StrategyGovernance`
+  Per-family approval and autonomy rules.
+- `StrategyDeployment`
+  Current autonomous deployment selection and state.
+- `PromotionRequest` and `WatchlistEntry`
+  Coverage allocation and streaming/watchlist state.
 
-[backend/app/db/session.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/db/session.py) configures SQLModel sessions, including SQLite thread options for local development.
+### Runtime Persistence And Recovery
 
-[backend/app/db/init_db.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/db/init_db.py) creates tables on startup.
+Runtime assignments do survive restarts now.
 
-### Strategy System
+The current lifecycle is:
 
-Strategies live in [backend/app/strategies](/Users/benparker/Documents/repos/codex-trading-app/backend/app/strategies) and implement the abstract contract in [backend/app/strategies/base.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/strategies/base.py).
+1. running engines are mirrored into `StrategyRuntimeState`
+2. the backend starts
+3. `RuntimeRecoveryService` loads active persisted runtimes
+4. broker positions are queried
+5. runtimes are resumed, paused, or marked `RECOVERY_REQUIRED`
 
-Current strategies:
+That makes persisted runtime state a real architectural feature, not a future idea.
 
-- `mean_reversion`
-  Enters when price deviates materially from a rolling mean and exits when it normalizes.
-- `breakout_guard`
-  Trades directional breaks only after a volatility filter passes.
-- `carry_drift`
-  Follows directional drift and exits on mean re-entry.
+## Strategies
 
-[backend/app/strategies/registry.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/strategies/registry.py) is the source of truth for:
+Strategies live in [backend/app/strategies](/Users/benparker/Documents/repos/codex-trading-app/backend/app/strategies). The registry in [backend/app/strategies/registry.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/strategies/registry.py) is the source of truth for:
 
-- registered strategies
+- registered strategy names
 - descriptions
 - default instruments
-- UI-exposed parameters
-- position size and risk metadata
+- parameter definitions
+- parameter profiles
+- supported asset classes
+- trade sizing and risk metadata
 
-### Service Layer
+Currently registered trading strategies include:
 
-Important services:
+- `mean_reversion`
+- `breakout_guard`
+- `carry_drift`
+- `fx_micro_pullback`
+- `volatility_adjusted_pullback_continuation`
+- `smoke_test_hold`
+- `bad_trade_flow`
+
+The system also includes a screening strategy:
+
+- `activity_surveillance_scanner`
+
+## Service Layer
+
+Important backend services:
 
 - [backend/app/services/strategy_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/strategy_service.py)
-  Lists strategies, starts and stops runtimes, processes price updates, persists positions, and records trades.
-- [backend/app/services/trade_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/trade_service.py)
-  CRUD-style persistence access for trades and positions.
-- [backend/app/services/dashboard_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/dashboard_service.py)
-  Aggregates KPIs, running strategy summaries, equity curve, drawdown, and exposure breakdowns.
-- [backend/app/services/simulation_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/simulation_service.py)
-  Generates synthetic prices, starts default strategies, and advances the market when endpoints are hit.
+  Strategy listing, runtime control, price processing, risk gating, execution progression, and persistence updates.
+- [backend/app/services/strategy_deployment_manager_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/strategy_deployment_manager_service.py)
+  Autonomous deployment reconciliation and state transitions.
+- [backend/app/services/control_plane_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/control_plane_service.py)
+  Control-plane summary and family detail serialization.
+- [backend/app/services/coverage_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/coverage_service.py)
+  Streaming coverage, promotion, and allocator summary.
 - [backend/app/services/market_data_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/market_data_service.py)
-  In live mode, polls prices from the broker and pushes them through active strategy runtimes.
+  Tier 1 polling fallback, Tier 2 refresh, promotion generation, and deployment reconciliation triggers.
 - [backend/app/services/reconciliation_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/reconciliation_service.py)
-  Syncs local open positions against remote broker positions.
+  Local and broker position reconciliation.
+- [backend/app/services/runtime_recovery_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/runtime_recovery_service.py)
+  Restart recovery for persisted runtimes.
+- [backend/app/services/health_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/health_service.py)
+  System health and status aggregation.
+- [backend/app/services/operational_telemetry_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/operational_telemetry_service.py)
+  Telemetry summary for health, broker, stream, runtimes, and failures.
+- [backend/app/services/dashboard_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/dashboard_service.py)
+  Dashboard aggregates.
 - [backend/app/services/market_overview_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/market_overview_service.py)
-  Builds category-level market readiness summaries and per-instrument rows.
-- [backend/app/services/broker_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/broker_service.py)
-  Thin façade for broker reads and reconciliation.
+  Market-category investigation views.
 
-### Request Flow In Simulation Mode
+## API Surface
 
-Simulation mode is intentionally interactive. Many read endpoints advance the market by one tick before responding.
+Routes are registered in [backend/app/api/router.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/api/router.py).
 
-That means:
-
-- refreshing the dashboard can change positions and trades
-- loading positions can update unrealized PnL
-- repeated local API calls are not idempotent from a data perspective
-
-This is by design for a live-feeling demo environment.
-
-### API Surface
-
-Registered in [backend/app/api/router.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/api/router.py).
-
-Main endpoints:
+Key endpoints:
 
 - `GET /health`
-  Basic health check.
+  Basic health status.
+- `GET /health/stream`
+  Streaming health and subscription state.
+- `GET /system/health`
+  Detailed system-health report.
+- `GET /system/telemetry`
+  Operational telemetry summary.
+- `GET /system/limits`
+  Runtime, execution, and coverage operating limits.
 - `GET /dashboard`
-  Dashboard KPIs and running strategy summary.
+  Dashboard snapshot.
 - `GET /charts/equity`
   Equity series.
 - `GET /charts/drawdown`
   Drawdown series.
 - `GET /charts/risk-allocation`
-  Open-exposure allocation.
+  Risk-allocation chart data.
 - `GET /positions`
-  Open positions with enriched timing and PnL fields.
-- `GET /executions`
-  Recent execution lifecycle records for entry and close attempts.
+  Enriched open positions.
 - `GET /trades`
-  Closed trades, optionally filtered by strategy or date range.
+  Closed trades.
 - `GET /trades/positions`
-  Compatibility endpoint for positions.
+  Compatibility positions endpoint used by the frontend.
+- `GET /executions`
+  Recent execution records.
 - `GET /strategies`
-  Strategy metadata and runtime state.
+  Strategy registry plus runtime, governance, deployment, and warning state.
 - `POST /strategy/start`
-  Start a strategy for a specific instrument.
+  Manual start for a specific strategy and instrument.
 - `POST /strategy/stop`
-  Stop a strategy by instrument.
+  Manual stop by strategy and/or instrument.
 - `POST /strategies/{name}/start`
-  Convenience start endpoint by strategy name.
+  Convenience start by strategy name.
 - `POST /strategies/{name}/stop`
-  Convenience stop endpoint by strategy name.
+  Convenience stop by strategy name.
+- `GET /control-plane/summary`
+  Global control-plane summary.
+- `GET /control-plane/operator-state`
+  Operator autonomy state.
+- `PUT /control-plane/operator-state`
+  Update global autonomy override.
+- `GET /control-plane/strategies/{strategy_name}`
+  Family-level control-plane detail.
+- `PUT /control-plane/governance/{strategy_name}`
+  Update strategy governance.
+- `POST /control-plane/reconcile`
+  Trigger deployment reconciliation.
+- `GET /coverage/summary`
+  Coverage, promotions, and trade allocator summary.
 - `GET /markets/overview?category=forex`
-  Market readiness snapshot for a category.
-- `GET /broker/positions`
-  Remote broker positions, useful as a broker-auth sanity check.
+  Market investigation overview.
+- `GET /events`
+  Domain-event list with filters.
+- `GET /events/{event_id}`
+  Single event detail.
+- `GET /reviews/operator-summary`
+  Deterministic reviewer summary.
+- `GET /reviews/history`
+  Review history.
+- `GET /reviews/history/{review_id}`
+  Review record detail.
+- `GET /reviews/daily`
+  Daily review.
+- `GET /reviews/runtime-health`
+  Runtime-health review.
+- `GET /reviews/strategies/{strategy_name}`
+  Strategy review.
+- `GET /reviews/trades/{trade_id}/postmortem`
+  Trade postmortem review.
+- `POST /reviews/questions`
+  Operational question answering.
+- `POST /testing/reset-history`
+  Test/dev reset endpoint used by the Events page.
 
-### Frontend Architecture
+## Frontend Architecture
 
-The frontend is a Next.js App Router app in [frontend](/Users/benparker/Documents/repos/codex-trading-app/frontend).
+The frontend is a Next.js App Router application under [frontend](/Users/benparker/Documents/repos/codex-trading-app/frontend).
 
 The main pattern is:
 
-- server-render page
-- fetch backend data via `frontend/lib/api.ts`
-- pass typed data into focused presentational/client components
+- server-render a page
+- load backend data through [frontend/lib/api.ts](/Users/benparker/Documents/repos/codex-trading-app/frontend/lib/api.ts)
+- pass typed initial data into focused client or presentational components
 
-### Frontend Routing
+### Current Routes
 
 - `/`
-  Dashboard
+  Operate dashboard
+- `/control-plane`
+  Autonomous control-plane view
+- `/coverage`
+  Coverage and allocator view
 - `/markets`
-  Market readiness and instrument exploration
+  Investigation view
+- `/events`
+  Domain-event console
+- `/reviewer`
+  AI reviewer console
 - `/strategies`
-  Strategy control surface
+  Strategy operations view
 
 Navigation lives in [frontend/components/app-nav.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/components/app-nav.tsx).
 
-### Frontend Data Layer
+### Frontend Data Behavior
 
-[frontend/lib/api.ts](/Users/benparker/Documents/repos/codex-trading-app/frontend/lib/api.ts) is the central API client.
+The current frontend data layer:
 
-Important behavior:
+- uses `no-store` fetches
+- uses short request timeouts for most backend calls
+- uses a longer timeout for market-overview requests
+- falls back to empty placeholder data through `loadWithMeta()` when a request fails
+- returns an error string alongside fallback data so pages can surface degraded state
 
-- all requests are no-store fetches
-- health checks determine whether the frontend is in live mode or dev fallback mode
-- if the backend is unreachable during development, many views fall back to local mock data
-- market overview requests get a longer timeout than the rest of the app
+Important current caveat:
 
-This is why the UI still works when the backend is down, but not every feature is truly backed by the server in that state.
+- `NEXT_PUBLIC_ENABLE_DEV_FALLBACK` exists in the env example, but the shared client code does not currently gate behavior on it.
+- `getBackendMode()` is currently hardcoded to `"live"`.
 
-### Dashboard Page
+## Frontend Pages
 
-[frontend/app/page.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/app/page.tsx) composes:
+### Operate Dashboard
 
-- `ModeIndicator`
-- `KpiBar`
-- `EquityPanel`
-- `RiskPanel`
-- `RiskAllocationPanel`
-- `StrategyTapePanel`
-- `OpenPositionsTable`
-- `RecentTradesTable`
+[frontend/app/page.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/app/page.tsx) loads:
 
-What it shows:
+- positions
+- trades
+- executions
+- broker auth
+- dashboard snapshot
+- stream health
+- coverage summary
+- control-plane summary
+- system operating limits
 
-- account value and daily PnL
-- win rate and risk/reward
-- open book risk and exposure concentration
-- running strategies and last seen prices
-- open positions and recent trades
+It is the main supervision surface rather than a simple PnL page.
 
-Notable implementation detail:
+### Control Plane
 
-- some analytics are calculated in the backend and some are recomputed in the page from returned data
+[frontend/app/control-plane/page.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/app/control-plane/page.tsx) renders the autonomous-control summary and family-level alignment state.
 
-### Markets Page
+### Coverage
 
-[frontend/app/markets/page.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/app/markets/page.tsx) loads the default forex overview, then delegates richer interactions to [frontend/components/markets/market-overview-dashboard.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/components/markets/market-overview-dashboard.tsx).
+[frontend/app/coverage/page.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/app/coverage/page.tsx) focuses on:
 
-What it supports:
+- Tier 1 streaming state
+- Tier 2 refresh activity
+- promotion lifecycle
+- operational telemetry
+- operating limits
 
-- category switching
-- lazy loading other market categories
-- local watchlist starring stored in browser local storage
-- tradable-only and active-only filters
-- search across name, symbol, and compatible strategies
-- countdown messaging for the next session transition
+### Investigate
 
-### Strategies Page
+[frontend/app/markets/page.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/app/markets/page.tsx) loads a market-category overview and supports interactive market inspection.
 
-[frontend/app/strategies/page.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/app/strategies/page.tsx) renders a control surface for registered strategies.
+### Events
 
-What it supports:
+[frontend/app/events/page.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/app/events/page.tsx) exposes filtered operational history for strategy, execution, health, reconciliation, and operator events.
 
-- start/stop actions against backend endpoints
-- instrument override selection before strategy start
-- display of trade count, win rate, PnL, and last price
-- side drawer for editable strategy settings
+### AI Reviewer
 
-Important limitation:
+[frontend/app/reviewer/page.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/app/reviewer/page.tsx) shows:
 
-- the settings drawer edits are currently UI-only and are not persisted to the backend
+- lead observation
+- supporting metrics
+- warnings
+- recent review history
 
-## Real Functionality Vs Simulated UX
+### Strategies
 
-This repo mixes real backend behavior with deliberately simulated UI affordances. That is useful for development, but it is worth calling out clearly.
+[frontend/app/strategies/page.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/app/strategies/page.tsx) is the manual runtime operations view.
 
-Backed by real backend state:
+It currently supports:
 
-- strategy registry and runtime state
-- start/stop strategy endpoints
-- persisted trades and positions
-- dashboard aggregates
-- IG authentication checks
-- live broker position reconciliation
-- market overview generation
+- start and stop actions
+- runtime and deployment visibility
+- execution warnings
+- profile and parameter visibility
 
-Currently simulated or local-only in the frontend:
+## Trade And Runtime Flow
 
-- dashboard position row drift animation
-- "Sim Close" actions in the open positions table
-- manual override toggles in the open positions table
-- strategy settings drawer save action
-- all fallback data shown when the backend is unavailable in development
+Current high-level execution flow:
 
-## How A Trade Flows Through The System
+1. A runtime is started manually or by the deployment manager.
+2. `runtime_manager` creates a `TradingEngine` for one strategy and one instrument.
+3. Price updates arrive from streaming-backed health, polling fallback, or Tier 2 refresh context.
+4. The engine calls strategy logic.
+5. Entry signals create `Execution` records.
+6. Risk checks and trade allocation determine whether the entry may proceed.
+7. Orders move through execution statuses such as `SIGNAL_GENERATED`, `RISK_APPROVED`, `ORDER_SUBMITTED`, `ORDER_ACKNOWLEDGED`, `FILL_PARTIAL`, `FILL_FULL`, and `POSITION_OPENED`.
+8. Exits create close-side execution records.
+9. Confirmed closes become `Trade` records.
+10. Reconciliation and recovery maintain consistency with broker truth.
 
-1. A strategy runtime is started through `StrategyService`.
-2. The runtime manager creates a `TradingEngine` bound to one strategy and one instrument.
-3. A price update arrives from simulation or broker polling.
-4. The engine calls `strategy.on_price_update(...)`.
-5. If `should_enter_trade()` returns true, `StrategyService` creates an `execution` record at `SIGNAL_GENERATED` and runs the risk gate.
-6. The risk gate evaluates layered controls across pre-trade, portfolio, market-quality, platform-health, and kill-switch checks, then stores the audit trail in the execution record.
-7. Approved entries advance through states such as `RISK_APPROVED`, `ORDER_SUBMITTED`, `ORDER_ACKNOWLEDGED`, `FILL_FULL` or `FILL_PARTIAL`, and then `POSITION_OPENED`.
-8. The resulting broker-confirmed position is reflected into persistence and later price updates recalculate unrealized PnL.
-9. If `should_exit_trade()` returns true, `StrategyService` creates a close-side `execution` record, moves it through `CLOSE_REQUESTED` and broker order states, and only records a `Trade` after a confirmed close.
-10. Failed or incomplete closes can remain in `FAILED` or `NEEDS_MANUAL_REVIEW` instead of being flattened into a fake closed trade.
+## Health, Coverage, And Streaming
 
-## Risk Controls
+The market-data and health model is now centered on bounded streaming plus fallback behavior.
 
-The runtime now splits entry risk into five auditable layers:
+- IG streaming can be enabled for Tier 1 instruments.
+- The market-data loop can poll when streaming is disabled or stale.
+- Tier 2 refresh scans a wider set of instruments at a lower cadence.
+- Promotion requests can move instruments from Tier 2 into Tier 1.
+- Domain events record stale-stream, fallback, promotion, allocation, and deployment-cycle activity.
 
-- `pre_trade`
-  Instrument uniqueness, per-strategy concurrency, duplicate-signal suppression, burst-entry throttling, and cooldowns after loss or exit.
-- `portfolio`
-  Max open positions, projected open risk, max position notional, and daily loss limits.
-- `market_quality`
-  Spread gating, stale-price gating, and basic market-status checks.
-- `platform_health`
-  Active price-feed errors and unhealthy runtime recovery states.
-- `kill_switch`
-  Global entry kill switch, unhealthy-runtime tolerance, and daily drawdown stop.
+This is a better description of the current system than the older "simulation mode" model.
 
-Relevant settings live in [backend/app/core/config.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/config.py), including:
+## Testing
 
-- `runtime_max_position_notional`
-- `runtime_max_spread_percent_of_price`
-- `runtime_price_stale_after_seconds`
-- `runtime_entry_burst_limit`
-- `runtime_entry_burst_window_seconds`
-- `runtime_cooldown_after_loss_seconds`
-- `runtime_cooldown_after_exit_seconds`
-- `runtime_duplicate_signal_window_seconds`
-- `runtime_max_unhealthy_runtimes`
-- `runtime_global_entry_kill_switch`
+The repo does have automated backend tests under [backend/tests](/Users/benparker/Documents/repos/codex-trading-app/backend/tests).
 
-This flow is the core of the codebase. Everything else is mostly presentation, orchestration, or broker integration around it.
+Current coverage includes tests for:
+
+- config parsing
+- market data
+- dashboard behavior
+- strategy services
+- broker services
+- control plane
+- coverage allocation
+- watchlists
+- health and telemetry
+- reconciliation
+- risk allocation
+- strategy implementations
 
 ## Working On The Codebase
 
 ### Adding A New Strategy
 
-1. Create a new strategy in [backend/app/strategies](/Users/benparker/Documents/repos/codex-trading-app/backend/app/strategies).
-2. Implement the abstract methods from `Strategy`.
-3. Register it in [backend/app/strategies/registry.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/strategies/registry.py) with metadata for description, parameters, risk, and default instrument.
-4. Confirm it appears in `GET /strategies` and on the Strategies page.
+1. Create the strategy in [backend/app/strategies](/Users/benparker/Documents/repos/codex-trading-app/backend/app/strategies).
+2. Implement the abstract contract from [backend/app/strategies/base.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/strategies/base.py).
+3. Register metadata and profiles in [backend/app/strategies/registry.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/strategies/registry.py).
+4. Verify it appears in `GET /strategies` and the Strategies page.
 
 ### Adding A New Broker
 
 Follow [backend/app/core/BROKER_INTEGRATION.md](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/BROKER_INTEGRATION.md).
 
-The short version:
+Current expectation:
 
 1. implement the `Broker` interface
-2. add provider config
-3. wire it into `broker_factory.py`
-4. keep translation and auth inside the adapter
-5. let services and the engine continue to depend only on the normalized broker contract
+2. add provider config and validation
+3. wire it through `broker_factory.py`
+4. keep translation, auth, and provider quirks inside the adapter
+5. keep services and engines dependent only on normalized broker contracts
 
 ### Extending The Frontend
 
-Good places to start:
+Good entry points:
 
-- new page route in [frontend/app](/Users/benparker/Documents/repos/codex-trading-app/frontend/app)
+- new route in [frontend/app](/Users/benparker/Documents/repos/codex-trading-app/frontend/app)
 - new typed request in [frontend/lib/api.ts](/Users/benparker/Documents/repos/codex-trading-app/frontend/lib/api.ts)
-- new view model types in [frontend/lib/types.ts](/Users/benparker/Documents/repos/codex-trading-app/frontend/lib/types.ts)
-- focused UI in [frontend/components](/Users/benparker/Documents/repos/codex-trading-app/frontend/components)
+- new types in [frontend/lib/types.ts](/Users/benparker/Documents/repos/codex-trading-app/frontend/lib/types.ts)
+- focused UI components in [frontend/components](/Users/benparker/Documents/repos/codex-trading-app/frontend/components)
 
-## Known Gaps And Caveats
+## Current Caveats
 
-- No automated test suite is present yet.
-- Runtime state is in-memory, so active strategy assignments do not survive process restarts.
-- Simulation mode advances on many read requests, which is great for demos but surprising if you expect static reads.
-- The frontend strategy settings drawer does not persist configuration changes.
-- The open positions table exposes simulated controls that do not send backend actions.
-- Broker support is effectively single-provider today, via IG.
-- The backend uses a local SQLite file by default; production would likely need PostgreSQL and background workers.
-
-## Suggested Next Improvements
-
-1. Add tests around strategies, services, and the IG adapter boundary.
-2. Persist runtime assignments so strategies survive backend restarts.
-3. Turn UI-only controls into real backend mutations or label them even more explicitly.
-4. Split simulation advancement from read endpoints if deterministic reads become important.
-5. Add streaming price updates instead of relying only on polling and page refreshes.
+- The backend is effectively single-broker today: IG only.
+- `IG_TRADING_ENABLED=false` still simulates fills locally inside the IG adapter, so not every execution is a real broker deal.
+- The frontend fallback behavior is coarse: request failures degrade to placeholder data rather than a strongly modeled offline mode.
+- The env example still includes `NEXT_PUBLIC_ENABLE_DEV_FALLBACK`, but the current client code does not actively use it.
+- Reviewer LLM settings exist, but the default and safest mode is still deterministic-only review output.
+- Local development defaults to SQLite; larger deployments would likely want a different database and clearer worker/process separation.
 
 ## Reference Files
 
 - [backend/app/main.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/main.py)
-- [backend/app/core/trading_engine.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/trading_engine.py)
+- [backend/app/core/config.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/config.py)
+- [backend/app/core/broker_factory.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/broker_factory.py)
+- [backend/app/core/ig_broker.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/ig_broker.py)
 - [backend/app/core/runtime.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/runtime.py)
+- [backend/app/services/runtime_recovery_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/runtime_recovery_service.py)
 - [backend/app/services/strategy_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/strategy_service.py)
-- [backend/app/services/simulation_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/simulation_service.py)
-- [backend/app/services/market_overview_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/market_overview_service.py)
+- [backend/app/services/strategy_deployment_manager_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/strategy_deployment_manager_service.py)
+- [backend/app/services/market_data_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/market_data_service.py)
+- [backend/app/services/control_plane_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/control_plane_service.py)
+- [backend/app/services/coverage_service.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/coverage_service.py)
 - [frontend/lib/api.ts](/Users/benparker/Documents/repos/codex-trading-app/frontend/lib/api.ts)
+- [frontend/components/app-nav.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/components/app-nav.tsx)
 - [frontend/app/page.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/app/page.tsx)
+- [frontend/app/control-plane/page.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/app/control-plane/page.tsx)
+- [frontend/app/coverage/page.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/app/coverage/page.tsx)
+- [frontend/app/events/page.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/app/events/page.tsx)
 - [frontend/app/markets/page.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/app/markets/page.tsx)
+- [frontend/app/reviewer/page.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/app/reviewer/page.tsx)
 - [frontend/app/strategies/page.tsx](/Users/benparker/Documents/repos/codex-trading-app/frontend/app/strategies/page.tsx)
