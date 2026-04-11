@@ -630,6 +630,19 @@ function toneClasses(tone: Tone) {
   return "border-[color:var(--glass-stroke)] bg-[color:var(--bg-muted)] text-[color:var(--text-secondary)]";
 }
 
+function toneTextClass(tone: Tone) {
+  if (tone === "positive") {
+    return "text-[color:var(--positive)]";
+  }
+  if (tone === "warning") {
+    return "text-[color:var(--warning)]";
+  }
+  if (tone === "negative") {
+    return "text-[color:var(--negative)]";
+  }
+  return "text-[color:var(--text-secondary)]";
+}
+
 export function AimeeShell() {
   const pathname = usePathname();
   const context = routeContextFromPath(pathname);
@@ -653,7 +666,7 @@ export function AimeeShell() {
   const [hasAutoCollapsed, setHasAutoCollapsed] = useState(false);
   const [hasAttentionPulse, setHasAttentionPulse] = useState(false);
   const lastSignatureRef = useRef<string | null>(null);
-  const messagesViewportRef = useRef<HTMLDivElement | null>(null);
+  const panelScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -725,7 +738,7 @@ export function AimeeShell() {
   }, [isOpen]);
 
   useEffect(() => {
-    const container = messagesViewportRef.current;
+    const container = panelScrollRef.current;
     if (!container || hasAutoCollapsed || !isOverviewExpanded) {
       return;
     }
@@ -737,7 +750,7 @@ export function AimeeShell() {
   }, [hasAutoCollapsed, isOverviewExpanded, messages]);
 
   useEffect(() => {
-    const container = messagesViewportRef.current;
+    const container = panelScrollRef.current;
     if (!container) {
       return;
     }
@@ -834,7 +847,7 @@ export function AimeeShell() {
         <button
           type="button"
           className={joinClasses(
-            "absolute inset-0 bg-[rgba(6,18,28,0.18)] transition-opacity duration-200 max-[920px]:bg-[rgba(6,18,28,0.32)]",
+            "absolute inset-0 bg-[rgba(6,18,28,0.18)] backdrop-blur-[6px] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.02),inset_0_0_140px_rgba(6,18,28,0.12)] transition-opacity duration-200 max-[920px]:bg-[rgba(6,18,28,0.32)] max-[920px]:backdrop-blur-[8px]",
             isOpen ? "pointer-events-auto opacity-100" : "opacity-0",
           )}
           onClick={() => setIsOpen(false)}
@@ -882,49 +895,51 @@ export function AimeeShell() {
           </div>
 
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 pb-5">
-            <section className="-mx-5 flex-none border-b border-transparent bg-[color:color-mix(in_srgb,var(--bg-shell)_94%,transparent)] px-5 pt-4 pb-3">
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between gap-3 rounded-[18px] border border-[color:var(--glass-stroke)] bg-[image:var(--glass-surface-soft)] px-4 py-3 shadow-[var(--shadow-soft)]">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className={joinClasses("h-2.5 w-2.5 rounded-full", systemSummary.tone === "positive" ? "bg-[color:var(--positive)]" : systemSummary.tone === "warning" ? "bg-[color:var(--warning)]" : systemSummary.tone === "negative" ? "bg-[color:var(--negative)]" : "bg-[color:var(--accent)]")} />
-                      <span className="text-[0.72rem] uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">{STATUS_LABEL[systemSummary.tone]}</span>
+            <div ref={panelScrollRef} className="min-h-0 flex-1 overflow-y-auto pr-1">
+              <div className="flex min-h-full flex-col gap-4 pt-4">
+                <section className="sticky top-0 z-10 -mx-5 border-b border-transparent bg-[color:color-mix(in_srgb,var(--bg-shell)_94%,transparent)] px-5 pb-3 backdrop-blur-[8px]">
+                  <div className="flex items-center justify-between gap-3 rounded-[12px] border border-[color:var(--border)] bg-[color:var(--bg-surface-muted)] px-3 py-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className={joinClasses("h-2.5 w-2.5 rounded-full", systemSummary.tone === "positive" ? "bg-[color:var(--positive)]" : systemSummary.tone === "warning" ? "bg-[color:var(--warning)]" : systemSummary.tone === "negative" ? "bg-[color:var(--negative)]" : "bg-[color:var(--accent)]")} />
+                        <span className="text-[0.72rem] uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">{STATUS_LABEL[systemSummary.tone]}</span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <strong className="text-[0.95rem] tracking-[-0.02em]">{systemSummary.headline}</strong>
+                        <span className="text-[0.78rem] text-[color:var(--text-secondary)]">{compactMetric}</span>
+                        <span className="text-[0.78rem] text-[color:var(--text-secondary)]">{attentionCount} active warnings</span>
+                      </div>
                     </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-                      <strong className="text-[0.95rem] tracking-[-0.02em]">{systemSummary.headline}</strong>
-                      <span className="text-[0.78rem] text-[color:var(--text-secondary)]">{compactMetric}</span>
-                      <span className="text-[0.78rem] text-[color:var(--text-secondary)]">{attentionCount} active warnings</span>
-                    </div>
+                    <button
+                      type="button"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[color:var(--glass-stroke)] bg-[color:var(--bg-muted)] text-[color:var(--text-secondary)] transition-transform hover:text-[color:var(--text-primary)]"
+                      onClick={() => setIsOverviewExpanded((value) => !value)}
+                      aria-expanded={isOverviewExpanded}
+                      aria-label={isOverviewExpanded ? "Collapse AIMEE overview" : "Expand AIMEE overview"}
+                    >
+                      <svg viewBox="0 0 20 20" className={joinClasses("h-4 w-4 transition-transform duration-200", isOverviewExpanded ? "rotate-180" : "rotate-0")} aria-hidden="true">
+                        <path d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.09l3.71-3.86a.75.75 0 0 1 1.08 1.04l-4.25 4.42a.75.75 0 0 1-1.08 0L5.21 8.27a.75.75 0 0 1 .02-1.06Z" fill="currentColor" />
+                      </svg>
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[color:var(--glass-stroke)] bg-[color:var(--bg-muted)] text-[color:var(--text-secondary)] transition-transform hover:text-[color:var(--text-primary)]"
-                    onClick={() => setIsOverviewExpanded((value) => !value)}
-                    aria-expanded={isOverviewExpanded}
-                    aria-label={isOverviewExpanded ? "Collapse AIMEE overview" : "Expand AIMEE overview"}
-                  >
-                    <svg viewBox="0 0 20 20" className={joinClasses("h-4 w-4 transition-transform duration-200", isOverviewExpanded ? "rotate-180" : "rotate-0")} aria-hidden="true">
-                      <path d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.09l3.71-3.86a.75.75 0 0 1 1.08 1.04l-4.25 4.42a.75.75 0 0 1-1.08 0L5.21 8.27a.75.75 0 0 1 .02-1.06Z" fill="currentColor" />
-                    </svg>
-                  </button>
-                </div>
+                </section>
 
                 {isOverviewExpanded ? (
-                  <div className="flex max-h-[min(46vh,520px)] min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain pr-1">
-                    <section className="rounded-[20px] border border-[color:var(--glass-stroke)] bg-[color:var(--bg-surface)] p-4">
+                  <div className="flex flex-col gap-2">
+                    <section className="rounded-[12px] border border-[color:var(--border)] bg-[color:var(--bg-surface)] p-3">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="text-[0.72rem] uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">System Overview</div>
                           <div className="mt-2 text-[1rem] font-semibold tracking-[-0.02em]">{systemSummary.headline}</div>
                           <p className="mt-1 text-[0.84rem] text-[color:var(--text-secondary)]">{systemSummary.detail}</p>
                         </div>
-                        <span className={joinClasses("rounded-full border px-3 py-[7px] text-[0.72rem] font-medium uppercase tracking-[0.08em]", toneClasses(systemSummary.tone))}>
+                        <span className={joinClasses("text-[0.72rem] font-medium uppercase tracking-[0.08em]", toneTextClass(systemSummary.tone))}>
                           {STATUS_LABEL[systemSummary.tone]}
                         </span>
                       </div>
                       <div className="mt-4 grid grid-cols-3 gap-2">
                         {systemSummary.indicators.map((indicator) => (
-                          <div key={indicator.label} className="rounded-[14px] border border-[color:var(--glass-stroke)] bg-[color:var(--bg-muted)] px-3 py-2">
+                          <div key={indicator.label} className="rounded-[10px] border border-[color:var(--border)] bg-[color:transparent] px-3 py-2">
                             <div className="text-[0.68rem] uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">{indicator.label}</div>
                             <div className="mt-1 text-[0.92rem] font-semibold">{indicator.value}</div>
                           </div>
@@ -939,10 +954,10 @@ export function AimeeShell() {
                       </div>
                       <div className="grid gap-2 sm:grid-cols-2">
                         {whatMatters.map((item) => (
-                          <article key={item.id} className="rounded-[18px] border border-[color:var(--glass-stroke)] bg-[color:var(--bg-surface-muted)] p-3">
+                          <article key={item.id} className="rounded-[12px] border border-[color:var(--border)] bg-[color:var(--bg-surface)] p-3">
                             <div className="flex items-center justify-between gap-2">
                               <h4 className="text-[0.88rem] font-semibold tracking-[-0.01em]">{item.title}</h4>
-                              <span className={joinClasses("rounded-full border px-2 py-[5px] text-[0.66rem] uppercase tracking-[0.08em]", toneClasses(item.tone))}>
+                              <span className={joinClasses("text-[0.66rem] uppercase tracking-[0.08em]", toneTextClass(item.tone))}>
                                 {item.tone}
                               </span>
                             </div>
@@ -958,13 +973,22 @@ export function AimeeShell() {
                       <div className="grid gap-2">
                         {warningItems.length ? (
                           warningItems.map((warning) => (
-                            <article key={warning.id} className={joinClasses("rounded-[16px] border p-3", toneClasses(warning.tone))}>
+                            <article
+                              key={warning.id}
+                              className={joinClasses(
+                                "rounded-[12px] border bg-[color:var(--bg-surface)] p-3",
+                                warning.tone === "positive" && "border-[color:color-mix(in_srgb,var(--positive)_35%,var(--border))]",
+                                warning.tone === "warning" && "border-[color:color-mix(in_srgb,var(--warning)_38%,var(--border))]",
+                                warning.tone === "negative" && "border-[color:color-mix(in_srgb,var(--negative)_40%,var(--border))]",
+                                warning.tone === "neutral" && "border-[color:var(--border)]",
+                              )}
+                            >
                               <div className="text-[0.84rem] font-semibold">{warning.title}</div>
-                              <div className="mt-1 text-[0.76rem] opacity-90">{warning.detail}</div>
+                              <div className={joinClasses("mt-1 text-[0.76rem]", toneTextClass(warning.tone))}>{warning.detail}</div>
                             </article>
                           ))
                         ) : (
-                          <div className="rounded-[16px] border border-[color:var(--glass-stroke)] bg-[color:var(--bg-surface-muted)] px-3 py-3 text-[0.8rem] text-[color:var(--text-secondary)]">
+                          <div className="rounded-[12px] border border-[color:var(--border)] bg-[color:var(--bg-surface)] px-3 py-3 text-[0.8rem] text-[color:var(--text-secondary)]">
                             No high-signal warnings are currently active.
                           </div>
                         )}
@@ -977,7 +1001,7 @@ export function AimeeShell() {
                         <div className="grid gap-2">
                           {recentChanges.length ? (
                             recentChanges.map((change) => (
-                              <article key={change.id} className="rounded-[16px] border border-[color:var(--glass-stroke)] bg-[color:var(--bg-surface-muted)] px-3 py-3">
+                              <article key={change.id} className="rounded-[12px] border border-[color:var(--border)] bg-[color:var(--bg-surface)] px-3 py-3">
                                 <div className="flex items-center justify-between gap-3">
                                   <div className="text-[0.82rem] font-semibold">{change.title}</div>
                                   {change.at ? <div className="text-[0.72rem] text-[color:var(--text-tertiary)]">{formatDateTime(change.at)}</div> : null}
@@ -986,7 +1010,7 @@ export function AimeeShell() {
                               </article>
                             ))
                           ) : (
-                            <div className="rounded-[16px] border border-[color:var(--glass-stroke)] bg-[color:var(--bg-surface-muted)] px-3 py-3 text-[0.8rem] text-[color:var(--text-secondary)]">
+                            <div className="rounded-[12px] border border-[color:var(--border)] bg-[color:var(--bg-surface)] px-3 py-3 text-[0.8rem] text-[color:var(--text-secondary)]">
                               No recent changes available.
                             </div>
                           )}
@@ -999,7 +1023,7 @@ export function AimeeShell() {
                             <button
                               key={question}
                               type="button"
-                              className="rounded-full border border-[color:var(--glass-stroke)] bg-[color:var(--bg-surface-muted)] px-3 py-2 text-left text-[0.76rem] text-[color:var(--text-secondary)] transition-[transform,color,background-color] duration-150 hover:-translate-y-px hover:bg-[color:var(--bg-muted)] hover:text-[color:var(--text-primary)]"
+                              className="rounded-[10px] border border-[color:var(--border)] bg-[color:var(--bg-surface)] px-3 py-2 text-left text-[0.76rem] text-[color:var(--text-secondary)] transition-colors duration-150 hover:bg-[color:var(--bg-muted)] hover:text-[color:var(--text-primary)]"
                               onClick={() => void submitQuestion(question)}
                             >
                               {question}
@@ -1010,20 +1034,16 @@ export function AimeeShell() {
                     </section>
                   </div>
                 ) : null}
-              </div>
-            </section>
 
-            <section className="flex min-h-0 flex-1 flex-col overflow-hidden pt-4">
-              <div className="mb-3 flex items-center justify-between">
-                <div>
-                  <h3 className="text-[0.82rem] font-semibold uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">Reasoning Layer</h3>
-                  <p className="mt-1 text-[0.78rem] text-[color:var(--text-secondary)]">Ask for explanation, grounding, and operator guidance. AIMEE remains read-only.</p>
-                </div>
-              </div>
+                <section className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-[0.82rem] font-semibold uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">Reasoning Layer</h3>
+                      <p className="mt-1 text-[0.78rem] text-[color:var(--text-secondary)]">Ask for explanation, grounding, and operator guidance. AIMEE remains read-only.</p>
+                    </div>
+                  </div>
 
-              <div className="flex min-h-0 flex-1 flex-col gap-3">
-                <div ref={messagesViewportRef} className="min-h-0 flex-1 overflow-y-auto pr-1">
-                  <div className="flex min-h-full flex-col gap-3 pb-1">
+                  <div className="flex flex-col gap-3 pb-1">
                     {isLoading ? (
                       <div className="rounded-[18px] border border-[color:var(--glass-stroke)] bg-[image:var(--glass-surface-soft)] px-4 py-3 text-[0.84rem] text-[color:var(--text-secondary)] shadow-[var(--shadow-soft)]">
                         AIMEE is refreshing system context.
@@ -1116,31 +1136,31 @@ export function AimeeShell() {
                     )
                   )}
                   </div>
-                </div>
-
-                <form onSubmit={handleSubmit} className="mt-1 flex-none rounded-[20px] border border-[color:var(--glass-stroke)] bg-[color:color-mix(in_srgb,var(--bg-shell)_96%,transparent)] p-3 shadow-[var(--shadow-panel)] backdrop-blur-[16px]">
-                  <div className="flex items-end gap-2">
-                    <label className="flex-1">
-                      <span className="sr-only">Ask AIMEE a system question</span>
-                      <textarea
-                        value={inputValue}
-                        onChange={(event) => setInputValue(event.target.value)}
-                        rows={2}
-                        placeholder="Ask AIMEE to explain the current system state..."
-                        className="min-h-[72px] w-full resize-none rounded-[16px] border border-[color:var(--glass-stroke)] bg-[color:var(--bg-surface-muted)] px-3 py-3 text-[0.84rem] text-[color:var(--text-primary)] outline-none transition-colors placeholder:text-[color:var(--text-tertiary)] focus:border-[color:color-mix(in_srgb,var(--accent)_36%,var(--glass-stroke))]"
-                      />
-                    </label>
-                    <button
-                      type="submit"
-                      className="inline-flex h-11 shrink-0 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--accent)_32%,var(--border))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--accent-soft)_70%,white_18%),color-mix(in_srgb,var(--accent-soft)_94%,transparent))] px-4 text-[0.82rem] font-semibold text-[color:var(--text-primary)] shadow-[var(--shadow-soft)] transition-transform duration-150 hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={!inputValue.trim()}
-                    >
-                      Ask
-                    </button>
-                  </div>
-                </form>
+                </section>
               </div>
-            </section>
+            </div>
+
+            <form onSubmit={handleSubmit} className="mt-3 flex-none rounded-[20px] border border-[color:var(--glass-stroke)] bg-[color:color-mix(in_srgb,var(--bg-shell)_96%,transparent)] p-3 shadow-[var(--shadow-panel)] backdrop-blur-[16px]">
+              <div className="flex items-end gap-2">
+                <label className="flex-1">
+                  <span className="sr-only">Ask AIMEE a system question</span>
+                  <textarea
+                    value={inputValue}
+                    onChange={(event) => setInputValue(event.target.value)}
+                    rows={2}
+                    placeholder="Ask AIMEE to explain the current system state..."
+                    className="min-h-[72px] w-full resize-none rounded-[16px] border border-[color:var(--glass-stroke)] bg-[color:var(--bg-surface-muted)] px-3 py-3 text-[0.84rem] text-[color:var(--text-primary)] outline-none transition-colors placeholder:text-[color:var(--text-tertiary)] focus:border-[color:color-mix(in_srgb,var(--accent)_36%,var(--glass-stroke))]"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="inline-flex h-11 shrink-0 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--accent)_32%,var(--border))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--accent-soft)_70%,white_18%),color-mix(in_srgb,var(--accent-soft)_94%,transparent))] px-4 text-[0.82rem] font-semibold text-[color:var(--text-primary)] shadow-[var(--shadow-soft)] transition-transform duration-150 hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={!inputValue.trim()}
+                >
+                  Ask
+                </button>
+              </div>
+            </form>
           </div>
         </aside>
       </div>
