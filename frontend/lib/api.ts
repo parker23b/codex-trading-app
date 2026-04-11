@@ -10,6 +10,7 @@ import {
   OperatorControlState,
   OperatorSummaryReview,
   OperationalTelemetry,
+  OperationalQuestionReviewResponse,
   Position,
   ReviewHistoryItem,
   SystemOperatingLimits,
@@ -429,6 +430,20 @@ export async function getReviewHistory(reviewType?: string, limit = 8): Promise<
   query.set("limit", String(limit));
   return request<ReviewHistoryItem[]>(`/reviews/history?${query.toString()}`, {
     timeoutMs: 3000,
+  });
+}
+
+export async function askOperationalQuestion(payload: {
+  question: string;
+  strategyName?: string | null;
+}): Promise<OperationalQuestionReviewResponse> {
+  return request<OperationalQuestionReviewResponse>("/reviews/questions", {
+    method: "POST",
+    body: JSON.stringify({
+      question: payload.question,
+      strategy_name: payload.strategyName ?? null,
+    }),
+    timeoutMs: 5000,
   });
 }
 

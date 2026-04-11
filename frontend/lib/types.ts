@@ -674,3 +674,28 @@ export type ReviewHistoryItem = {
   provider?: string | null;
   model?: string | null;
 };
+
+export type OperationalQuestionReviewResponse = {
+  metadata: ReviewMetadata;
+  facts: {
+    question: string;
+    answer_type: string;
+    routed_review_type: ReviewMetadata["review_type"];
+    routed_scope: Record<string, unknown>;
+    supporting_review: Record<string, unknown>;
+  };
+  derived_observations: ReviewObservation[];
+  possible_contributors: PossibleContributor[];
+  warnings: ReviewWarning[];
+  supporting_metrics: SupportingMetric[];
+  ai_summary?: AIReviewSummary | null;
+  provenance?: {
+    llm_attempted: boolean;
+    llm_provider?: string | null;
+    llm_model?: string | null;
+    prompt_version: string;
+    generated_at?: string | null;
+    prompt_facts: Record<string, unknown>;
+    raw_response?: string | null;
+  } | null;
+};

@@ -12,6 +12,7 @@ import {
   getControlPlaneSummary,
   getStreamHealth,
 } from "@/lib/api";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const links = [
   { href: "/", label: "Operate" },
@@ -19,7 +20,6 @@ const links = [
   { href: "/coverage", label: "Coverage" },
   { href: "/markets", label: "Investigate" },
   { href: "/events", label: "Events" },
-  { href: "/reviewer", label: "AI Reviewer" },
   { href: "/strategies", label: "Strategies" },
 ];
 
@@ -167,6 +167,7 @@ export function AppNav() {
           <span className="text-[0.68rem] uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">Env</span>
           <strong>Demo</strong>
         </div>
+        <ThemeToggle variant="nav" />
       </div>
     </div>
   );

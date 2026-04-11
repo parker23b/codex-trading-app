@@ -10,7 +10,16 @@ function applyTheme(theme: Theme) {
   document.documentElement.dataset.theme = theme;
 }
 
-export function ThemeToggle() {
+type ThemeToggleProps = {
+  variant?: "floating" | "nav";
+  className?: string;
+};
+
+function joinClasses(...values: Array<string | undefined | false>) {
+  return values.filter(Boolean).join(" ");
+}
+
+export function ThemeToggle({ variant = "floating", className }: ThemeToggleProps) {
   const [theme, setTheme] = useState<Theme>("light");
 
   useEffect(() => {
@@ -33,7 +42,12 @@ export function ThemeToggle() {
   return (
     <button
       type="button"
-      className="fixed right-4 bottom-4 z-30 flex h-11 w-11 items-center justify-center rounded-full border border-[color:var(--glass-stroke)] bg-[image:var(--glass-surface)] text-[color:var(--text-primary)] shadow-[var(--shadow-panel)] backdrop-blur-[16px] transition-transform duration-150 ease-out hover:-translate-y-px hover:shadow-[var(--shadow-raised)]"
+      className={joinClasses(
+        variant === "nav"
+          ? "inline-flex h-9 w-9 items-center justify-center rounded-full border border-[color:var(--glass-stroke)] bg-[image:var(--glass-surface-soft)] text-[color:var(--text-secondary)] shadow-[var(--shadow-soft)] transition-[transform,background-color,color,box-shadow] duration-150 ease-out hover:-translate-y-px hover:text-[color:var(--text-primary)] hover:shadow-[var(--shadow-panel)]"
+          : "fixed right-4 bottom-4 z-30 flex h-11 w-11 items-center justify-center rounded-full border border-[color:var(--glass-stroke)] bg-[image:var(--glass-surface)] text-[color:var(--text-primary)] shadow-[var(--shadow-panel)] backdrop-blur-[16px] transition-transform duration-150 ease-out hover:-translate-y-px hover:shadow-[var(--shadow-raised)]",
+        className,
+      )}
       onClick={handleToggle}
       aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
       title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}

@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
+import { AimeeShell } from "@/components/aimee/aimee-shell";
 import { AppNav } from "@/components/app-nav";
-import { ThemeToggle } from "@/components/theme-toggle";
 
 import "./globals.css";
 
@@ -37,7 +37,7 @@ export default function RootLayout({
           </header>
           <div className="min-h-[calc(100vh-var(--nav-height))] pt-[var(--nav-height)]">{children}</div>
         </div>
-        <ThemeToggle />
+        <AimeeShell />
       </body>
     </html>
   );
