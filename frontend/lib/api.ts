@@ -1,4 +1,5 @@
 import {
+  AimeeSnapshotResponse,
   BrokerAuthStatus,
   CoverageSummary,
   ControlPlaneSummary,
@@ -443,6 +444,12 @@ export async function askOperationalQuestion(payload: {
       question: payload.question,
       strategy_name: payload.strategyName ?? null,
     }),
+    timeoutMs: 5000,
+  });
+}
+
+export async function getAimeeSnapshot(): Promise<AimeeSnapshotResponse> {
+  return request<AimeeSnapshotResponse>("/aimee/snapshot", {
     timeoutMs: 5000,
   });
 }

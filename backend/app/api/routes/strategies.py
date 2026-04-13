@@ -29,6 +29,11 @@ class StrategyControlResponse(BaseModel):
 
 @router.get("/strategies")
 def list_strategies(session: Session = Depends(get_session)) -> list[dict[str, object]]:
+    """Return operator strategy state.
+
+    This endpoint performs broker reconciliation before responding, so it is
+    not safe for passive assistant refresh paths such as AIMEE.
+    """
     BrokerService().reconcile_positions(session)
     return StrategyService(session).list_strategies()
 

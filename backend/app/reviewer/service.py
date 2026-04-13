@@ -58,7 +58,13 @@ class AIReviewerService:
         self.stream_service = get_ig_streaming_service()
         self.llm_client = get_review_llm_client()
 
-    def get_operator_summary(self) -> OperatorSummaryReview:
+    def get_operator_summary(self, *, persist: bool = True) -> OperatorSummaryReview:
+        """Build the current operator summary.
+
+        `persist=False` exists for read-only consumers such as AIMEE's passive
+        snapshot path. Those callers may explain current state, but must not
+        create review-history artifacts merely by reading.
+        """
         now = self._utc_datetime(datetime.now(UTC))
         since = now - timedelta(hours=24)
         trades = self.trade_service.list_trades(date_from=since)
@@ -149,9 +155,9 @@ class AIReviewerService:
             warnings=warnings,
             supporting_metrics=supporting_metrics,
         )
-        return self._finalize_review(response)
+        return self._finalize_review(response, persist=persist)
 
-    def get_daily_review(self, review_date: date) -> DailyReviewResponse:
+    def get_daily_review(self, review_date: date, *, persist: bool = True) -> DailyReviewResponse:
         start = self._utc_datetime(datetime.combine(review_date, time.min, tzinfo=UTC))
         end = self._utc_datetime(datetime.combine(review_date, time.max, tzinfo=UTC))
         previous_start = start - timedelta(days=5)
@@ -196,9 +202,9 @@ class AIReviewerService:
                 self._metric("risk_rejections", "Risk Rejections", facts.risk_rejections),
             ],
         )
-        return self._finalize_review(response)
+        return self._finalize_review(response, persist=persist)
 
-    def get_strategy_review(self, strategy_name: str, period_days: int = 7) -> StrategyReviewResponse:
+    def get_strategy_review(self, strategy_name: str, period_days: int = 7, *, persist: bool = True) -> StrategyReviewResponse:
         now = self._utc_datetime(datetime.now(UTC))
         start = now - timedelta(days=period_days)
         previous_start = start - timedelta(days=period_days)
@@ -243,9 +249,9 @@ class AIReviewerService:
                 self._metric("execution_failures", "Execution Failures", facts.execution_failures),
             ],
         )
-        return self._finalize_review(response)
+        return self._finalize_review(response, persist=persist)
 
-    def get_runtime_health_review(self, period_hours: int = 24) -> RuntimeHealthReviewResponse:
+    def get_runtime_health_review(self, period_hours: int = 24, *, persist: bool = True) -> RuntimeHealthReviewResponse:
         now = self._utc_datetime(datetime.now(UTC))
         start = now - timedelta(hours=period_hours)
         runtimes = self.runtime_state_service.list_runtimes()
@@ -306,9 +312,9 @@ class AIReviewerService:
                 self._metric("execution_failure_count", "Execution Failures", facts.execution_failure_count),
             ],
         )
-        return self._finalize_review(response)
+        return self._finalize_review(response, persist=persist)
 
-    def get_trade_postmortem(self, trade_id: int) -> TradePostMortemReviewResponse:
+    def get_trade_postmortem(self, trade_id: int, *, persist: bool = True) -> TradePostMortemReviewResponse:
         trade = self.trade_service.get_trade(trade_id)
         if trade is None:
             raise ValueError(f"Trade '{trade_id}' was not found.")
@@ -354,25 +360,31 @@ class AIReviewerService:
                 self._metric("recent_loss_count_same_strategy", "Recent Strategy Losses", facts.recent_loss_count_same_strategy),
             ],
         )
-        return self._finalize_review(response)
+        return self._finalize_review(response, persist=persist)
 
     def answer_operational_question(self, question: str, strategy_name: str | None = None) -> OperationalQuestionReviewResponse:
+        """Answer an operator question interpretively.
+
+        Supporting summaries are intentionally computed with `persist=False` so
+        this path stores only the explicit advisory question artifact instead of
+        generating hidden nested review records.
+        """
         normalized = question.lower()
         inferred_strategy_name = strategy_name or self._infer_strategy_name(normalized)
         if "risk" in normalized and "blocked" in normalized:
-            supporting = self.get_daily_review(datetime.now(UTC).date())
+            supporting = self.get_daily_review(datetime.now(UTC).date(), persist=False)
             answer_type = "risk_blockers"
         elif "operational" in normalized or "runtime" in normalized or "stale" in normalized:
-            supporting = self.get_runtime_health_review()
+            supporting = self.get_runtime_health_review(persist=False)
             answer_type = "runtime_health"
         elif inferred_strategy_name is not None:
-            supporting = self.get_strategy_review(inferred_strategy_name)
+            supporting = self.get_strategy_review(inferred_strategy_name, persist=False)
             answer_type = "strategy_review"
         elif "today" in normalized or "daily" in normalized or "pnl" in normalized:
-            supporting = self.get_daily_review(datetime.now(UTC).date())
+            supporting = self.get_daily_review(datetime.now(UTC).date(), persist=False)
             answer_type = "daily_review"
         else:
-            supporting = self.get_operator_summary()
+            supporting = self.get_operator_summary(persist=False)
             answer_type = "operator_summary"
         response = OperationalQuestionReviewResponse(
             metadata=self._metadata("operational_question", self._utc_datetime(datetime.now(UTC)), supporting.metadata.period_start, supporting.metadata.period_end, {"question": question, "strategy_name": inferred_strategy_name}),
@@ -432,7 +444,7 @@ class AIReviewerService:
             generation_mode=record.generation_mode,  # type: ignore[arg-type]
         )
 
-    def _finalize_review(self, response: Any, request_text: str | None = None) -> Any:
+    def _finalize_review(self, response: Any, request_text: str | None = None, *, persist: bool = True) -> Any:
         facts_payload = response.facts.model_dump(mode="json") if hasattr(response.facts, "model_dump") else response.facts
         review_payload = {
             "facts": facts_payload,
@@ -461,7 +473,10 @@ class AIReviewerService:
         )
         if llm_response is not None:
             response.ai_summary = AIReviewSummary(summary=llm_response.content)
-        self._persist_review(response)
+        # Read-only consumers must be able to reuse review construction without
+        # leaking write-on-read behavior back into passive assistant refreshes.
+        if persist:
+            self._persist_review(response)
         return response
 
     def _persist_review(self, response: Any) -> None:

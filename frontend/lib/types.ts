@@ -675,6 +675,80 @@ export type ReviewHistoryItem = {
   model?: string | null;
 };
 
+export type AimeeControlPlaneSummary = {
+  effective_autonomous_control_enabled: boolean;
+  configured_autonomous_control_enabled: boolean;
+  autonomy_override_active: boolean;
+  autonomy_override_reason?: string | null;
+  misaligned_count: number;
+  counts: Record<string, number>;
+  families: Array<{
+    strategy_name: string;
+    deployment?: {
+      state?: string | null;
+      blocked_reason?: string | null;
+      degraded_reason?: string | null;
+      selected_instrument?: string | null;
+      selected_profile?: string | null;
+      updated_at?: string | null;
+    } | null;
+    runtime: {
+      is_running: boolean;
+      active_instrument?: string | null;
+      active_profile_name?: string | null;
+      control_mode?: string | null;
+      persisted_runtime_count: number;
+    };
+    alignment: {
+      is_aligned?: boolean | null;
+      reason: string;
+    };
+    governance: {
+      approval_state: string;
+      autonomous_operation_allowed: boolean;
+      emergency_stop: boolean;
+    };
+  }>;
+};
+
+export type AimeeCoverageSummary = {
+  streaming: {
+    active_instruments: string[];
+    desired_instruments: string[];
+    pinned_instruments: string[];
+    capped_instruments: string[];
+    asset_class_usage: Record<string, number>;
+  };
+  promotions: {
+    pending_count: number;
+    accepted_count: number;
+    rejected_count: number;
+    expired_count: number;
+  };
+  trade_allocator: {
+    selected_count: number;
+    rejected_count: number;
+    reason_counts: Record<string, number>;
+  };
+};
+
+export type AimeeStrategySummary = {
+  name: string;
+  status: "RUNNING" | "STOPPED";
+  warning_message?: string | null;
+};
+
+export type AimeeSnapshotResponse = {
+  review: OperatorSummaryReview | null;
+  history: ReviewHistoryItem[];
+  controlPlane: AimeeControlPlaneSummary | null;
+  coverage: AimeeCoverageSummary | null;
+  telemetry: OperationalTelemetry | null;
+  events: DomainEvent[];
+  strategies: AimeeStrategySummary[];
+  updatedAt?: string | null;
+};
+
 export type OperationalQuestionReviewResponse = {
   metadata: ReviewMetadata;
   facts: {

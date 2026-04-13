@@ -404,17 +404,17 @@ export function InspectorDrawer({ title, subtitle, open, onClose, children }: In
     >
       <div
         className={joinClasses(
-          "absolute inset-0 bg-[rgba(6,12,18,0.4)] opacity-0 transition-opacity duration-200",
+          "absolute inset-0 bg-[rgba(6,18,28,0.16)] opacity-0 backdrop-blur-[4px] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.02),inset_0_0_120px_rgba(6,18,28,0.1)] transition-opacity duration-200",
           open && "pointer-events-auto opacity-100",
         )}
         onClick={onClose}
       />
       <aside
         className={joinClasses(
-          "absolute right-0 w-full max-w-[560px] border-l border-[color:var(--glass-stroke)] bg-[image:var(--glass-surface)] shadow-[var(--shadow-raised)] transition-transform duration-200 ease-out pointer-events-auto",
+          "pointer-events-auto absolute right-0 w-full max-w-[620px] overflow-x-hidden border-l border-[color:var(--glass-stroke)] bg-[color:color-mix(in_srgb,var(--bg-shell)_96%,transparent)] shadow-[var(--shadow-raised)] backdrop-blur-[16px] transition-transform duration-200 ease-out",
           open ? "translate-x-0" : "translate-x-full",
         )}
-        style={{ top: "var(--nav-height)", height: "calc(100vh - var(--nav-height))" }}
+        style={{ top: 0, height: "100vh" }}
         aria-label={title}
       >
         <header className="flex items-start justify-between gap-3 border-b border-[color:var(--border)] px-5 py-4">
@@ -425,8 +425,15 @@ export function InspectorDrawer({ title, subtitle, open, onClose, children }: In
             </div>
             {subtitle ? <p className="text-[0.82rem] text-[color:var(--text-secondary)]">{subtitle}</p> : null}
           </div>
-          <button type="button" className="console-button console-button--ghost" onClick={onClose}>
-            Close
+          <button
+            type="button"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[color:var(--glass-stroke)] bg-[color:var(--bg-muted)] text-[color:var(--text-secondary)] transition-colors hover:text-[color:var(--text-primary)]"
+            onClick={onClose}
+            aria-label={`Close ${title}`}
+          >
+            <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden="true">
+              <path d="M5.22 5.22a.75.75 0 0 1 1.06 0L10 8.94l3.72-3.72a.75.75 0 1 1 1.06 1.06L11.06 10l3.72 3.72a.75.75 0 0 1-1.06 1.06L10 11.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06L8.94 10 5.22 6.28a.75.75 0 0 1 0-1.06Z" fill="currentColor" />
+            </svg>
           </button>
         </header>
         <div className="flex h-[calc(100%-73px)] flex-col gap-3 overflow-y-auto p-5">{children}</div>
