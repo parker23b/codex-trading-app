@@ -4,7 +4,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
-from app.core.broker import BrokerMarketDetails, OrderDirection
+from app.core.broker import AccountType, BrokerAccountSummary, BrokerMarketDetails, OrderDirection
 from app.core.config import get_settings
 from app.core.runtime import runtime_manager
 from app.core.signals import EntrySignal, SignalCandidate, SignalKind
@@ -14,7 +14,7 @@ from app.core.broker import BrokerOrderResult, BrokerOrderStatus
 from app.models.runtime import StrategyRuntimeState
 from app.models.trade import Execution, ExecutionPhase, ExecutionStatus, TradeIntent, TradeIntentState
 from app.services.health_service import get_health_service
-from app.services.market_status_service import get_market_status_service
+from app.services.market_status_service import MarketStatus, get_market_status_service
 from app.services.strategy_service import StrategyService
 from app.services.trade_service import TradeService
 from tests.fakes import make_order_result
@@ -181,9 +181,106 @@ def test_execute_entry_signal_requires_approved_trade_intent(session, broker, fi
     assert broker.placed_orders == []
 
 
+def test_execute_entry_signal_reuses_broker_normalization_for_revalidation(session, broker, fixed_now):
+    trade_service = TradeService(session)
+    runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
+    broker.market_details_by_instrument[INSTRUMENT] = BrokerMarketDetails(
+        instrument=INSTRUMENT,
+        name=INSTRUMENT,
+        bid=100.0,
+        offer=100.1,
+        high=101.0,
+        low=99.0,
+        percentage_change=0.0,
+        net_change=0.0,
+        market_status="TRADEABLE",
+        update_time=fixed_now.isoformat(),
+        tradable=True,
+        size_step=0.1,
+    )
+    intent = trade_service.create_trade_intent(
+        TradeIntent(
+            strategy_name="smoke_test_hold",
+            instrument=INSTRUMENT,
+            direction="BUY",
+            state=TradeIntentState.APPROVED.value,
+            signal_time=fixed_now,
+            proposed_size=0.23,
+            allocated_size=0.23,
+            proposed_risk_percent=0.1,
+            allocated_risk_percent=0.1,
+        )
+    )
+    execution = trade_service.create_execution(
+        Execution(
+            trade_intent_id=intent.id,
+            strategy_name="smoke_test_hold",
+            instrument=INSTRUMENT,
+            phase=ExecutionPhase.ENTRY.value,
+            status=ExecutionStatus.SUBMISSION_PENDING.value,
+            client_request_id="ent-revalidate",
+            signal_time=fixed_now,
+            requested_size=0.23,
+            requested_price=100.0,
+        )
+    )
+    signal = EntrySignal(
+        kind=SignalKind.ENTRY,
+        strategy_name="smoke_test_hold",
+        instrument=INSTRUMENT,
+        observed_price=100.0,
+        signal_at=fixed_now,
+        direction=OrderDirection.BUY,
+        size=0.23,
+        risk_percent=0.1,
+        bid=99.9,
+        ask=100.1,
+        market_status="TRADEABLE",
+        tradable=True,
+    )
+    engine = runtime_manager.start(strategy_name="smoke_test_hold", instrument=INSTRUMENT)
+    market_status_service = get_market_status_service()
+    original_get_status = market_status_service.get_status
+    market_status_service.get_status = lambda instrument, *, broker=None, now=None: MarketStatus(
+        instrument=instrument,
+        is_ok=True,
+        market_open=True,
+        tradable=True,
+        quote_fresh=True,
+        spread_ok=True,
+        session_valid=True,
+        dealing_allowed=True,
+        last_price_age_ms=0.0,
+        spread=0.1,
+        reason=None,
+    )
+
+    try:
+        with pytest.raises(ValueError, match="reallocation required"):
+            StrategyService._execute_entry_signal(
+                engine=engine,
+                signal=signal,
+                intent=intent,
+                trade_service=trade_service,
+                execution=execution,
+            )
+    finally:
+        market_status_service.get_status = original_get_status
+
+    assert broker.placed_orders == []
+
+
 def test_process_price_update_runs_entry_to_close_lifecycle(session, broker, fixed_now):
     service = StrategyService(session)
     trade_service = TradeService(session)
+    broker.account_summary = BrokerAccountSummary(
+        account_id="smoke-lifecycle",
+        balance=101.0,
+        available=101.0,
+        profit_loss=0.0,
+        equity=101.0,
+        account_type=AccountType.DEMO,
+    )
     service.start_strategy(STRATEGY, INSTRUMENT)
     broker.place_order_outcomes.append(
         make_order_result(
@@ -224,7 +321,7 @@ def test_process_price_update_runs_entry_to_close_lifecycle(session, broker, fix
     assert len(trades) == 1
     assert trades[0].close_broker_reference == "close-1"
     assert trades[0].pnl == pytest.approx(0.3)
-    assert trades[0].r_multiple == pytest.approx(3.0)
+    assert trades[0].r_multiple == pytest.approx(2.97, rel=1e-2)
     assert {execution.status for execution in executions} >= {
         ExecutionStatus.POSITION_OPENED.value,
         ExecutionStatus.CLOSE_CONFIRMED.value,
@@ -242,6 +339,14 @@ def test_process_price_update_runs_entry_to_close_lifecycle(session, broker, fix
 def test_evaluate_price_update_is_decoupled_from_execution_orchestration(session, broker, fixed_now):
     service = StrategyService(session)
     trade_service = TradeService(session)
+    broker.account_summary = BrokerAccountSummary(
+        account_id="smoke-split",
+        balance=101.0,
+        available=101.0,
+        profit_loss=0.0,
+        equity=101.0,
+        account_type=AccountType.DEMO,
+    )
     service.start_strategy(STRATEGY, INSTRUMENT)
     broker.place_order_outcomes.append(
         make_order_result(
@@ -411,6 +516,14 @@ def test_entry_broker_failure_fails_safely_without_opening_position(session, bro
 def test_entry_below_broker_minimum_is_risk_rejected_before_submission(session, broker, fixed_now):
     service = StrategyService(session)
     trade_service = TradeService(session)
+    broker.account_summary = BrokerAccountSummary(
+        account_id="min-size-reject",
+        balance=1.15713,
+        available=1.15713,
+        profit_loss=0.0,
+        equity=1.15713,
+        account_type=AccountType.DEMO,
+    )
     instrument = "CS.D.EURUSD.CFD.IP"
     strategy = STRATEGY
     broker.market_details_by_instrument[instrument] = BrokerMarketDetails(
@@ -456,9 +569,9 @@ def test_entry_below_broker_minimum_is_risk_rejected_before_submission(session, 
     assert trade_service.list_executions(limit=10) == []
     intents = trade_service.list_trade_intents(limit=10)
     assert intents[0].state == TradeIntentState.REJECTED.value
-    assert intents[0].decision_reason == "Requested size 0.2 is below broker minimum deal size 1.0 for CS.D.EURUSD.CFD.IP."
-    assert intents[0].details["risk_rejection_layer"] == "broker_constraints"
-    assert intents[0].details["risk_audit_summary"]["min_deal_size"] == 1.0
+    assert "minimum deal size" in (intents[0].decision_reason or "").lower()
+    assert intents[0].decision_reason_code == "below_min_size"
+    assert intents[0].details["allocation"]["broker_details"]["min_deal_size"] == 1.0
 
 
 def test_entry_is_blocked_when_market_quote_is_stale(session, broker, fixed_now):

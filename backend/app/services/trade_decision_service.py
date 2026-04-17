@@ -7,9 +7,9 @@ from sqlmodel import Session
 
 from app.core.signals import EntrySignal, ExitSignal, SignalCandidate, SignalStatus
 from app.models.trade import TradeIntent, TradeIntentState
+from app.services.capital_allocator_service import AllocationDecision, CapitalAllocatorService
 from app.services.market_status_service import get_market_status_service
 from app.services.portfolio_risk_service import PortfolioRiskService
-from app.services.trade_allocator_service import TradeAllocatorService
 from app.services.trade_service import ActiveTradeIntentConflictError, TradeService
 
 
@@ -34,20 +34,41 @@ class TradeDecisionService:
 
     ALLOCATOR_REASON_MAP = {
         "weaker_duplicate": "duplicate_same_direction",
+        "portfolio_position_limit": "portfolio_position_limit",
+        "strategy_position_limit": "strategy_capacity_reached",
+        "cycle_position_limit": "cycle_capacity_reached",
+        "portfolio_risk_exhausted": "portfolio_risk_rejected",
+        "cycle_risk_exhausted": "cycle_risk_rejected",
+        "strategy_risk_exhausted": "strategy_budget_exhausted",
+        "family_risk_exhausted": "family_budget_exhausted",
+        "instrument_risk_exhausted": "instrument_budget_exhausted",
+        "currency_USD_exhausted": "currency_budget_exhausted",
+        "currency_EUR_exhausted": "currency_budget_exhausted",
+        "currency_GBP_exhausted": "currency_budget_exhausted",
+        "currency_JPY_exhausted": "currency_budget_exhausted",
+        "currency_AUD_exhausted": "currency_budget_exhausted",
+        "currency_CHF_exhausted": "currency_budget_exhausted",
+        "currency_CAD_exhausted": "currency_budget_exhausted",
+        "currency_NZD_exhausted": "currency_budget_exhausted",
+        "gross_exposure_limit": "gross_exposure_rejected",
+        "below_min_size": "below_min_size",
+        "size_rounded_to_zero": "below_min_size",
         "direction_conflict": "opposing_signal_blocked",
-        "instrument_exposure_limit": "instrument_already_allocated",
-        "cycle_capacity": "insufficient_capacity",
-        "strategy_capacity": "strategy_capacity_reached",
-        "open_risk_capacity": "portfolio_risk_rejected",
+        "account_equity_unavailable": "allocation_blocked",
+        "account_equity_invalid": "allocation_blocked",
+        "broker_metadata_unavailable": "allocation_blocked",
+        "sizing_context_unavailable": "allocation_blocked",
+        "sizing_quote_unavailable": "allocation_blocked",
+        "approximate_sizing_unsupported": "allocation_blocked",
         "stale_signal": "stale_signal",
-        "selected": "approved",
+        "allocated": "approved",
     }
 
     def __init__(self, session: Session):
         self.session = session
         self.trade_service = TradeService(session)
         self.risk_service = PortfolioRiskService(session)
-        self.trade_allocator = TradeAllocatorService(session)
+        self.capital_allocator = CapitalAllocatorService(session)
         self.market_status_service = get_market_status_service()
 
     def decide_signal_candidates(
@@ -73,23 +94,16 @@ class TradeDecisionService:
         received_at: datetime | None = None,
     ) -> list[TradeDecisionResult]:
         results: list[TradeDecisionResult] = []
-        prepared_candidates: list[SignalCandidate] = []
-        for candidate in candidates:
-            signal = candidate.signal
-            assert isinstance(signal, EntrySignal)
-            size_hint, risk_hint = self._resolve_sizing(candidate)
-            signal.size = size_hint
-            signal.risk_percent = risk_hint
-            prepared_candidates.append(candidate)
-
         open_positions = self.trade_service.list_positions()
         trades = self.trade_service.list_trades()
-        allocation_decisions = self.trade_allocator.allocate(prepared_candidates, received_at=received_at)
+        allocation_decisions = self.capital_allocator.allocate(candidates, received_at=received_at)
         for allocation in allocation_decisions:
             candidate = allocation.candidate
             signal = candidate.signal
             assert isinstance(signal, EntrySignal)
             mapped_reason = self.ALLOCATOR_REASON_MAP.get(allocation.reason_code, allocation.reason_code)
+            signal.size = allocation.normalized_size if allocation.selected else allocation.requested_size
+            signal.risk_percent = allocation.allocated_risk_percent if allocation.selected else allocation.requested_risk_percent
             if allocation.selected:
                 existing_active = self.trade_service.find_active_trade_intent_for_instrument(candidate.instrument)
                 if existing_active is not None:
@@ -102,7 +116,21 @@ class TradeDecisionService:
                             f"Instrument {candidate.instrument} already has active intent "
                             f"{existing_active.id} in state {existing_active.state}."
                         ),
-                        details={"conflicting_trade_intent_id": existing_active.id},
+                        allocation=allocation,
+                        details={
+                            "conflicting_trade_intent_id": existing_active.id,
+                            "allocation_outcome": {
+                                "stage": "post_allocation_conflict",
+                                "allocator_selected": True,
+                                "hard_risk_passed": None,
+                                "hard_risk_blocked": False,
+                                "execution_submitted": False,
+                                "execution_blocked": True,
+                                "execution_revalidation_changed_outcome": False,
+                                "fill_status": None,
+                                "final_status": TradeIntentState.REJECTED.value,
+                            },
+                        },
                     )
                     results.append(
                         TradeDecisionResult(
@@ -121,6 +149,7 @@ class TradeDecisionService:
                         initial_state=TradeIntentState.PROPOSED,
                         decision_reason_code="proposed",
                         decision_reason="Raw strategy signal proposed for centralized trade admission.",
+                        allocation=allocation,
                     )
                 except ActiveTradeIntentConflictError as exc:
                     conflicting_id = exc.conflicting_intent_id
@@ -136,10 +165,36 @@ class TradeDecisionService:
                             else f"Instrument {candidate.instrument} was allocated concurrently."
                         ),
                         details=(
-                            {"conflicting_trade_intent_id": conflicting_id}
+                            {
+                                "conflicting_trade_intent_id": conflicting_id,
+                                "allocation_outcome": {
+                                    "stage": "post_allocation_conflict",
+                                    "allocator_selected": True,
+                                    "hard_risk_passed": None,
+                                    "hard_risk_blocked": False,
+                                    "execution_submitted": False,
+                                    "execution_blocked": True,
+                                    "execution_revalidation_changed_outcome": False,
+                                    "fill_status": None,
+                                    "final_status": TradeIntentState.REJECTED.value,
+                                },
+                            }
                             if conflicting_id is not None
-                            else None
+                            else {
+                                "allocation_outcome": {
+                                    "stage": "post_allocation_conflict",
+                                    "allocator_selected": True,
+                                    "hard_risk_passed": None,
+                                    "hard_risk_blocked": False,
+                                    "execution_submitted": False,
+                                    "execution_blocked": True,
+                                    "execution_revalidation_changed_outcome": False,
+                                    "fill_status": None,
+                                    "final_status": TradeIntentState.REJECTED.value,
+                                }
+                            }
                         ),
+                        allocation=allocation,
                     )
                     results.append(
                         TradeDecisionResult(
@@ -158,7 +213,7 @@ class TradeDecisionService:
                     initial_state=TradeIntentState.REJECTED,
                     decision_reason_code=mapped_reason,
                     decision_reason=allocation.reason,
-                    details={"allocator_score": allocation.score},
+                    allocation=allocation,
                 )
 
             if not allocation.selected:
@@ -180,8 +235,6 @@ class TradeDecisionService:
                     open_positions=open_positions,
                     trades=trades,
                 )
-            if approved_signal.status is SignalStatus.APPROVED:
-                approved_signal = self._apply_broker_entry_constraints(candidate=candidate, signal=approved_signal)
 
             if approved_signal.status is SignalStatus.APPROVED:
                 conflicting_active = self.trade_service.find_active_trade_intent_for_instrument_excluding(
@@ -197,7 +250,20 @@ class TradeDecisionService:
                             f"Instrument {candidate.instrument} was allocated while this intent was under review "
                             f"by intent {conflicting_active.id}."
                         ),
-                        details={"conflicting_trade_intent_id": conflicting_active.id},
+                        details={
+                            "conflicting_trade_intent_id": conflicting_active.id,
+                            "allocation_outcome": {
+                                "stage": "post_allocation_conflict",
+                                "allocator_selected": True,
+                                "hard_risk_passed": True,
+                                "hard_risk_blocked": False,
+                                "execution_submitted": False,
+                                "execution_blocked": True,
+                                "execution_revalidation_changed_outcome": False,
+                                "fill_status": None,
+                                "final_status": TradeIntentState.REJECTED.value,
+                            },
+                        },
                     )
                     results.append(
                         TradeDecisionResult(
@@ -218,10 +284,22 @@ class TradeDecisionService:
                         decision_reason_code="approved",
                         decision_reason=approved_signal.reason or "Approved by centralized trade decision service.",
                         details={
-                            "allocator_score": allocation.score,
+                            "allocator_score": allocation.priority_score,
+                            "allocation_priority_score": allocation.priority_score,
                             "risk_rejection_layer": approved_signal.rejection_layer,
                             "risk_audit_summary": approved_signal.audit_summary,
                             "risk_audit_trail": approved_signal.audit_trail,
+                            "allocation_outcome": {
+                                "stage": "approved_for_execution",
+                                "allocator_selected": True,
+                                "hard_risk_passed": True,
+                                "hard_risk_blocked": False,
+                                "execution_submitted": False,
+                                "execution_blocked": False,
+                                "execution_revalidation_changed_outcome": False,
+                                "fill_status": None,
+                                "final_status": TradeIntentState.APPROVED.value,
+                            },
                         },
                     )
                 except ActiveTradeIntentConflictError as exc:
@@ -236,9 +314,34 @@ class TradeDecisionService:
                             else f"Instrument {candidate.instrument} was allocated concurrently."
                         ),
                         details=(
-                            {"conflicting_trade_intent_id": exc.conflicting_intent_id}
+                            {
+                                "conflicting_trade_intent_id": exc.conflicting_intent_id,
+                                "allocation_outcome": {
+                                    "stage": "post_allocation_conflict",
+                                    "allocator_selected": True,
+                                    "hard_risk_passed": True,
+                                    "hard_risk_blocked": False,
+                                    "execution_submitted": False,
+                                    "execution_blocked": True,
+                                    "execution_revalidation_changed_outcome": False,
+                                    "fill_status": None,
+                                    "final_status": TradeIntentState.REJECTED.value,
+                                },
+                            }
                             if exc.conflicting_intent_id is not None
-                            else None
+                            else {
+                                "allocation_outcome": {
+                                    "stage": "post_allocation_conflict",
+                                    "allocator_selected": True,
+                                    "hard_risk_passed": True,
+                                    "hard_risk_blocked": False,
+                                    "execution_submitted": False,
+                                    "execution_blocked": True,
+                                    "execution_revalidation_changed_outcome": False,
+                                    "fill_status": None,
+                                    "final_status": TradeIntentState.REJECTED.value,
+                                }
+                            }
                         ),
                     )
                     results.append(
@@ -269,10 +372,22 @@ class TradeDecisionService:
                 decision_reason_code=rejection_code,
                 decision_reason=approved_signal.reason,
                 details={
-                    "allocator_score": allocation.score,
+                    "allocator_score": allocation.priority_score,
+                    "allocation_priority_score": allocation.priority_score,
                     "risk_rejection_layer": approved_signal.rejection_layer,
                     "risk_audit_summary": approved_signal.audit_summary,
                     "risk_audit_trail": approved_signal.audit_trail,
+                    "allocation_outcome": {
+                        "stage": "hard_risk_rejected",
+                        "allocator_selected": True,
+                        "hard_risk_passed": False,
+                        "hard_risk_blocked": True,
+                        "execution_submitted": False,
+                        "execution_blocked": False,
+                        "execution_revalidation_changed_outcome": False,
+                        "fill_status": None,
+                        "final_status": TradeIntentState.REJECTED.value,
+                    },
                 },
             )
             results.append(
@@ -328,19 +443,41 @@ class TradeDecisionService:
         initial_state: TradeIntentState,
         decision_reason_code: str,
         decision_reason: str,
+        allocation: AllocationDecision,
         details: dict[str, object] | None = None,
     ) -> TradeIntent:
+        risk_currency = (
+            ((allocation.sizing_details or {}).get("sizing_quote") or {}).get("details") or {}
+        ).get("account_currency")
+        allocation_outcome_stage = "allocator_rejected" if not allocation.selected else "proposed_for_risk_overlay"
+        effective_risk_percent = (
+            allocation.allocated_risk_percent if allocation.selected else allocation.requested_risk_percent
+        )
+        allocation_drift_metrics = self._build_allocation_drift_metrics(allocation)
         return self.trade_service.create_trade_intent(
             TradeIntent(
                 strategy_name=candidate.strategy_name,
+                family_name=getattr(candidate.metadata, "family_name", None),
+                allocation_cycle_id=allocation.cycle_id,
                 instrument=candidate.instrument,
                 direction=signal.direction.value,
                 state=initial_state.value,
                 signal_time=signal.signal_at,
-                proposed_size=signal.size,
-                allocated_size=signal.size,
-                proposed_risk_percent=signal.risk_percent,
-                allocated_risk_percent=signal.risk_percent,
+                proposed_size=allocation.requested_size if allocation.requested_size is not None else signal.size,
+                allocated_size=allocation.normalized_size if allocation.normalized_size is not None else signal.size,
+                proposed_risk_percent=(
+                    allocation.requested_risk_percent
+                    if allocation.requested_risk_percent is not None
+                    else signal.risk_percent
+                ),
+                allocated_risk_percent=(
+                    allocation.allocated_risk_percent
+                    if allocation.allocated_risk_percent is not None
+                    else signal.risk_percent
+                ),
+                estimated_risk_amount=allocation.risk_amount,
+                risk_truth_confidence="ALLOCATION_INTENT_ONLY",
+                risk_currency=str(risk_currency) if risk_currency is not None else None,
                 confidence=candidate.confidence,
                 observed_price=signal.observed_price,
                 market_status=signal.market_status,
@@ -354,19 +491,104 @@ class TradeDecisionService:
                         "metadata_risk_per_trade": getattr(candidate.metadata, "risk_per_trade", None),
                         "signal_size_hint": signal.size,
                     },
+                    "allocation": {
+                        "cycle_id": allocation.cycle_id,
+                        "priority_score": allocation.priority_score,
+                        "requested_size": allocation.requested_size,
+                        "normalized_size": allocation.normalized_size,
+                        "requested_risk_percent": allocation.requested_risk_percent,
+                        "allocated_risk_percent": allocation.allocated_risk_percent,
+                        "risk_amount": allocation.risk_amount,
+                        "account_equity": allocation.account_equity,
+                        "sizing_precision": allocation.sizing_precision,
+                        "sizing_mode": allocation.sizing_mode,
+                        "degraded": allocation.degraded,
+                        "binding_budget": allocation.binding_budget,
+                        "sizing_method": allocation.sizing_method,
+                        "score_components": allocation.score_components,
+                        "sizing_details": allocation.sizing_details,
+                        "broker_details": allocation.broker_details,
+                        "notes": allocation.notes,
+                        "drift_metrics": allocation_drift_metrics,
+                    },
+                    "allocation_outcome": {
+                        "stage": allocation_outcome_stage,
+                        "allocator_selected": allocation.selected,
+                        "hard_risk_passed": None,
+                        "hard_risk_blocked": False,
+                        "execution_submitted": False,
+                        "execution_blocked": False,
+                        "execution_revalidation_changed_outcome": False,
+                        "fill_status": None,
+                        "final_status": initial_state.value,
+                    },
+                    "risk_tracking": {
+                        "risk_currency": risk_currency,
+                        "estimated_allocation_risk_amount": allocation.risk_amount,
+                        "estimated_allocation_risk_percent": effective_risk_percent,
+                        "submitted_executable_risk_amount": None,
+                        "submitted_executable_risk_percent": None,
+                        "fill_derived_risk_amount": None,
+                        "fill_derived_risk_percent": None,
+                        "submitted_size": None,
+                        "filled_size": None,
+                        "reservation_owner": "INTENT",
+                        "risk_state": "estimated_only",
+                        "risk_truth_confidence": "ALLOCATION_INTENT_ONLY",
+                    },
+                    "risk_reconciliation": {
+                        "estimated": {
+                            "risk_amount": allocation.risk_amount,
+                            "risk_percent": effective_risk_percent,
+                            "size": allocation.normalized_size if allocation.selected else allocation.requested_size,
+                            "entry_price": signal.observed_price,
+                            "risk_currency": risk_currency,
+                            "derivation_mode": "allocation_estimate",
+                            "precision": allocation.sizing_precision,
+                            "sizing_mode": allocation.sizing_mode,
+                            "risk_truth_confidence": "ALLOCATION_INTENT_ONLY",
+                        },
+                        "submitted": None,
+                        "filled": None,
+                        "live_position": None,
+                        "drift_metrics": allocation_drift_metrics,
+                        "flags": {
+                            "material_execution_drift": False,
+                            "fill_risk_estimated": False,
+                            "incomplete_fill_data": False,
+                            "degraded_sizing": allocation.degraded,
+                        },
+                    },
                     **(details or {}),
                 },
             )
         )
 
     @staticmethod
-    def _resolve_sizing(candidate: SignalCandidate) -> tuple[float, float]:
-        metadata = candidate.metadata
-        signal = candidate.signal
-        assert isinstance(signal, EntrySignal)
-        size_hint = float(getattr(metadata, "position_size", signal.size) or signal.size or 0.0)
-        risk_hint = float(getattr(metadata, "risk_per_trade", signal.risk_percent) or signal.risk_percent or 0.0)
-        return size_hint, risk_hint
+    def _metric(expected: float | None, actual: float | None) -> dict[str, float | bool] | None:
+        if expected is None or actual is None:
+            return None
+        absolute_drift = float(actual) - float(expected)
+        percent_drift = None
+        if abs(float(expected)) > 1e-9:
+            percent_drift = (absolute_drift / float(expected)) * 100.0
+        return {
+            "expected": round(float(expected), 8),
+            "actual": round(float(actual), 8),
+            "absolute_drift": round(absolute_drift, 8),
+            "absolute_drift_abs": round(abs(absolute_drift), 8),
+            "percent_drift": round(percent_drift, 8) if percent_drift is not None else None,
+            "percent_drift_abs": round(abs(percent_drift), 8) if percent_drift is not None else None,
+        }
+
+    def _build_allocation_drift_metrics(self, allocation: AllocationDecision) -> dict[str, object]:
+        return {
+            "requested_to_normalized_size": self._metric(allocation.requested_size, allocation.normalized_size),
+            "requested_to_allocated_risk_percent": self._metric(
+                allocation.requested_risk_percent,
+                allocation.allocated_risk_percent,
+            ),
+        }
 
     def _apply_market_status_gate(self, *, candidate: SignalCandidate, signal: EntrySignal) -> EntrySignal:
         status = self.market_status_service.get_status(signal.instrument, broker=candidate.engine.broker, now=signal.signal_at)
@@ -403,59 +625,7 @@ class TradeDecisionService:
         )
 
     @staticmethod
-    def _apply_broker_entry_constraints(*, candidate: SignalCandidate, signal: EntrySignal) -> EntrySignal:
-        try:
-            market_details = candidate.engine.broker.get_market_details(signal.instrument)
-        except Exception:
-            return signal
-
-        min_deal_size = market_details.min_deal_size
-        if min_deal_size is None or signal.size >= min_deal_size:
-            return signal
-
-        reason = (
-            f"Requested size {signal.size} is below broker minimum deal size "
-            f"{min_deal_size} for {signal.instrument}."
-        )
-        audit_trail = list(signal.audit_trail)
-        audit_trail.append(
-            {
-                "layer": "broker_constraints",
-                "status": "REJECTED",
-                "passed": False,
-                "reason": reason,
-                "checks": [
-                    {
-                        "code": "min_deal_size",
-                        "passed": False,
-                        "reason": reason,
-                        "actual": signal.size,
-                        "limit": min_deal_size,
-                    }
-                ],
-            }
-        )
-        audit_summary = dict(signal.audit_summary)
-        audit_summary.update(
-            {
-                "approved": False,
-                "rejection_layer": "broker_constraints",
-                "min_deal_size": min_deal_size,
-            }
-        )
-        return replace(
-            signal,
-            status=SignalStatus.REJECTED,
-            reason=reason,
-            rejection_layer="broker_constraints",
-            audit_trail=audit_trail,
-            audit_summary=audit_summary,
-        )
-
-    @staticmethod
     def _reason_code_from_signal(signal: EntrySignal) -> str:
-        if signal.rejection_layer == "broker_constraints":
-            return "below_min_size"
         if signal.rejection_layer == "market_status":
             return "market_closed" if "closed" in (signal.reason or "").lower() else "instrument_not_tradable"
         if signal.rejection_layer in {"portfolio", "kill_switch"}:

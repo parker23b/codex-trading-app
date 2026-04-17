@@ -3,8 +3,10 @@ from datetime import datetime
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, desc, select
 
+from app.models.allocation_alert import AllocationAlert
 from app.models.trade import (
     ACTIVE_INSTRUMENT_OWNERSHIP_STATES,
+    AllocationCycle,
     Execution,
     ExecutionStatus,
     Position,
@@ -56,10 +58,28 @@ class TradeService:
         statement = select(Execution).order_by(desc(Execution.last_transition_at)).limit(limit)
         return list(self.session.exec(statement).all())
 
+    def list_executions_for_trade_intent(self, trade_intent_id: int) -> list[Execution]:
+        statement = (
+            select(Execution)
+            .where(Execution.trade_intent_id == trade_intent_id)
+            .order_by(desc(Execution.last_transition_at), desc(Execution.id))
+        )
+        return list(self.session.exec(statement).all())
+
+    def get_latest_execution_for_trade_intent(self, trade_intent_id: int) -> Execution | None:
+        statement = (
+            select(Execution)
+            .where(Execution.trade_intent_id == trade_intent_id)
+            .order_by(desc(Execution.last_transition_at), desc(Execution.id))
+            .limit(1)
+        )
+        return self.session.exec(statement).first()
+
     def list_trade_intents(
         self,
         *,
         limit: int = 250,
+        allocation_cycle_id: str | None = None,
         strategy_name: str | None = None,
         instrument: str | None = None,
         date_from: datetime | None = None,
@@ -67,6 +87,8 @@ class TradeService:
         states: set[str] | tuple[str, ...] | list[str] | None = None,
     ) -> list[TradeIntent]:
         statement = select(TradeIntent)
+        if allocation_cycle_id is not None:
+            statement = statement.where(TradeIntent.allocation_cycle_id == allocation_cycle_id)
         if strategy_name is not None:
             statement = statement.where(TradeIntent.strategy_name == strategy_name)
         if instrument is not None:
@@ -96,6 +118,10 @@ class TradeService:
 
     def get_trade(self, trade_id: int) -> Trade | None:
         statement = select(Trade).where(Trade.id == trade_id)
+        return self.session.exec(statement).first()
+
+    def get_position_by_id(self, position_id: int) -> Position | None:
+        statement = select(Position).where(Position.id == position_id)
         return self.session.exec(statement).first()
 
     def list_all_open_positions(self) -> list[Position]:
@@ -145,6 +171,46 @@ class TradeService:
     def get_trade_intent(self, trade_intent_id: int) -> TradeIntent | None:
         statement = select(TradeIntent).where(TradeIntent.id == trade_intent_id)
         return self.session.exec(statement).first()
+
+    def list_allocation_cycles(self, *, limit: int = 100) -> list[AllocationCycle]:
+        statement = select(AllocationCycle).order_by(desc(AllocationCycle.received_at), desc(AllocationCycle.id)).limit(limit)
+        return list(self.session.exec(statement).all())
+
+    def get_allocation_cycle(self, cycle_id: str) -> AllocationCycle | None:
+        statement = select(AllocationCycle).where(AllocationCycle.cycle_id == cycle_id)
+        return self.session.exec(statement).first()
+
+    def record_allocation_cycle(self, allocation_cycle: AllocationCycle) -> AllocationCycle:
+        self.session.add(allocation_cycle)
+        self.session.commit()
+        self.session.refresh(allocation_cycle)
+        return allocation_cycle
+
+    def list_allocation_alerts(
+        self,
+        *,
+        limit: int = 100,
+        states: set[str] | tuple[str, ...] | list[str] | None = None,
+    ) -> list[AllocationAlert]:
+        statement = select(AllocationAlert)
+        if states:
+            statement = statement.where(AllocationAlert.state.in_(tuple(states)))
+        statement = statement.order_by(desc(AllocationAlert.updated_at), desc(AllocationAlert.id)).limit(limit)
+        return list(self.session.exec(statement).all())
+
+    def get_allocation_alert(self, alert_id: int) -> AllocationAlert | None:
+        statement = select(AllocationAlert).where(AllocationAlert.id == alert_id)
+        return self.session.exec(statement).first()
+
+    def get_allocation_alert_by_key(self, alert_key: str) -> AllocationAlert | None:
+        statement = select(AllocationAlert).where(AllocationAlert.alert_key == alert_key)
+        return self.session.exec(statement).first()
+
+    def upsert_allocation_alert(self, alert: AllocationAlert) -> AllocationAlert:
+        self.session.add(alert)
+        self.session.commit()
+        self.session.refresh(alert)
+        return alert
 
     def find_active_trade_intent_for_instrument(self, instrument: str) -> TradeIntent | None:
         return self.find_active_trade_intent_for_instrument_excluding(instrument, exclude_intent_id=None)
@@ -259,8 +325,14 @@ class TradeService:
         intent: TradeIntent,
         *,
         state: TradeIntentState | str,
+        allocation_cycle_id: str | None = None,
         allocated_size: float | None = None,
         allocated_risk_percent: float | None = None,
+        estimated_risk_amount: float | None = None,
+        submitted_risk_amount: float | None = None,
+        fill_derived_risk_amount: float | None = None,
+        risk_truth_confidence: str | None = None,
+        risk_currency: str | None = None,
         average_fill_price: float | None = None,
         filled_size: float | None = None,
         broker_reference: str | None = None,
@@ -281,10 +353,22 @@ class TradeService:
     ) -> TradeIntent:
         intent.state = state.value if isinstance(state, TradeIntentState) else state
         intent.updated_at = utc_now()
+        if allocation_cycle_id is not None:
+            intent.allocation_cycle_id = allocation_cycle_id
         if allocated_size is not None:
             intent.allocated_size = allocated_size
         if allocated_risk_percent is not None:
             intent.allocated_risk_percent = allocated_risk_percent
+        if estimated_risk_amount is not None:
+            intent.estimated_risk_amount = estimated_risk_amount
+        if submitted_risk_amount is not None:
+            intent.submitted_risk_amount = submitted_risk_amount
+        if fill_derived_risk_amount is not None:
+            intent.fill_derived_risk_amount = fill_derived_risk_amount
+        if risk_truth_confidence is not None:
+            intent.risk_truth_confidence = risk_truth_confidence
+        if risk_currency is not None:
+            intent.risk_currency = risk_currency
         if average_fill_price is not None:
             intent.average_fill_price = average_fill_price
         if filled_size is not None:
@@ -383,6 +467,10 @@ class TradeService:
         completed_at: datetime | None = None,
         filled_size: float | None = None,
         average_fill_price: float | None = None,
+        intended_risk_amount: float | None = None,
+        submitted_risk_amount: float | None = None,
+        fill_derived_risk_amount: float | None = None,
+        risk_truth_confidence: str | None = None,
         reason: str | None = None,
         error_code: str | None = None,
         error_message: str | None = None,
@@ -413,6 +501,14 @@ class TradeService:
             execution.filled_size = filled_size
         if average_fill_price is not None:
             execution.average_fill_price = average_fill_price
+        if intended_risk_amount is not None:
+            execution.intended_risk_amount = intended_risk_amount
+        if submitted_risk_amount is not None:
+            execution.submitted_risk_amount = submitted_risk_amount
+        if fill_derived_risk_amount is not None:
+            execution.fill_derived_risk_amount = fill_derived_risk_amount
+        if risk_truth_confidence is not None:
+            execution.risk_truth_confidence = risk_truth_confidence
         if reason is not None:
             execution.reason = reason
         if error_code is not None:
@@ -469,6 +565,7 @@ class TradeService:
             for field_name in (
                 "trade_intent_id",
                 "strategy_name",
+                "family_name",
                 "broker_reference",
                 "direction",
                 "size",
@@ -480,6 +577,8 @@ class TradeService:
                 "current_price",
                 "unrealized_pnl",
                 "risk_percent",
+                "entry_risk_amount",
+                "risk_truth_confidence",
                 "reason",
                 "manual_override",
                 "account_type",
@@ -648,6 +747,10 @@ class TradeService:
                 "filled_size": execution.filled_size,
                 "requested_price": execution.requested_price,
                 "average_fill_price": execution.average_fill_price,
+                "intended_risk_amount": execution.intended_risk_amount,
+                "submitted_risk_amount": execution.submitted_risk_amount,
+                "fill_derived_risk_amount": execution.fill_derived_risk_amount,
+                "risk_truth_confidence": execution.risk_truth_confidence,
                 "requires_manual_review": execution.requires_manual_review,
                 "details": execution.details or {},
             },

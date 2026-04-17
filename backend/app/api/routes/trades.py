@@ -25,6 +25,8 @@ class TradeResponse(BaseModel):
     open_time: datetime
     close_time: datetime
     pnl: float
+    entry_risk_amount: float | None
+    risk_truth_confidence: str | None
     account_type: str
     r_multiple: float | None
     reason: str | None
@@ -45,6 +47,8 @@ def _serialize_trade(trade: Trade) -> TradeResponse:
         open_time=trade.open_time,
         close_time=trade.close_time,
         pnl=trade.pnl,
+        entry_risk_amount=trade.entry_risk_amount,
+        risk_truth_confidence=trade.risk_truth_confidence,
         account_type=trade.account_type,
         r_multiple=trade.r_multiple,
         reason=trade.reason,
@@ -86,6 +90,8 @@ def list_positions_compat(session: Session = Depends(get_session)) -> list[dict[
             "current_price": position.current_price,
             "unrealized_pnl": position.unrealized_pnl,
             "risk_percent": position.risk_percent,
+            "entry_risk_amount": position.entry_risk_amount,
+            "risk_truth_confidence": position.risk_truth_confidence,
             "reason": position.reason,
             "manual_override": position.manual_override,
             "time_in_trade_seconds": max(int((now - position.open_time.astimezone(UTC)).total_seconds()), 0),

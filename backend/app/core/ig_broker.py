@@ -5,6 +5,7 @@ import ssl
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from math import floor
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -18,6 +19,10 @@ from app.core.broker import (
     BrokerMarketDetails,
     BrokerOrderResult,
     BrokerOrderStatus,
+    BrokerRiskSizingQuote,
+    BrokerSizeNormalization,
+    BrokerSizingMode,
+    BrokerSizingPrecision,
     BrokerPosition,
     OrderDirection,
     OrderRequest,
@@ -451,6 +456,142 @@ class IGBroker(Broker):
             account_type=self._account_type,
         )
 
+    def quote_risk_sized_order(
+        self,
+        instrument: str,
+        *,
+        entry_price: float,
+        risk_amount: float,
+        stop_loss_price: float | None = None,
+        fallback_stop_distance: float | None = None,
+    ) -> BrokerRiskSizingQuote:
+        details = self.get_market_details(instrument)
+        sizing_metadata = details.metadata.get("ig_sizing")
+        if not isinstance(sizing_metadata, dict):
+            return BrokerRiskSizingQuote(
+                instrument=instrument,
+                precision=BrokerSizingPrecision.UNSUPPORTED,
+                mode=BrokerSizingMode.UNSUPPORTED,
+                sizing_available=False,
+                reason_code="unsupported_sizing",
+                reason="IG market metadata is insufficient for coherent risk sizing.",
+                entry_price=entry_price,
+                risk_amount=risk_amount,
+                min_stop_distance=details.min_normal_stop_or_limit_distance,
+                details={"broker": "IG"},
+            )
+        price_increment = self._coerce_float(sizing_metadata.get("price_increment"))
+        value_per_increment = self._coerce_float(sizing_metadata.get("value_per_increment"))
+        if (
+            price_increment is None
+            or price_increment <= 0
+            or value_per_increment is None
+            or value_per_increment <= 0
+        ):
+            return BrokerRiskSizingQuote(
+                instrument=instrument,
+                precision=BrokerSizingPrecision.UNSUPPORTED,
+                mode=BrokerSizingMode.UNSUPPORTED,
+                sizing_available=False,
+                reason_code="unsupported_sizing",
+                reason=(
+                    "IG market metadata is insufficient for coherent risk sizing; "
+                    "expected exact point-value semantics."
+                ),
+                entry_price=entry_price,
+                risk_amount=risk_amount,
+                min_stop_distance=details.min_normal_stop_or_limit_distance,
+                details={
+                    "broker": "IG",
+                    "sizing_metadata": sizing_metadata,
+                },
+            )
+
+        stop_distance, sizing_method = self._effective_stop_distance(
+            entry_price=entry_price,
+            stop_loss_price=stop_loss_price,
+            fallback_stop_distance=fallback_stop_distance,
+            min_stop_distance=details.min_normal_stop_or_limit_distance,
+        )
+        increments = stop_distance / max(price_increment, 1e-9)
+        risk_per_unit = increments * value_per_increment
+        requested_size = risk_amount / max(risk_per_unit, 1e-9)
+        normalization = self.normalize_order_size(instrument, requested_size)
+        return BrokerRiskSizingQuote(
+            instrument=instrument,
+            precision=BrokerSizingPrecision.EXACT,
+            mode=BrokerSizingMode.EXACT_POINT_VALUE,
+            sizing_available=True,
+            reason_code="quoted",
+            reason="Broker provided exact point-value risk sizing.",
+            entry_price=entry_price,
+            risk_amount=risk_amount,
+            requested_size=max(requested_size, 0.0),
+            normalized_size=normalization.normalized_size,
+            risk_per_unit=risk_per_unit,
+            stop_distance_price=stop_distance,
+            sizing_method=sizing_method,
+            min_stop_distance=details.min_normal_stop_or_limit_distance,
+            normalization=normalization,
+            details={
+                "broker": "IG",
+                "account_currency": self._get_account_currency(),
+                "price_increment": price_increment,
+                "value_per_increment": value_per_increment,
+                "instrument_type": sizing_metadata.get("instrument_type"),
+                "size_unit": sizing_metadata.get("size_unit"),
+                "one_pip_means": sizing_metadata.get("one_pip_means"),
+                "scaling_factor": sizing_metadata.get("scaling_factor"),
+            },
+        )
+
+    def normalize_order_size(self, instrument: str, requested_size: float) -> BrokerSizeNormalization:
+        details = self.get_market_details(instrument)
+        notes: list[str] = []
+        normalized_size = max(float(requested_size), 0.0)
+        if details.size_step is not None and details.size_step > 0:
+            normalized_size = floor(normalized_size / details.size_step) * details.size_step
+            notes.append("rounded_down_to_size_step")
+        normalized_size = round(normalized_size, 8)
+        if normalized_size <= 0:
+            return BrokerSizeNormalization(
+                instrument=instrument,
+                requested_size=requested_size,
+                normalized_size=0.0,
+                accepted=False,
+                reason_code="size_rounded_to_zero",
+                reason="Broker size normalization rounded the requested size to zero.",
+                min_deal_size=details.min_deal_size,
+                size_step=details.size_step,
+                details={"broker": "IG", "size_unit": details.metadata.get("size_unit")},
+                notes=notes,
+            )
+        if details.min_deal_size is not None and normalized_size < details.min_deal_size:
+            return BrokerSizeNormalization(
+                instrument=instrument,
+                requested_size=requested_size,
+                normalized_size=normalized_size,
+                accepted=False,
+                reason_code="below_min_size",
+                reason="Computed size is below broker minimum deal size.",
+                min_deal_size=details.min_deal_size,
+                size_step=details.size_step,
+                details={"broker": "IG", "size_unit": details.metadata.get("size_unit")},
+                notes=notes,
+            )
+        return BrokerSizeNormalization(
+            instrument=instrument,
+            requested_size=requested_size,
+            normalized_size=normalized_size,
+            accepted=True,
+            reason_code="normalized",
+            reason="Size normalized to broker dealing constraints.",
+            min_deal_size=details.min_deal_size,
+            size_step=details.size_step,
+            details={"broker": "IG", "size_unit": details.metadata.get("size_unit")},
+            notes=notes,
+        )
+
     def _simulate_place_order(self, order: OrderRequest, *, submitted_at: datetime | None = None) -> BrokerOrderResult:
         logger.info(
             "Stub order placed via IG broker",
@@ -639,9 +780,26 @@ class IGBroker(Broker):
         market_order_preference = str(dealing_rules.get("marketOrderPreference") or "").upper()
         tradable = market_status in {"TRADEABLE", "TRADEABLE_ONLINE"} and market_order_preference != "NOT_AVAILABLE"
         min_deal_size = self._extract_rule_value(dealing_rules.get("minDealSize"))
+        size_step = self._coerce_float(instrument_data.get("lotSize"))
         min_normal_stop_or_limit_distance = self._extract_rule_value(
             dealing_rules.get("minNormalStopOrLimitDistance")
         )
+        one_pip_means = instrument_data.get("onePipMeans")
+        one_pip_size = self._extract_numeric_prefix(one_pip_means)
+        scaling_factor = self._coerce_float(instrument_data.get("scalingFactor"))
+        currencies = instrument_data.get("currencies") or []
+        default_currency = next((currency for currency in currencies if currency.get("isDefault")), {})
+        quote_currency = default_currency.get("code") or next(
+            (currency.get("code") for currency in currencies if currency.get("code")),
+            None,
+        )
+        base_currency = None
+        instrument_name = str(instrument_data.get("name") or "")
+        if "/" in instrument_name:
+            left, _, right = instrument_name.partition("/")
+            if len(left.strip()) == 3 and len(right.strip()) == 3:
+                base_currency = left.strip().upper()
+                quote_currency = quote_currency or right.strip().upper()
 
         return BrokerMarketDetails(
             instrument=instrument,
@@ -656,9 +814,43 @@ class IGBroker(Broker):
             update_time=snapshot.get("updateTime"),
             tradable=tradable,
             min_deal_size=min_deal_size,
+            size_step=size_step,
             min_normal_stop_or_limit_distance=min_normal_stop_or_limit_distance,
             market_order_preference=market_order_preference or None,
+            base_currency=base_currency,
+            quote_currency=quote_currency.upper() if isinstance(quote_currency, str) else None,
+            metadata={
+                "provider": "IG",
+                "size_unit": str(instrument_data.get("unit") or "") or None,
+                "ig_sizing": {
+                    "instrument_type": str(instrument_data.get("type") or "") or None,
+                    "size_unit": str(instrument_data.get("unit") or "") or None,
+                    "contract_size": self._coerce_float(instrument_data.get("contractSize")),
+                    "value_per_increment": self._coerce_float(instrument_data.get("valueOfOnePip")),
+                    "scaling_factor": scaling_factor,
+                    "one_pip_means": str(one_pip_means) if one_pip_means is not None else None,
+                    "price_increment": one_pip_size,
+                },
+            },
         )
+
+    @staticmethod
+    def _effective_stop_distance(
+        *,
+        entry_price: float,
+        stop_loss_price: float | None,
+        fallback_stop_distance: float | None,
+        min_stop_distance: float | None,
+    ) -> tuple[float, str]:
+        if stop_loss_price is not None:
+            distance = abs(entry_price - stop_loss_price)
+            if min_stop_distance is not None:
+                distance = max(distance, min_stop_distance)
+            return max(distance, 1e-9), "stop_distance"
+        fallback = max(float(fallback_stop_distance or 0.0), 1e-9)
+        if min_stop_distance is not None:
+            fallback = max(fallback, min_stop_distance)
+        return fallback, "fallback_percent_stop"
 
     def _extract_rule_value(self, raw_value: Any) -> float | None:
         if raw_value is None:
@@ -670,6 +862,22 @@ class IGBroker(Broker):
                 if key in raw_value:
                     return self._coerce_float(raw_value.get(key))
         return self._coerce_float(raw_value)
+
+    def _extract_numeric_prefix(self, raw_value: Any) -> float | None:
+        if raw_value is None:
+            return None
+        if isinstance(raw_value, (int, float)):
+            return float(raw_value)
+        text = str(raw_value).strip()
+        numeric: list[str] = []
+        for char in text:
+            if char.isdigit() or char in {".", "-"}:
+                numeric.append(char)
+                continue
+            break
+        if not numeric:
+            return None
+        return self._coerce_float("".join(numeric))
 
     def _resolve_order_currency(self, market_payload: dict[str, Any]) -> str:
         currencies = market_payload.get("instrument", {}).get("currencies") or []

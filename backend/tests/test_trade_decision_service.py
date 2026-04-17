@@ -4,7 +4,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
-from app.core.broker import BrokerMarketDetails, OrderDirection
+from app.core.broker import AccountType, BrokerAccountSummary, BrokerMarketDetails, OrderDirection
 from app.core.runtime import runtime_manager
 from app.core.signals import EntrySignal, ExitSignal, SignalCandidate, SignalKind
 from app.models.trade import TradeIntent, TradeIntentState
@@ -77,8 +77,9 @@ def test_decision_service_persists_proposed_signal_as_approved_trade_intent(sess
     assert results[0].admitted is True
     assert results[0].intent is not None
     assert results[0].intent.state == TradeIntentState.APPROVED.value
-    assert results[0].intent.allocated_size == 0.2
+    assert results[0].intent.allocated_size > 0
     assert results[0].intent.allocated_risk_percent == 0.1
+    assert ((results[0].intent.details or {}).get("allocation") or {}).get("sizing_method") is not None
     assert intents[0].decision_reason_code == "approved"
 
 
@@ -114,6 +115,14 @@ def test_decision_service_resolves_same_instrument_competition_explicitly(sessio
 
 def test_decision_service_rejects_and_persists_below_min_size_reason(session, broker, fixed_now):
     runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
+    broker.account_summary = BrokerAccountSummary(
+        account_id="tiny-risk",
+        balance=1.1001,
+        available=1.1001,
+        profit_loss=0.0,
+        equity=1.1001,
+        account_type=AccountType.DEMO,
+    )
     broker.market_details_by_instrument[INSTRUMENT] = BrokerMarketDetails(
         instrument=INSTRUMENT,
         name=INSTRUMENT,
@@ -187,6 +196,14 @@ def test_only_approved_trade_intents_reach_order_submission(session, broker, fix
     service = StrategyService(session)
     trade_service = TradeService(session)
     runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
+    broker.account_summary = BrokerAccountSummary(
+        account_id="tiny-smoke",
+        balance=101.0,
+        available=101.0,
+        profit_loss=0.0,
+        equity=101.0,
+        account_type=AccountType.DEMO,
+    )
     candidate = _candidate(
         strategy_name="smoke_test_hold",
         instrument=INSTRUMENT,

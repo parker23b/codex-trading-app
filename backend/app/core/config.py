@@ -44,6 +44,25 @@ class Settings(BaseSettings):
     runtime_duplicate_signal_window_seconds: int = 30
     runtime_max_unhealthy_runtimes: int = 0
     runtime_global_entry_kill_switch: bool = False
+    allocation_enabled: bool = True
+    allocation_default_risk_per_trade_percent: float = 0.35
+    allocation_fallback_stop_distance_percent: float = 0.005
+    allocation_max_new_positions_per_cycle: int = 2
+    allocation_max_new_risk_per_cycle_percent: float = 1.25
+    allocation_max_risk_per_strategy_percent: float = 1.5
+    allocation_max_risk_per_family_percent: float = 2.0
+    allocation_max_risk_per_instrument_percent: float = 1.0
+    allocation_max_risk_per_currency_percent: float = 2.0
+    allocation_max_gross_exposure_percent: float = 150.0
+    allocation_under_minimum_round_up_tolerance_percent: float = 10.0
+    allocation_drift_warning_percent: float = 10.0
+    allocation_drift_critical_percent: float = 25.0
+    allocation_alert_window_minutes: int = 240
+    allocation_alert_revalidation_failure_threshold: int = 2
+    allocation_alert_broker_submission_failure_threshold: int = 2
+    allocation_alert_under_minimum_rejection_threshold: int = 3
+    allocation_alert_hard_risk_block_threshold: int = 3
+    allocation_alert_concentration_warning_utilization_percent: float = 80.0
     autonomous_control_enabled: bool = True
     autonomous_candidate_instruments_per_family: int = 4
     trade_allocator_enabled: bool = True
@@ -187,6 +206,7 @@ class Settings(BaseSettings):
         "trade_allocator_max_decisions_per_cycle",
         "trade_allocator_max_open_positions_per_instrument",
         "autonomous_candidate_instruments_per_family",
+        "allocation_max_new_positions_per_cycle",
         mode="after",
     )
     @classmethod
@@ -201,6 +221,18 @@ class Settings(BaseSettings):
         "runtime_max_position_notional",
         "runtime_max_spread_percent_of_price",
         "runtime_price_stale_after_seconds",
+        "allocation_default_risk_per_trade_percent",
+        "allocation_fallback_stop_distance_percent",
+        "allocation_max_new_risk_per_cycle_percent",
+        "allocation_max_risk_per_strategy_percent",
+        "allocation_max_risk_per_family_percent",
+        "allocation_max_risk_per_instrument_percent",
+        "allocation_max_risk_per_currency_percent",
+        "allocation_max_gross_exposure_percent",
+        "allocation_under_minimum_round_up_tolerance_percent",
+        "allocation_drift_warning_percent",
+        "allocation_drift_critical_percent",
+        "allocation_alert_concentration_warning_utilization_percent",
         "trade_allocator_signal_stale_after_seconds",
         "max_price_age_ms",
         "max_spread_pips",
@@ -215,6 +247,20 @@ class Settings(BaseSettings):
     def validate_positive_runtime_numeric_limits(cls, value: float) -> float:
         if value <= 0:
             raise ValueError("Runtime numeric limit settings must be greater than 0.")
+        return value
+
+    @field_validator(
+        "allocation_alert_window_minutes",
+        "allocation_alert_revalidation_failure_threshold",
+        "allocation_alert_broker_submission_failure_threshold",
+        "allocation_alert_under_minimum_rejection_threshold",
+        "allocation_alert_hard_risk_block_threshold",
+        mode="after",
+    )
+    @classmethod
+    def validate_positive_allocation_alert_thresholds(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("Allocation alert thresholds must be greater than 0.")
         return value
 
     @field_validator("runtime_max_unhealthy_runtimes", mode="after")

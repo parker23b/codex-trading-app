@@ -31,6 +31,10 @@ class ExecutionResponse(BaseModel):
     filled_size: float | None
     requested_price: float | None
     average_fill_price: float | None
+    intended_risk_amount: float | None
+    submitted_risk_amount: float | None
+    fill_derived_risk_amount: float | None
+    risk_truth_confidence: str | None
     reason: str | None
     error_code: str | None
     error_message: str | None
@@ -61,6 +65,10 @@ def _serialize_execution(execution: Execution) -> ExecutionResponse:
         filled_size=execution.filled_size,
         requested_price=execution.requested_price,
         average_fill_price=execution.average_fill_price,
+        intended_risk_amount=execution.intended_risk_amount,
+        submitted_risk_amount=execution.submitted_risk_amount,
+        fill_derived_risk_amount=execution.fill_derived_risk_amount,
+        risk_truth_confidence=execution.risk_truth_confidence,
         reason=execution.reason,
         error_code=execution.error_code,
         error_message=execution.error_message,

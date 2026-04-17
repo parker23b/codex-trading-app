@@ -31,6 +31,12 @@ class EntrySignal:
     direction: OrderDirection
     size: float
     risk_percent: float
+    stop_loss_price: float | None = None
+    take_profit_price: float | None = None
+    expected_reward_risk: float | None = None
+    volatility_estimate: float | None = None
+    thesis: str | None = None
+    strategy_metadata: dict[str, Any] = field(default_factory=dict)
     bid: float | None = None
     ask: float | None = None
     market_status: str | None = None

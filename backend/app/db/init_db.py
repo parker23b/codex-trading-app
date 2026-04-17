@@ -1,6 +1,7 @@
 from sqlalchemy import text
 from sqlmodel import SQLModel
 
+from app.models.allocation_alert import AllocationAlert
 from app.models.domain_event import DomainEvent
 from app.models.operator_control import OperatorControlState
 from app.models.promotion_request import PromotionRequest
@@ -9,7 +10,7 @@ from app.db.session import engine
 from app.models.strategy_deployment import StrategyDeployment
 from app.models.strategy_governance import StrategyFamilyGovernance
 from app.models.runtime import StrategyRuntimeState
-from app.models.trade import Execution, Position, ReconciliationEvent, Trade, TradeIntent
+from app.models.trade import AllocationCycle, Execution, Position, ReconciliationEvent, Trade, TradeIntent
 from app.models.watchlist import WatchlistEntry
 
 
@@ -17,6 +18,8 @@ def initialize_database() -> None:
     _ = (
         Trade,
         TradeIntent,
+        AllocationCycle,
+        AllocationAlert,
         Position,
         StrategyRuntimeState,
         ReconciliationEvent,
@@ -31,14 +34,20 @@ def initialize_database() -> None:
     )
     SQLModel.metadata.create_all(engine)
     _ensure_sqlite_column("position", "trade_intent_id", "INTEGER")
+    _ensure_sqlite_column("position", "family_name", "VARCHAR")
     _ensure_sqlite_column("position", "broker_reference", "VARCHAR")
     _ensure_sqlite_column("position", "broker_sync_status", "VARCHAR DEFAULT 'PENDING'")
     _ensure_sqlite_column("position", "broker_open_confirmed_at", "TIMESTAMP")
     _ensure_sqlite_column("position", "broker_closed_confirmed_at", "TIMESTAMP")
     _ensure_sqlite_column("position", "last_reconciled_at", "TIMESTAMP")
+    _ensure_sqlite_column("position", "entry_risk_amount", "FLOAT")
+    _ensure_sqlite_column("position", "risk_truth_confidence", "VARCHAR")
     _ensure_sqlite_column("trade", "trade_intent_id", "INTEGER")
+    _ensure_sqlite_column("trade", "family_name", "VARCHAR")
     _ensure_sqlite_column("trade", "broker_reference", "VARCHAR")
     _ensure_sqlite_column("trade", "close_broker_reference", "VARCHAR")
+    _ensure_sqlite_column("trade", "entry_risk_amount", "FLOAT")
+    _ensure_sqlite_column("trade", "risk_truth_confidence", "VARCHAR")
     _ensure_sqlite_column("execution", "trade_intent_id", "INTEGER")
     _ensure_sqlite_column("execution", "client_request_id", "VARCHAR")
     _ensure_sqlite_column("execution", "broker_reference", "VARCHAR")
@@ -52,6 +61,10 @@ def initialize_database() -> None:
     _ensure_sqlite_column("execution", "filled_size", "FLOAT")
     _ensure_sqlite_column("execution", "requested_price", "FLOAT")
     _ensure_sqlite_column("execution", "average_fill_price", "FLOAT")
+    _ensure_sqlite_column("execution", "intended_risk_amount", "FLOAT")
+    _ensure_sqlite_column("execution", "submitted_risk_amount", "FLOAT")
+    _ensure_sqlite_column("execution", "fill_derived_risk_amount", "FLOAT")
+    _ensure_sqlite_column("execution", "risk_truth_confidence", "VARCHAR")
     _ensure_sqlite_column("execution", "reason", "VARCHAR")
     _ensure_sqlite_column("execution", "error_code", "VARCHAR")
     _ensure_sqlite_column("execution", "error_message", "VARCHAR")
@@ -59,6 +72,17 @@ def initialize_database() -> None:
     _ensure_sqlite_column("execution", "details", "JSON")
     _ensure_sqlite_column("execution", "updated_at", "TIMESTAMP")
     _ensure_sqlite_column("reconciliationevent", "trade_intent_id", "INTEGER")
+    _ensure_sqlite_column("tradeintent", "family_name", "VARCHAR")
+    _ensure_sqlite_column("tradeintent", "allocation_cycle_id", "VARCHAR")
+    _ensure_sqlite_column("tradeintent", "estimated_risk_amount", "FLOAT")
+    _ensure_sqlite_column("tradeintent", "submitted_risk_amount", "FLOAT")
+    _ensure_sqlite_column("tradeintent", "fill_derived_risk_amount", "FLOAT")
+    _ensure_sqlite_column("tradeintent", "risk_truth_confidence", "VARCHAR")
+    _ensure_sqlite_column("tradeintent", "risk_currency", "VARCHAR")
+    _ensure_index("ix_allocationalert_updated_at_desc", "allocationalert", "updated_at DESC")
+    _ensure_index("ix_allocationalert_state_updated_at", "allocationalert", "state, updated_at DESC")
+    _ensure_index("ix_allocationalert_severity_updated_at", "allocationalert", "severity, updated_at DESC")
+    _ensure_index("ix_tradeintent_allocation_cycle_id", "tradeintent", "allocation_cycle_id")
     _ensure_sqlite_partial_unique_index(
         "uq_trade_intent_active_instrument",
         "tradeintent",
@@ -158,6 +182,11 @@ def initialize_database() -> None:
     _ensure_sqlite_column("strategydeployment", "profile_selected_at", "TIMESTAMP")
     _ensure_sqlite_column("strategydeployment", "profile_change_reason", "VARCHAR")
     _ensure_sqlite_column("strategydeployment", "last_restart_reason", "VARCHAR")
+    _ensure_index(
+        "ix_allocationcycle_received_at_desc",
+        "allocationcycle",
+        "received_at DESC",
+    )
 
 
 def _ensure_sqlite_column(table_name: str, column_name: str, column_sql: str) -> None:

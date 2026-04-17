@@ -93,6 +93,8 @@ def test_initialize_database_adds_trade_intent_columns_to_legacy_sqlite_schema(t
         reconciliation_columns = {
             row[1] for row in connection.execute(text("PRAGMA table_info('reconciliationevent')")).fetchall()
         }
+        trade_intent_columns = {row[1] for row in connection.execute(text("PRAGMA table_info('tradeintent')")).fetchall()}
+        allocation_alert_columns = {row[1] for row in connection.execute(text("PRAGMA table_info('allocationalert')")).fetchall()}
         indexes = {
             row[1] for row in connection.execute(text("PRAGMA index_list('tradeintent')")).fetchall()
         }
@@ -101,4 +103,12 @@ def test_initialize_database_adds_trade_intent_columns_to_legacy_sqlite_schema(t
     assert "trade_intent_id" in trade_columns
     assert "trade_intent_id" in execution_columns
     assert "trade_intent_id" in reconciliation_columns
+    assert "risk_truth_confidence" in position_columns
+    assert "risk_truth_confidence" in trade_columns
+    assert "risk_truth_confidence" in execution_columns
+    assert "allocation_cycle_id" in trade_intent_columns
+    assert "estimated_risk_amount" in trade_intent_columns
+    assert "risk_truth_confidence" in trade_intent_columns
+    assert "alert_key" in allocation_alert_columns
+    assert "state" in allocation_alert_columns
     assert "uq_trade_intent_active_instrument" in indexes

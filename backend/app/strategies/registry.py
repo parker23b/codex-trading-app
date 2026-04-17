@@ -49,6 +49,7 @@ class StrategyMetadata:
     position_size: float
     risk_per_trade: float
     parameters: tuple[StrategyParameterDefinition, ...]
+    family_name: str | None = None
     supported_asset_classes: tuple[str, ...] = ()
     parameter_profiles: tuple[StrategyParameterProfile, ...] = ()
 
@@ -137,6 +138,7 @@ strategy_registry.register(
         default_instrument="IX.D.FTSE.DAILY.IP",
         position_size=1.0,
         risk_per_trade=0.8,
+        family_name="mean_reversion",
         parameters=(
             StrategyParameterDefinition(key="window_size", label="Window", value=20, step=1),
             StrategyParameterDefinition(key="entry_threshold", label="Entry Threshold", value=0.0015, step=0.0001),
@@ -165,6 +167,7 @@ strategy_registry.register(
         default_instrument="IX.D.NASDAQ.DAILY.IP",
         position_size=0.8,
         risk_per_trade=1.1,
+        family_name="breakout",
         parameters=(
             StrategyParameterDefinition(key="breakout_window", label="Breakout Window", value=15, step=1),
             StrategyParameterDefinition(key="volatility_floor", label="Volatility Floor", value=0.003, step=0.0001),
@@ -187,6 +190,7 @@ strategy_registry.register(
         default_instrument="IX.D.DAX.DAILY.IP",
         position_size=0.6,
         risk_per_trade=0.7,
+        family_name="trend",
         parameters=(
             StrategyParameterDefinition(key="trend_window", label="Trend Window", value=34, step=1),
             StrategyParameterDefinition(key="pullback_threshold", label="Pullback Threshold", value=0.0015, step=0.0001),
@@ -209,6 +213,7 @@ strategy_registry.register(
         default_instrument="CS.D.EURUSD.MINI.IP",
         position_size=0.5,
         risk_per_trade=0.4,
+        family_name="fx_pullback",
         parameters=(
             StrategyParameterDefinition(key="fast_window", label="Fast EMA", value=8, step=1),
             StrategyParameterDefinition(key="slow_window", label="Slow EMA", value=21, step=1),
@@ -240,6 +245,7 @@ strategy_registry.register(
         default_instrument="CS.D.EURUSD.MINI.IP",
         position_size=0.4,
         risk_per_trade=0.5,
+        family_name="fx_pullback",
         parameters=(
             StrategyParameterDefinition(key="htf_fast_window", label="HTF Fast SMA", value=20, step=1),
             StrategyParameterDefinition(key="htf_slow_window", label="HTF Slow SMA", value=50, step=1),
@@ -269,6 +275,7 @@ strategy_registry.register(
         default_instrument="CS.D.EURUSD.MINI.IP",
         position_size=0.2,
         risk_per_trade=0.1,
+        family_name="ops_validation",
         parameters=(
             StrategyParameterDefinition(key="warmup_ticks", label="Warmup Ticks", value=3, step=1),
             StrategyParameterDefinition(key="hold_seconds", label="Hold Seconds", value=3, step=0.5),
@@ -292,6 +299,7 @@ strategy_registry.register(
         default_instrument="CS.D.EURUSD.MINI.IP",
         position_size=0.2,
         risk_per_trade=0.1,
+        family_name="ops_validation",
         parameters=(
             StrategyParameterDefinition(key="warmup_ticks", label="Warmup Ticks", value=2, step=1),
             StrategyParameterDefinition(key="hold_minutes", label="Hold Minutes", value=0.5, step=0.5),

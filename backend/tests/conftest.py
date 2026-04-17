@@ -9,13 +9,14 @@ from sqlmodel import SQLModel, Session, create_engine
 
 from app.core.config import get_settings
 from app.core.runtime import runtime_manager
+from app.models.allocation_alert import AllocationAlert
 from app.models.domain_event import DomainEvent
 from app.models.operator_control import OperatorControlState
 from app.models.promotion_request import PromotionRequest
 from app.models.runtime import StrategyRuntimeState
 from app.models.strategy_deployment import StrategyDeployment
 from app.models.strategy_governance import StrategyFamilyGovernance
-from app.models.trade import Execution, Position, ReconciliationEvent, Trade, TradeIntent
+from app.models.trade import AllocationCycle, Execution, Position, ReconciliationEvent, Trade, TradeIntent
 from app.models.watchlist import WatchlistEntry
 from app.services.domain_event_service import domain_event_service
 from app.services.health_service import get_health_service
@@ -74,6 +75,8 @@ def session() -> Iterator[Session]:
     _ = (
         Trade,
         TradeIntent,
+        AllocationCycle,
+        AllocationAlert,
         Position,
         StrategyRuntimeState,
         ReconciliationEvent,

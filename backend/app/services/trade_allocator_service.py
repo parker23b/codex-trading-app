@@ -12,7 +12,7 @@ from app.services.trade_service import TradeService
 
 
 class TradeAllocatorService:
-    """Mechanical first-pass allocator between signal generation and execution."""
+    """Deprecated legacy allocator retained only for backward compatibility tests."""
 
     def __init__(
         self,

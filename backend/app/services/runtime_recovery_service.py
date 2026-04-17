@@ -8,6 +8,7 @@ from app.core.broker_factory import get_broker
 from app.core.logging import get_logger
 from app.core.runtime import runtime_manager
 from app.models.trade import Position, TradeIntent, TradeIntentState, clone_position, utc_now
+from app.strategies.registry import strategy_registry
 from app.services.domain_event_service import domain_event_service
 from app.services.runtime_state_service import RuntimeStateService
 from app.services.trade_service import TradeService
@@ -283,6 +284,7 @@ class RuntimeRecoveryService:
         return self.trade_service.create_trade_intent(
             TradeIntent(
                 strategy_name=runtime.strategy_name,
+                family_name=strategy_registry.get_metadata(runtime.strategy_name).family_name or runtime.strategy_name,
                 instrument=runtime.instrument,
                 direction=position.direction,
                 state=TradeIntentState.RECOVERED_POSITION_ATTACHED.value,
@@ -291,6 +293,7 @@ class RuntimeRecoveryService:
                 allocated_size=position.size,
                 proposed_risk_percent=position.risk_percent,
                 allocated_risk_percent=position.risk_percent,
+                risk_truth_confidence=position.risk_truth_confidence or "BROKER_CONFIRMED_AVERAGE_FILL_ESTIMATED",
                 observed_price=position.open_price,
                 average_fill_price=position.open_price,
                 filled_size=position.size,
@@ -304,8 +307,10 @@ class RuntimeRecoveryService:
 
     def _position_from_remote(self, strategy_name: str, remote_position) -> Position:
         now = datetime.now(UTC)
+        family_name = strategy_registry.get_metadata(strategy_name).family_name or strategy_name
         return Position(
             strategy_name=strategy_name,
+            family_name=family_name,
             broker_reference=remote_position.broker_reference,
             instrument=remote_position.instrument,
             direction=remote_position.direction.value,
@@ -315,6 +320,7 @@ class RuntimeRecoveryService:
             current_price=runtime_manager.get_last_price(remote_position.instrument) or remote_position.open_price,
             unrealized_pnl=0.0,
             risk_percent=None,
+            risk_truth_confidence="BROKER_CONFIRMED_AVERAGE_FILL_ESTIMATED",
             reason="Recovered from persisted runtime and broker state",
             manual_override=False,
             account_type=self.broker.account_type.value,

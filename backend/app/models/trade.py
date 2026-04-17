@@ -17,6 +17,7 @@ class Trade(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     trade_intent_id: int | None = Field(default=None, index=True)
     strategy_name: str
+    family_name: str | None = Field(default=None, index=True)
     broker_reference: str | None = Field(default=None, index=True)
     close_broker_reference: str | None = Field(default=None, index=True)
     instrument: str
@@ -27,6 +28,8 @@ class Trade(SQLModel, table=True):
     open_time: datetime
     close_time: datetime
     pnl: float = 0.0
+    entry_risk_amount: float | None = None
+    risk_truth_confidence: str | None = None
     r_multiple: float | None = None
     outcome: str | None = None
     reason: str | None = None
@@ -105,6 +108,7 @@ class Position(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     trade_intent_id: int | None = Field(default=None, index=True)
     strategy_name: str
+    family_name: str | None = Field(default=None, index=True)
     broker_reference: str | None = Field(default=None, index=True)
     instrument: str = Field(index=True)
     direction: str
@@ -117,6 +121,8 @@ class Position(SQLModel, table=True):
     current_price: float | None = None
     unrealized_pnl: float | None = None
     risk_percent: float | None = None
+    entry_risk_amount: float | None = None
+    risk_truth_confidence: str | None = None
     reason: str | None = None
     manual_override: bool = False
     account_type: str
@@ -156,6 +162,10 @@ class Execution(SQLModel, table=True):
     filled_size: float | None = None
     requested_price: float | None = None
     average_fill_price: float | None = None
+    intended_risk_amount: float | None = None
+    submitted_risk_amount: float | None = None
+    fill_derived_risk_amount: float | None = None
+    risk_truth_confidence: str | None = None
     reason: str | None = None
     error_code: str | None = None
     error_message: str | None = None
@@ -199,6 +209,8 @@ class TradeIntent(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     strategy_name: str = Field(index=True)
+    family_name: str | None = Field(default=None, index=True)
+    allocation_cycle_id: str | None = Field(default=None, index=True)
     instrument: str = Field(index=True)
     direction: str = Field(index=True)
     state: str = Field(default=TradeIntentState.PROPOSED.value, index=True)
@@ -207,6 +219,11 @@ class TradeIntent(SQLModel, table=True):
     allocated_size: float | None = None
     proposed_risk_percent: float | None = None
     allocated_risk_percent: float | None = None
+    estimated_risk_amount: float | None = None
+    submitted_risk_amount: float | None = None
+    fill_derived_risk_amount: float | None = None
+    risk_truth_confidence: str | None = None
+    risk_currency: str | None = None
     confidence: float | None = None
     observed_price: float | None = None
     average_fill_price: float | None = None
@@ -232,6 +249,30 @@ class TradeIntent(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utc_now, nullable=False)
 
 
+class AllocationCycle(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    cycle_id: str = Field(index=True, unique=True)
+    received_at: datetime = Field(index=True)
+    completed_at: datetime = Field(default_factory=utc_now, index=True)
+    candidate_count: int = 0
+    approved_count: int = 0
+    rejected_count: int = 0
+    total_requested_risk_percent: float = 0.0
+    total_allocated_risk_percent: float = 0.0
+    remaining_portfolio_risk_percent: float = 0.0
+    resized_candidate_count: int = 0
+    degraded_candidate_count: int = 0
+    blocked_unsupported_sizing_count: int = 0
+    blocked_approximate_live_count: int = 0
+    blocked_under_minimum_size_count: int = 0
+    blocked_budget_count: int = 0
+    blocked_conflict_count: int = 0
+    binding_budget_counts: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    rejection_reason_counts: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    details: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utc_now, nullable=False)
+
+
 def clone_position(position: Position | None) -> Position | None:
     if position is None:
         return None
@@ -239,6 +280,7 @@ def clone_position(position: Position | None) -> Position | None:
         id=position.id,
         trade_intent_id=position.trade_intent_id,
         strategy_name=position.strategy_name,
+        family_name=position.family_name,
         broker_reference=position.broker_reference,
         instrument=position.instrument,
         direction=position.direction,
@@ -251,6 +293,8 @@ def clone_position(position: Position | None) -> Position | None:
         current_price=position.current_price,
         unrealized_pnl=position.unrealized_pnl,
         risk_percent=position.risk_percent,
+        entry_risk_amount=position.entry_risk_amount,
+        risk_truth_confidence=position.risk_truth_confidence,
         reason=position.reason,
         manual_override=position.manual_override,
         account_type=position.account_type,

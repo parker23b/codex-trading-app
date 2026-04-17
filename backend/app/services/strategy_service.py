@@ -10,7 +10,7 @@ from app.core.broker import BrokerOrderStatus, OrderDirection, OrderRequest
 from app.core.config import get_settings
 from app.core.ig_broker import IGBrokerError
 from app.core.logging import get_logger
-from app.core.signals import EntrySignal, ExitSignal, SignalCandidate, SignalStatus, TradeAllocationDecision
+from app.core.signals import EntrySignal, ExitSignal, SignalCandidate, SignalStatus
 from app.core.instrument_catalog import list_instruments
 from app.core.runtime import runtime_manager
 from app.models.strategy_deployment import StrategyDeployment
@@ -599,11 +599,27 @@ class StrategyService:
                         engine.current_position = None
                         engine.strategy.on_entry_failed()
                         if intent.state != TradeIntentState.POSITION_OPENED.value:
+                            latest_execution = trade_service.get_latest_execution_for_trade_intent(intent.id or 0) if intent.id is not None else execution
+                            execution_stage = "execution_failed"
+                            fill_status = None
+                            if latest_execution is not None and latest_execution.status == ExecutionStatus.FILL_PARTIAL.value:
+                                execution_stage = "partial_fill_requires_review"
+                                fill_status = ExecutionStatus.FILL_PARTIAL.value
+                            elif latest_execution is not None and latest_execution.status == ExecutionStatus.FAILED.value:
+                                execution_stage = "execution_failed"
                             trade_service.transition_trade_intent(
                                 intent,
                                 state=TradeIntentState.FAILED,
                                 decision_reason_code="execution_failed",
                                 decision_reason=str(exc),
+                                details=StrategyService._allocation_outcome_update(
+                                    stage=execution_stage,
+                                    final_status=TradeIntentState.FAILED.value,
+                                    hard_risk_passed=True,
+                                    execution_submitted=True,
+                                    execution_blocked=True,
+                                    fill_status=fill_status,
+                                ),
                             )
                         logger.exception(
                             "Entry execution failed",
@@ -747,7 +763,18 @@ class StrategyService:
                         )
                     continue
                 trade.outcome = "win" if trade.pnl > 0 else "loss"
-                risk_budget = metadata.risk_per_trade if metadata and metadata.risk_per_trade else 1.0
+                allocation_risk_amount = trade.entry_risk_amount
+                if intent is not None:
+                    if not allocation_risk_amount:
+                        allocation_risk_amount = (
+                            intent.fill_derived_risk_amount
+                            or intent.submitted_risk_amount
+                            or intent.estimated_risk_amount
+                            or ((intent.details or {}).get("allocation") or {}).get("risk_amount")
+                        )
+                risk_budget = float(allocation_risk_amount or 0.0)
+                if risk_budget <= 0:
+                    risk_budget = metadata.risk_per_trade if metadata and metadata.risk_per_trade else 1.0
                 trade.r_multiple = round(trade.pnl / risk_budget, 2)
                 trade.reason = f"{trade.strategy_name} exit triggered"
                 existing_position = trade_service.get_open_position(
@@ -787,6 +814,19 @@ class StrategyService:
                     close_reason=trade.reason or "Strategy exit confirmed.",
                     completed_at=trade.close_time,
                     closed_at=trade.close_time,
+                    details={
+                        **StrategyService._allocation_outcome_update(
+                            stage="trade_closed",
+                            final_status=TradeIntentState.CLOSED.value,
+                            hard_risk_passed=True,
+                            execution_submitted=True,
+                            fill_status=ExecutionStatus.FILL_FULL.value,
+                        ),
+                        "risk_tracking": {
+                            "reservation_owner": "TRADE",
+                            "risk_state": "closed_trade",
+                        },
+                    },
                 )
                 trade_service.transition_execution(
                     execution,
@@ -812,112 +852,6 @@ class StrategyService:
                 open_positions = trade_service.list_positions()
                 trades = trade_service.list_trades()
         self._refresh_paused_strategy_count()
-
-    def _record_allocator_rejection(self, decision: TradeAllocationDecision) -> None:
-        signal = decision.candidate.signal
-        if not isinstance(signal, EntrySignal):
-            return
-        self.event_service.record_event(
-            event_type="strategy.trade_allocator_rejected",
-            category="strategy",
-            severity="info",
-            source="strategy_service.allocate_signal_candidates",
-            title="Trade allocator rejected signal candidate",
-            message=f"{signal.strategy_name} entry on {signal.instrument} was filtered before execution orchestration.",
-            strategy_name=signal.strategy_name,
-            instrument=signal.instrument,
-            payload_json={
-                "reason_code": decision.reason_code,
-                "reason": decision.reason,
-                "score": decision.score,
-                "direction": signal.direction.value,
-                "observed_price": signal.observed_price,
-                "source_tier": decision.candidate.source_tier,
-            },
-            created_at=signal.signal_at,
-        )
-
-    def _record_allocator_selection(self, decision: TradeAllocationDecision) -> None:
-        signal = decision.candidate.signal
-        if not isinstance(signal, EntrySignal):
-            return
-        self.event_service.record_event(
-            event_type="strategy.trade_allocator_selected",
-            category="strategy",
-            severity="info",
-            source="strategy_service.allocate_signal_candidates",
-            title="Trade allocator selected signal candidate",
-            message=f"{signal.strategy_name} entry on {signal.instrument} advanced to risk and execution orchestration.",
-            strategy_name=signal.strategy_name,
-            instrument=signal.instrument,
-            payload_json={
-                "reason_code": decision.reason_code,
-                "reason": decision.reason,
-                "score": decision.score,
-                "direction": signal.direction.value,
-                "observed_price": signal.observed_price,
-                "source_tier": decision.candidate.source_tier,
-            },
-            created_at=signal.signal_at,
-        )
-
-    @staticmethod
-    def _apply_broker_entry_constraints(*, engine, signal: EntrySignal) -> EntrySignal:
-        try:
-            market_details = engine.broker.get_market_details(signal.instrument)
-        except Exception as exc:
-            logger.warning(
-                "Unable to load broker market details during entry validation",
-                extra={
-                    "strategy": signal.strategy_name,
-                    "instrument": signal.instrument,
-                    "error": str(exc),
-                },
-            )
-            return signal
-
-        min_deal_size = market_details.min_deal_size
-        if min_deal_size is None or signal.size >= min_deal_size:
-            return signal
-
-        reason = (
-            f"Requested size {signal.size} is below broker minimum deal size "
-            f"{min_deal_size} for {signal.instrument}."
-        )
-        audit_trail = list(signal.audit_trail)
-        audit_trail.append(
-            {
-                "layer": "broker_constraints",
-                "status": "REJECTED",
-                "passed": False,
-                "reason": reason,
-                "checks": [
-                    {
-                        "code": "min_deal_size",
-                        "passed": False,
-                        "reason": reason,
-                        "actual": signal.size,
-                        "limit": min_deal_size,
-                    }
-                ],
-            }
-        )
-        audit_summary = dict(signal.audit_summary)
-        audit_summary.update(
-            {
-                "approved": False,
-                "rejection_layer": "broker_constraints",
-                "min_deal_size": min_deal_size,
-            }
-        )
-        return replace(
-            signal,
-            status=SignalStatus.REJECTED,
-            reason=reason,
-            rejection_layer="broker_constraints",
-            audit_trail=audit_trail,
-            audit_summary=audit_summary,
-        )
 
     def _apply_market_status_gate(self, *, engine, signal: EntrySignal) -> EntrySignal:
         status = self.market_status_service.get_status(signal.instrument, broker=engine.broker, now=signal.signal_at)
@@ -985,6 +919,325 @@ class StrategyService:
         return price
 
     @staticmethod
+    def _allocation_details(intent: TradeIntent) -> dict[str, object]:
+        return ((intent.details or {}).get("allocation") or {})
+
+    @staticmethod
+    def _drift_metric(
+        *,
+        expected: float | None,
+        actual: float | None,
+        threshold_percent: float | None = None,
+    ) -> dict[str, object] | None:
+        if expected is None or actual is None:
+            return None
+        absolute_drift = float(actual) - float(expected)
+        percent_drift = None
+        percent_drift_abs = None
+        if abs(float(expected)) > 1e-9:
+            percent_drift = (absolute_drift / float(expected)) * 100.0
+            percent_drift_abs = abs(percent_drift)
+        return {
+            "expected": round(float(expected), 8),
+            "actual": round(float(actual), 8),
+            "absolute_drift": round(absolute_drift, 8),
+            "absolute_drift_abs": round(abs(absolute_drift), 8),
+            "percent_drift": round(percent_drift, 8) if percent_drift is not None else None,
+            "percent_drift_abs": round(percent_drift_abs, 8) if percent_drift_abs is not None else None,
+            "material": (
+                percent_drift_abs is not None
+                and threshold_percent is not None
+                and percent_drift_abs >= threshold_percent
+            ),
+        }
+
+    @staticmethod
+    def _merge_stage_snapshot(
+        current: dict[str, object] | None,
+        update: dict[str, object] | None,
+    ) -> dict[str, object] | None:
+        if not current and not update:
+            return None
+        merged = dict(current or {})
+        merged.update({key: value for key, value in (update or {}).items() if value is not None})
+        return merged
+
+    @staticmethod
+    def _risk_truth_confidence(
+        *,
+        stage: str,
+        source: str | None,
+        precision: str | None,
+        fill_confirmed: bool = False,
+        partial_fill: bool = False,
+        incomplete: bool = False,
+    ) -> str:
+        if incomplete:
+            return "INCOMPLETE_DEGRADED"
+        if partial_fill:
+            return "PARTIAL_FILL_PROVISIONAL"
+        if stage == "estimated":
+            return "ALLOCATION_INTENT_ONLY"
+        if stage == "submitted":
+            return "SUBMITTED_EXECUTABLE_ESTIMATE"
+        if stage == "filled" and fill_confirmed and source == "broker_quote_unit_risk" and precision == "EXACT":
+            return "EXACT_FILL_DERIVED"
+        if stage == "filled" and fill_confirmed:
+            return "BROKER_CONFIRMED_AVERAGE_FILL_ESTIMATED"
+        if source == "broker_quote_unit_risk" and precision == "EXACT":
+            return "SUBMITTED_EXECUTABLE_ESTIMATE"
+        return "ALLOCATION_INTENT_ONLY"
+
+    @classmethod
+    def _build_risk_reconciliation(
+        cls,
+        *,
+        intent: TradeIntent,
+        submitted_risk_tracking: dict[str, object] | None = None,
+        fill_risk_tracking: dict[str, object] | None = None,
+        submitted_size: float | None = None,
+        filled_size: float | None = None,
+        submitted_price: float | None = None,
+        fill_price: float | None = None,
+        live_position: Position | None = None,
+        fill_status: str | None = None,
+    ) -> dict[str, object]:
+        allocation = cls._allocation_details(intent)
+        existing = ((intent.details or {}).get("risk_reconciliation") or {})
+        settings = get_settings()
+        estimated = cls._merge_stage_snapshot(
+            existing.get("estimated") if isinstance(existing, dict) else None,
+            {
+                "risk_amount": intent.estimated_risk_amount or allocation.get("risk_amount"),
+                "risk_percent": intent.allocated_risk_percent or allocation.get("allocated_risk_percent"),
+                "size": intent.allocated_size or allocation.get("normalized_size") or allocation.get("requested_size"),
+                "entry_price": intent.observed_price,
+                "risk_currency": intent.risk_currency,
+                "derivation_mode": "allocation_estimate",
+                "precision": allocation.get("sizing_precision"),
+                "sizing_mode": allocation.get("sizing_mode"),
+                "risk_truth_confidence": intent.risk_truth_confidence or "ALLOCATION_INTENT_ONLY",
+            },
+        )
+        submitted = cls._merge_stage_snapshot(
+            existing.get("submitted") if isinstance(existing, dict) else None,
+            {
+                "risk_amount": (submitted_risk_tracking or {}).get("submitted_executable_risk_amount") or intent.submitted_risk_amount,
+                "risk_percent": (submitted_risk_tracking or {}).get("submitted_executable_risk_percent"),
+                "size": submitted_size if submitted_size is not None else (submitted_risk_tracking or {}).get("submitted_size"),
+                "entry_price": submitted_price,
+                "risk_currency": intent.risk_currency,
+                "derivation_mode": (submitted_risk_tracking or {}).get("risk_estimate_source"),
+                "precision": (submitted_risk_tracking or {}).get("risk_sizing_precision"),
+                "sizing_mode": (submitted_risk_tracking or {}).get("risk_sizing_mode"),
+                "risk_truth_confidence": (submitted_risk_tracking or {}).get("risk_truth_confidence"),
+            },
+        )
+        fill_source = (fill_risk_tracking or {}).get("risk_estimate_source")
+        filled = cls._merge_stage_snapshot(
+            existing.get("filled") if isinstance(existing, dict) else None,
+            {
+                "risk_amount": (fill_risk_tracking or {}).get("fill_derived_risk_amount") or intent.fill_derived_risk_amount,
+                "risk_percent": (fill_risk_tracking or {}).get("fill_derived_risk_percent"),
+                "size": filled_size if filled_size is not None else (fill_risk_tracking or {}).get("filled_size"),
+                "entry_price": fill_price,
+                "risk_currency": intent.risk_currency,
+                "derivation_mode": fill_source or ("fill_price_fallback" if fill_price is not None else None),
+                "precision": (fill_risk_tracking or {}).get("risk_sizing_precision"),
+                "sizing_mode": (fill_risk_tracking or {}).get("risk_sizing_mode"),
+                "risk_truth_confidence": (fill_risk_tracking or {}).get("risk_truth_confidence"),
+            },
+        )
+        live_snapshot = cls._merge_stage_snapshot(
+            existing.get("live_position") if isinstance(existing, dict) else None,
+            {
+                "risk_amount": live_position.entry_risk_amount if live_position is not None else None,
+                "risk_percent": live_position.risk_percent if live_position is not None else None,
+                "size": live_position.size if live_position is not None else None,
+                "entry_price": live_position.open_price if live_position is not None else None,
+                "risk_currency": intent.risk_currency,
+                "derivation_mode": "position_entry_risk_amount" if live_position is not None else None,
+                "risk_truth_confidence": live_position.risk_truth_confidence if live_position is not None else None,
+            },
+        )
+        drift_metrics = {
+            "requested_to_normalized_size": ((allocation.get("drift_metrics") or {}).get("requested_to_normalized_size") if isinstance(allocation, dict) else None),
+            "requested_to_allocated_risk_percent": ((allocation.get("drift_metrics") or {}).get("requested_to_allocated_risk_percent") if isinstance(allocation, dict) else None),
+            "normalized_to_submitted_size": cls._drift_metric(
+                expected=float(allocation.get("normalized_size")) if allocation.get("normalized_size") is not None else None,
+                actual=float(submitted["size"]) if submitted and submitted.get("size") is not None else None,
+                threshold_percent=settings.allocation_drift_warning_percent,
+            ),
+            "submitted_to_filled_size": cls._drift_metric(
+                expected=float(submitted["size"]) if submitted and submitted.get("size") is not None else None,
+                actual=float(filled["size"]) if filled and filled.get("size") is not None else None,
+                threshold_percent=settings.allocation_drift_warning_percent,
+            ),
+            "estimated_to_submitted_risk": cls._drift_metric(
+                expected=float(estimated["risk_amount"]) if estimated and estimated.get("risk_amount") is not None else None,
+                actual=float(submitted["risk_amount"]) if submitted and submitted.get("risk_amount") is not None else None,
+                threshold_percent=settings.allocation_drift_warning_percent,
+            ),
+            "submitted_to_fill_risk": cls._drift_metric(
+                expected=float(submitted["risk_amount"]) if submitted and submitted.get("risk_amount") is not None else None,
+                actual=float(filled["risk_amount"]) if filled and filled.get("risk_amount") is not None else None,
+                threshold_percent=settings.allocation_drift_warning_percent,
+            ),
+            "intended_to_fill_price": cls._drift_metric(
+                expected=float(intent.observed_price) if intent.observed_price is not None else None,
+                actual=float(fill_price) if fill_price is not None else None,
+                threshold_percent=settings.allocation_drift_warning_percent,
+            ),
+        }
+        material_execution_drift = any(
+            isinstance(metric, dict) and bool(metric.get("material"))
+            for key, metric in drift_metrics.items()
+            if key in {"normalized_to_submitted_size", "submitted_to_filled_size", "estimated_to_submitted_risk", "submitted_to_fill_risk", "intended_to_fill_price"}
+        )
+        incomplete_fill_data = bool(
+            filled is not None
+            and (
+                filled.get("size") is None
+                or filled.get("entry_price") is None
+                or filled.get("risk_amount") is None
+            )
+        )
+        partial_fill_provisional = bool(fill_status == BrokerOrderStatus.PARTIALLY_FILLED.value)
+        return {
+            "estimated": estimated,
+            "submitted": submitted,
+            "filled": filled,
+            "live_position": live_snapshot,
+            "drift_metrics": drift_metrics,
+            "flags": {
+                "material_execution_drift": material_execution_drift,
+                "critical_execution_drift": any(
+                    isinstance(metric, dict)
+                    and (metric.get("percent_drift_abs") or 0.0) >= settings.allocation_drift_critical_percent
+                    for metric in drift_metrics.values()
+                    if metric is not None
+                ),
+                "fill_risk_estimated": bool(fill_source in {None, "size_scaled_allocation"}),
+                "incomplete_fill_data": incomplete_fill_data,
+                "partial_fill_provisional": partial_fill_provisional,
+                "degraded_sizing": bool(allocation.get("degraded")) if isinstance(allocation, dict) else False,
+            },
+        }
+
+    @staticmethod
+    def _allocation_outcome_update(
+        *,
+        stage: str,
+        final_status: str,
+        allocator_selected: bool = True,
+        hard_risk_passed: bool | None = None,
+        hard_risk_blocked: bool = False,
+        execution_submitted: bool = False,
+        execution_blocked: bool = False,
+        execution_revalidation_changed_outcome: bool = False,
+        fill_status: str | None = None,
+    ) -> dict[str, object]:
+        return {
+            "allocation_outcome": {
+                "stage": stage,
+                "allocator_selected": allocator_selected,
+                "hard_risk_passed": hard_risk_passed,
+                "hard_risk_blocked": hard_risk_blocked,
+                "execution_submitted": execution_submitted,
+                "execution_blocked": execution_blocked,
+                "execution_revalidation_changed_outcome": execution_revalidation_changed_outcome,
+                "fill_status": fill_status,
+                "final_status": final_status,
+            }
+        }
+
+    @classmethod
+    def _estimate_execution_risk_snapshot(
+        cls,
+        *,
+        broker,
+        intent: TradeIntent,
+        entry_price: float,
+        size: float,
+        risk_state: str,
+        reservation_owner: str,
+        broker_order_status: BrokerOrderStatus | None = None,
+        fill_price_confirmed: bool = False,
+        filled_size_confirmed: bool = False,
+    ) -> dict[str, object]:
+        allocation = cls._allocation_details(intent)
+        sizing_details = (allocation.get("sizing_details") or {}) if isinstance(allocation, dict) else {}
+        risk_currency = intent.risk_currency or (
+            ((sizing_details.get("sizing_quote") or {}).get("details") or {}).get("account_currency")
+        )
+        account_equity = float(allocation.get("account_equity") or 0.0)
+        stop_loss_price = sizing_details.get("stop_loss_price")
+        fallback_stop_distance = sizing_details.get("stop_distance_price")
+        estimated_amount = float(intent.estimated_risk_amount or allocation.get("risk_amount") or 0.0)
+        estimated_size = float(intent.allocated_size or allocation.get("normalized_size") or allocation.get("requested_size") or 0.0)
+        risk_amount: float | None = None
+        risk_percent: float | None = None
+        risk_precision = str(allocation.get("sizing_precision") or sizing_details.get("sizing_precision") or "UNSUPPORTED")
+        risk_mode = str(allocation.get("sizing_mode") or sizing_details.get("sizing_mode") or "UNSUPPORTED")
+        source = "size_scaled_allocation"
+        if size > 0 and entry_price > 0:
+            try:
+                unit_quote = broker.quote_risk_sized_order(
+                    intent.instrument,
+                    entry_price=entry_price,
+                    risk_amount=1.0,
+                    stop_loss_price=float(stop_loss_price) if stop_loss_price is not None else None,
+                    fallback_stop_distance=float(fallback_stop_distance) if fallback_stop_distance is not None else None,
+                )
+            except Exception:
+                unit_quote = None
+            if unit_quote is not None and unit_quote.sizing_available and (unit_quote.risk_per_unit or 0.0) > 0:
+                risk_amount = float(unit_quote.risk_per_unit or 0.0) * size
+                risk_precision = unit_quote.precision.value
+                risk_mode = unit_quote.mode.value
+                source = "broker_quote_unit_risk"
+            elif estimated_amount > 0 and estimated_size > 0:
+                risk_amount = estimated_amount * (size / estimated_size)
+        if risk_amount is None and estimated_amount > 0 and estimated_size > 0:
+            risk_amount = estimated_amount * (size / estimated_size)
+        if risk_amount is not None and account_equity > 0:
+            risk_percent = (risk_amount / account_equity) * 100.0
+        partial_fill = broker_order_status is BrokerOrderStatus.PARTIALLY_FILLED
+        incomplete = risk_state == "filled" and (not fill_price_confirmed or not filled_size_confirmed or risk_amount is None)
+        truth_confidence = cls._risk_truth_confidence(
+            stage="filled" if risk_state == "filled" else "submitted" if risk_state == "submitted" else "estimated",
+            source=source,
+            precision=risk_precision,
+            fill_confirmed=fill_price_confirmed and filled_size_confirmed,
+            partial_fill=partial_fill,
+            incomplete=incomplete,
+        )
+        return {
+            "risk_currency": risk_currency,
+            "estimated_allocation_risk_amount": estimated_amount,
+            "estimated_allocation_risk_percent": allocation.get("allocated_risk_percent") or intent.allocated_risk_percent,
+            "submitted_executable_risk_amount": risk_amount if risk_state in {"submitted", "filled"} else None,
+            "submitted_executable_risk_percent": risk_percent if risk_state in {"submitted", "filled"} else None,
+            "fill_derived_risk_amount": risk_amount if risk_state == "filled" else None,
+            "fill_derived_risk_percent": risk_percent if risk_state == "filled" else None,
+            "submitted_size": size if risk_state in {"submitted", "filled"} else None,
+            "filled_size": size if risk_state == "filled" else None,
+            "reservation_owner": reservation_owner,
+            "risk_state": risk_state,
+            "risk_estimate_source": source,
+            "risk_sizing_precision": risk_precision,
+            "risk_sizing_mode": risk_mode,
+            "risk_truth_confidence": truth_confidence,
+            "risk_derivation_confidence": (
+                "EXACT"
+                if source == "broker_quote_unit_risk" and risk_precision == "EXACT"
+                else "APPROXIMATE"
+                if source == "broker_quote_unit_risk"
+                else "ESTIMATED"
+            ),
+        }
+
+    @staticmethod
     def _execute_entry_signal(
         *,
         engine,
@@ -1013,10 +1266,128 @@ class StrategyService:
             trade_service=trade_service,
             phase="entry_execution",
         )
+        executable_size = intent.allocated_size or signal.size
+        size_validation = engine.broker.normalize_order_size(signal.instrument, executable_size)
+        if not size_validation.accepted:
+            risk_reconciliation = StrategyService._build_risk_reconciliation(intent=intent)
+            trade_service.transition_execution(
+                execution,
+                status=ExecutionStatus.FAILED,
+                trade_intent_id=intent.id,
+                client_request_id=execution.client_request_id,
+                reason=f"Entry execution blocked by broker size validation: {size_validation.reason}",
+                error_message=size_validation.reason,
+                risk_truth_confidence="INCOMPLETE_DEGRADED",
+                requires_manual_review=False,
+                details={
+                    "risk_reconciliation": risk_reconciliation,
+                    "execution_revalidation": {
+                        "accepted": False,
+                        "reason_code": size_validation.reason_code,
+                        "reason": size_validation.reason,
+                        "normalized_size": size_validation.normalized_size,
+                        "min_deal_size": size_validation.min_deal_size,
+                        "size_step": size_validation.size_step,
+                        "notes": size_validation.notes,
+                    }
+                },
+            )
+            trade_service.transition_trade_intent(
+                intent,
+                state=TradeIntentState.FAILED,
+                decision_reason_code="execution_revalidation_failed",
+                decision_reason=size_validation.reason,
+                risk_truth_confidence="INCOMPLETE_DEGRADED",
+                details={
+                    **StrategyService._allocation_outcome_update(
+                        stage="execution_revalidation_failed",
+                        final_status=TradeIntentState.FAILED.value,
+                        hard_risk_passed=True,
+                        execution_blocked=True,
+                    ),
+                    "risk_reconciliation": risk_reconciliation,
+                    "execution_revalidation": {
+                        "accepted": False,
+                        "reason_code": size_validation.reason_code,
+                        "reason": size_validation.reason,
+                        "normalized_size": size_validation.normalized_size,
+                    },
+                },
+            )
+            raise ValueError(
+                f"Entry execution blocked by broker size validation for {signal.instrument}: {size_validation.reason}"
+            )
+        if abs(size_validation.normalized_size - executable_size) > 1e-8:
+            risk_reconciliation = StrategyService._build_risk_reconciliation(
+                intent=intent,
+                submitted_size=size_validation.normalized_size,
+                submitted_price=signal.observed_price,
+            )
+            trade_service.transition_execution(
+                execution,
+                status=ExecutionStatus.FAILED,
+                trade_intent_id=intent.id,
+                client_request_id=execution.client_request_id,
+                reason="Broker size normalization changed after approval; reallocation required.",
+                error_message="Execution-time normalization drift requires reallocation.",
+                risk_truth_confidence="INCOMPLETE_DEGRADED",
+                requires_manual_review=False,
+                details={
+                    "risk_reconciliation": risk_reconciliation,
+                    "execution_revalidation": {
+                        "accepted": True,
+                        "reallocation_required": True,
+                        "approved_size": executable_size,
+                        "normalized_size": size_validation.normalized_size,
+                    }
+                },
+            )
+            trade_service.transition_trade_intent(
+                intent,
+                state=TradeIntentState.FAILED,
+                decision_reason_code="execution_revalidation_failed",
+                decision_reason="Broker size normalization changed after approval; reallocation required.",
+                risk_truth_confidence="INCOMPLETE_DEGRADED",
+                details={
+                    **StrategyService._allocation_outcome_update(
+                        stage="execution_revalidation_failed",
+                        final_status=TradeIntentState.FAILED.value,
+                        hard_risk_passed=True,
+                        execution_blocked=True,
+                        execution_revalidation_changed_outcome=True,
+                    ),
+                    "risk_reconciliation": risk_reconciliation,
+                    "execution_revalidation": {
+                        "accepted": True,
+                        "reallocation_required": True,
+                        "approved_size": executable_size,
+                        "normalized_size": size_validation.normalized_size,
+                    },
+                },
+            )
+            raise ValueError(
+                f"Broker size normalization for {signal.instrument} changed after approval "
+                f"({executable_size} -> {size_validation.normalized_size}); reallocation required."
+            )
+        submitted_risk_tracking = StrategyService._estimate_execution_risk_snapshot(
+            broker=engine.broker,
+            intent=intent,
+            entry_price=signal.observed_price,
+            size=size_validation.normalized_size,
+            risk_state="submitted",
+            reservation_owner="INTENT",
+            filled_size_confirmed=True,
+        )
+        submitted_risk_reconciliation = StrategyService._build_risk_reconciliation(
+            intent=intent,
+            submitted_risk_tracking=submitted_risk_tracking,
+            submitted_size=size_validation.normalized_size,
+            submitted_price=signal.observed_price,
+        )
         order_request = OrderRequest(
             instrument=signal.instrument,
             direction=signal.direction,
-            size=intent.allocated_size or signal.size,
+            size=size_validation.normalized_size,
             price=signal.observed_price,
             strategy_name=signal.strategy_name,
             client_request_id=execution.client_request_id,
@@ -1027,14 +1398,33 @@ class StrategyService:
             trade_intent_id=intent.id,
             submitted_at=utc_now(),
             client_request_id=execution.client_request_id,
+            intended_risk_amount=intent.estimated_risk_amount,
+            submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
+            risk_truth_confidence=str(submitted_risk_tracking.get("risk_truth_confidence") or "SUBMITTED_EXECUTABLE_ESTIMATE"),
             reason="Entry order submitted",
-            details={"market_status_execution_check": status.model_dump(mode="json")},
+            details={
+                "market_status_execution_check": status.model_dump(mode="json"),
+                "risk_tracking": submitted_risk_tracking,
+                "risk_reconciliation": submitted_risk_reconciliation,
+            },
         )
         trade_service.transition_trade_intent(
             intent,
             state=TradeIntentState.SUBMITTED,
             execution_client_request_id=execution.client_request_id,
+            submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
+            risk_truth_confidence=str(submitted_risk_tracking.get("risk_truth_confidence") or "SUBMITTED_EXECUTABLE_ESTIMATE"),
             submitted_at=execution.submitted_at,
+            details={
+                **StrategyService._allocation_outcome_update(
+                    stage="submitted_to_broker",
+                    final_status=TradeIntentState.SUBMITTED.value,
+                    hard_risk_passed=True,
+                    execution_submitted=True,
+                ),
+                "risk_tracking": submitted_risk_tracking,
+                "risk_reconciliation": submitted_risk_reconciliation,
+            },
         )
         started_at = perf_counter()
         try:
@@ -1064,16 +1454,33 @@ class StrategyService:
                 status=ExecutionStatus.FAILED,
                 trade_intent_id=intent.id,
                 client_request_id=execution.client_request_id,
+                intended_risk_amount=intent.estimated_risk_amount,
+                submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
+                risk_truth_confidence=str(submitted_risk_tracking.get("risk_truth_confidence") or "SUBMITTED_EXECUTABLE_ESTIMATE"),
                 error_message=str(exc),
                 reason="Entry order submission failed",
                 requires_manual_review=False,
+                details={"risk_reconciliation": submitted_risk_reconciliation},
             )
             trade_service.transition_trade_intent(
                 intent,
                 state=TradeIntentState.FAILED,
                 decision_reason_code="broker_submission_failed",
                 decision_reason="Entry order submission failed.",
-                details={"error_message": str(exc)},
+                submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
+                risk_truth_confidence=str(submitted_risk_tracking.get("risk_truth_confidence") or "SUBMITTED_EXECUTABLE_ESTIMATE"),
+                details={
+                    "error_message": str(exc),
+                    **StrategyService._allocation_outcome_update(
+                        stage="broker_submission_failed",
+                        final_status=TradeIntentState.FAILED.value,
+                        hard_risk_passed=True,
+                        execution_submitted=True,
+                        execution_blocked=True,
+                    ),
+                    "risk_tracking": submitted_risk_tracking,
+                    "risk_reconciliation": submitted_risk_reconciliation,
+                },
             )
             raise
         get_health_service().update_broker_state(connected=True, latency_ms=(perf_counter() - started_at) * 1000)
@@ -1090,6 +1497,27 @@ class StrategyService:
         filled_size = order.filled_size or order.size
         if order.status in {BrokerOrderStatus.REJECTED, BrokerOrderStatus.FAILED, BrokerOrderStatus.CANCELLED} or filled_size <= 0:
             raise RuntimeError(f"Entry order for {signal.instrument} did not produce an open fill.")
+        fill_risk_tracking = StrategyService._estimate_execution_risk_snapshot(
+            broker=engine.broker,
+            intent=intent,
+            entry_price=order.average_fill_price or order.price,
+            size=filled_size,
+            risk_state="filled",
+            reservation_owner="POSITION",
+            broker_order_status=order.status,
+            fill_price_confirmed=(order.average_fill_price is not None or order.price is not None),
+            filled_size_confirmed=(order.filled_size is not None or order.size is not None),
+        )
+        fill_risk_reconciliation = StrategyService._build_risk_reconciliation(
+            intent=intent,
+            submitted_risk_tracking=submitted_risk_tracking,
+            fill_risk_tracking=fill_risk_tracking,
+            submitted_size=size_validation.normalized_size,
+            filled_size=filled_size,
+            submitted_price=signal.observed_price,
+            fill_price=order.average_fill_price or order.price,
+            fill_status=order.status.value,
+        )
         engine.current_position = Position(
             trade_intent_id=intent.id,
             instrument=signal.instrument,
@@ -1099,9 +1527,17 @@ class StrategyService:
             open_price=order.average_fill_price or order.price,
             open_time=order.executed_at,
             strategy_name=signal.strategy_name,
+            family_name=intent.family_name,
             account_type=engine.broker.account_type.value,
             is_open=True,
             risk_percent=intent.allocated_risk_percent or signal.risk_percent,
+            entry_risk_amount=float(
+                fill_risk_tracking.get("fill_derived_risk_amount")
+                or fill_risk_tracking.get("submitted_executable_risk_amount")
+                or intent.estimated_risk_amount
+                or 0.0
+            ),
+            risk_truth_confidence=str(fill_risk_tracking.get("risk_truth_confidence") or "INCOMPLETE_DEGRADED"),
             current_price=order.average_fill_price or order.price,
             unrealized_pnl=0.0,
             reason=f"{signal.strategy_name} entry approved",
@@ -1117,18 +1553,77 @@ class StrategyService:
             completed_at=persisted_position.broker_open_confirmed_at or persisted_position.open_time,
             average_fill_price=persisted_position.open_price,
             filled_size=persisted_position.size,
+            intended_risk_amount=intent.estimated_risk_amount,
+            submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
+            fill_derived_risk_amount=fill_risk_tracking.get("fill_derived_risk_amount"),
+            risk_truth_confidence=str(fill_risk_tracking.get("risk_truth_confidence") or "INCOMPLETE_DEGRADED"),
             reason="Position opened",
+            details={"risk_tracking": fill_risk_tracking, "risk_reconciliation": fill_risk_reconciliation},
         )
         trade_service.transition_trade_intent(
             intent,
             state=TradeIntentState.POSITION_OPENED,
             broker_reference=persisted_position.broker_reference,
             position_id=persisted_position.id,
+            submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
+            fill_derived_risk_amount=fill_risk_tracking.get("fill_derived_risk_amount"),
+            risk_truth_confidence=str(fill_risk_tracking.get("risk_truth_confidence") or "INCOMPLETE_DEGRADED"),
             average_fill_price=persisted_position.open_price,
             filled_size=persisted_position.size,
             completed_at=persisted_position.broker_open_confirmed_at or persisted_position.open_time,
             opened_at=persisted_position.open_time,
+            details={
+                **StrategyService._allocation_outcome_update(
+                    stage=(
+                        "position_opened_partial_fill"
+                        if order.status is BrokerOrderStatus.PARTIALLY_FILLED
+                        else "position_opened"
+                    ),
+                    final_status=TradeIntentState.POSITION_OPENED.value,
+                    hard_risk_passed=True,
+                    execution_submitted=True,
+                    fill_status=(
+                        TradeIntentState.PARTIALLY_FILLED.value
+                        if order.status is BrokerOrderStatus.PARTIALLY_FILLED
+                        else TradeIntentState.FILLED.value
+                    ),
+                ),
+                "risk_tracking": fill_risk_tracking,
+                "risk_reconciliation": StrategyService._build_risk_reconciliation(
+                    intent=intent,
+                    submitted_risk_tracking=submitted_risk_tracking,
+                    fill_risk_tracking=fill_risk_tracking,
+                    submitted_size=size_validation.normalized_size,
+                    filled_size=filled_size,
+                    submitted_price=signal.observed_price,
+                    fill_price=persisted_position.open_price,
+                    live_position=persisted_position,
+                    fill_status=order.status.value,
+                ),
+            },
         )
+        if bool((fill_risk_reconciliation.get("flags") or {}).get("material_execution_drift")):
+            domain_event_service.record_event(
+                event_type="allocation.execution_drift_detected",
+                category="allocation",
+                severity=(
+                    "error"
+                    if bool((fill_risk_reconciliation.get("flags") or {}).get("critical_execution_drift"))
+                    else "warning"
+                ),
+                source="strategy_service.execute_entry_signal",
+                title="Execution drift exceeded tolerance",
+                message=f"Execution drift exceeded tolerance for {signal.instrument}.",
+                correlation_id=execution.client_request_id,
+                strategy_name=signal.strategy_name,
+                instrument=signal.instrument,
+                position_id=persisted_position.id,
+                execution_id=execution.id,
+                payload_json={
+                    "trade_intent_id": intent.id,
+                    "risk_reconciliation": fill_risk_reconciliation,
+                },
+            )
         engine.strategy.on_position_opened(direction=signal.direction, entry_price=order.price)
         engine.current_position = clone_position(persisted_position)
         return clone_position(persisted_position)
@@ -1261,6 +1756,7 @@ class StrategyService:
         trade = Trade(
             trade_intent_id=intent.id,
             strategy_name=engine.current_position.strategy_name,
+            family_name=engine.current_position.family_name,
             broker_reference=engine.current_position.broker_reference,
             close_broker_reference=closed_order.broker_reference,
             instrument=engine.current_position.instrument,
@@ -1271,6 +1767,8 @@ class StrategyService:
             open_time=engine.current_position.open_time,
             close_time=closed_order.executed_at,
             pnl=pnl,
+            entry_risk_amount=engine.current_position.entry_risk_amount,
+            risk_truth_confidence=engine.current_position.risk_truth_confidence,
             account_type=engine.current_position.account_type,
         )
         engine.current_position.is_open = False
@@ -1404,6 +1902,22 @@ class StrategyService:
                 average_fill_price=order.average_fill_price or order.price,
                 filled_size=order.filled_size or order.size,
                 completed_at=order.executed_at,
+                details=StrategyService._allocation_outcome_update(
+                    stage=(
+                        "fill_partial"
+                        if order.status is BrokerOrderStatus.PARTIALLY_FILLED
+                        else "broker_order_failed"
+                        if order.status in {BrokerOrderStatus.REJECTED, BrokerOrderStatus.FAILED}
+                        else "broker_order_cancelled"
+                        if order.status is BrokerOrderStatus.CANCELLED
+                        else "fill_complete"
+                    ),
+                    final_status=intent_state.value,
+                    hard_risk_passed=True,
+                    execution_submitted=True,
+                    execution_blocked=order.status in {BrokerOrderStatus.REJECTED, BrokerOrderStatus.FAILED, BrokerOrderStatus.CANCELLED},
+                    fill_status=fill_status.value,
+                ),
                 **intent_broker_reference_kwargs,
             )
 

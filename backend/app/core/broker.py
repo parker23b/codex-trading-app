@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 
@@ -23,6 +23,19 @@ class BrokerOrderStatus(str, Enum):
     CANCELLED = "CANCELLED"
     REJECTED = "REJECTED"
     FAILED = "FAILED"
+
+
+class BrokerSizingPrecision(str, Enum):
+    EXACT = "EXACT"
+    APPROXIMATE = "APPROXIMATE"
+    UNSUPPORTED = "UNSUPPORTED"
+
+
+class BrokerSizingMode(str, Enum):
+    EXACT_POINT_VALUE = "EXACT_POINT_VALUE"
+    EXACT_CONTRACT_RISK = "EXACT_CONTRACT_RISK"
+    APPROXIMATE_PRICE_DELTA = "APPROXIMATE_PRICE_DELTA"
+    UNSUPPORTED = "UNSUPPORTED"
 
 
 @dataclass(slots=True)
@@ -90,8 +103,46 @@ class BrokerMarketDetails:
     update_time: str | None
     tradable: bool
     min_deal_size: float | None = None
+    size_step: float | None = None
     min_normal_stop_or_limit_distance: float | None = None
     market_order_preference: str | None = None
+    base_currency: str | None = None
+    quote_currency: str | None = None
+    metadata: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class BrokerRiskSizingQuote:
+    instrument: str
+    precision: BrokerSizingPrecision
+    mode: BrokerSizingMode
+    sizing_available: bool
+    reason_code: str
+    reason: str
+    entry_price: float
+    risk_amount: float
+    requested_size: float = 0.0
+    normalized_size: float = 0.0
+    risk_per_unit: float | None = None
+    stop_distance_price: float | None = None
+    sizing_method: str | None = None
+    min_stop_distance: float | None = None
+    normalization: BrokerSizeNormalization | None = None
+    details: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class BrokerSizeNormalization:
+    instrument: str
+    requested_size: float
+    normalized_size: float
+    accepted: bool
+    reason_code: str
+    reason: str
+    min_deal_size: float | None = None
+    size_step: float | None = None
+    details: dict[str, object] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
 
 
 class Broker(ABC):
@@ -130,6 +181,22 @@ class Broker(ABC):
 
     @abstractmethod
     def get_market_details(self, instrument: str) -> BrokerMarketDetails:
+        raise NotImplementedError
+
+    @abstractmethod
+    def quote_risk_sized_order(
+        self,
+        instrument: str,
+        *,
+        entry_price: float,
+        risk_amount: float,
+        stop_loss_price: float | None = None,
+        fallback_stop_distance: float | None = None,
+    ) -> BrokerRiskSizingQuote:
+        raise NotImplementedError
+
+    @abstractmethod
+    def normalize_order_size(self, instrument: str, requested_size: float) -> BrokerSizeNormalization:
         raise NotImplementedError
 
 
