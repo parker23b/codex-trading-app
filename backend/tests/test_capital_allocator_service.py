@@ -65,7 +65,7 @@ def _candidate(
             signal_at=signal_at,
             direction=direction,
             size=0.0,
-            risk_percent=0.0,
+            risk_percent=risk_per_trade,
             stop_loss_price=stop_loss_price,
             expected_reward_risk=expected_reward_risk,
             bid=price,
@@ -77,7 +77,6 @@ def _candidate(
         source_tier="TIER1",
         confidence=confidence,
         metadata=SimpleNamespace(
-            risk_per_trade=risk_per_trade,
             family_name=family_name or strategy_name,
         ),
     )

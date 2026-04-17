@@ -18,6 +18,20 @@ export type RiskSummaryItem = {
   tone: RiskTone;
 };
 
+export type RiskAllocationSummary = {
+  grossRiskPercent: number;
+  netRiskPercent: number;
+  longRiskPercent: number;
+  shortRiskPercent: number;
+  openPositionCount: number;
+  reservedIntentCount: number;
+  topInstruments: Array<{
+    instrument: string;
+    totalRiskPercent: number;
+    utilizationPercent?: number | null;
+  }>;
+};
+
 export type RiskConsoleSummary = {
   openRiskPercent: number;
   reservedRiskPercent: number;
@@ -402,6 +416,39 @@ export function buildRiskConsoleSummary(args: {
         bindingConstraint: dominantBindingBudget(lastCycle),
       },
     },
+  };
+}
+
+export function buildRiskAllocationSummary(exposure: AllocationExposureSummary): RiskAllocationSummary {
+  const longRiskPercent = exposure.currency_directional.reduce(
+    (total, bucket) => total + bucket.reserved_long_risk_percent + bucket.live_long_risk_percent,
+    0,
+  );
+  const shortRiskPercent = exposure.currency_directional.reduce(
+    (total, bucket) => total + bucket.reserved_short_risk_percent + bucket.live_short_risk_percent,
+    0,
+  );
+  const netRiskPercent = longRiskPercent - shortRiskPercent;
+  const grossRiskPercent = exposure.currency_directional.length
+    ? exposure.currency_directional.reduce((total, bucket) => total + bucket.gross_risk_percent, 0)
+    : longRiskPercent + shortRiskPercent;
+
+  return {
+    grossRiskPercent,
+    netRiskPercent,
+    longRiskPercent,
+    shortRiskPercent,
+    openPositionCount: exposure.totals.open_position_count,
+    reservedIntentCount: exposure.totals.reserved_intent_count,
+    topInstruments: exposure.by_instrument
+      .slice()
+      .sort((left, right) => right.total_risk_percent - left.total_risk_percent)
+      .slice(0, 5)
+      .map((bucket) => ({
+        instrument: bucket.name,
+        totalRiskPercent: bucket.total_risk_percent,
+        utilizationPercent: bucket.utilization_percent,
+      })),
   };
 }
 

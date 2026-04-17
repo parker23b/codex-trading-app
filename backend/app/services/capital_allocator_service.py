@@ -450,10 +450,7 @@ class CapitalAllocatorService:
     def _requested_risk_percent(self, candidate: SignalCandidate) -> float:
         signal = candidate.signal
         assert isinstance(signal, EntrySignal)
-        metadata = candidate.metadata
-        raw = getattr(metadata, "risk_per_trade", None)
-        if raw is None:
-            raw = signal.risk_percent
+        raw = signal.risk_percent
         if raw in (None, 0):
             raw = self.settings.allocation_default_risk_per_trade_percent
         return max(float(raw), 0.0)

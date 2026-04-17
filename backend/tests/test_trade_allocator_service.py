@@ -45,7 +45,6 @@ def _candidate(
         engine=engine,
         source_tier="TIER1",
         confidence=confidence,
-        metadata=SimpleNamespace(risk_per_trade=risk_percent),
     )
 
 

@@ -244,6 +244,31 @@ class VolatilityAdjustedPullbackContinuationStrategy(Strategy):
         self._lowest_price_since_entry = None
         self._signal_stop_loss = None
 
+    def entry_signal_hints(self) -> dict[str, Any]:
+        current_price = self._current_reference_price()
+        if self._entry_direction is None or current_price is None:
+            return {}
+        stop_loss_price = self._signal_stop_loss
+        if stop_loss_price is None:
+            return {}
+        risk_per_unit = abs(current_price - stop_loss_price)
+        if risk_per_unit <= 0:
+            return {}
+        if self._entry_direction is OrderDirection.BUY:
+            take_profit_price = current_price + (risk_per_unit * self.risk_reward_multiple)
+            thesis = "higher_timeframe_trend_pullback_continuation_long"
+        else:
+            take_profit_price = current_price - (risk_per_unit * self.risk_reward_multiple)
+            thesis = "higher_timeframe_trend_pullback_continuation_short"
+        current_atr = self._current_atr()
+        return {
+            "stop_loss_price": round(stop_loss_price, 8),
+            "take_profit_price": round(take_profit_price, 8),
+            "expected_reward_risk": round(self.risk_reward_multiple, 4),
+            "volatility_estimate": round(current_atr, 8) if current_atr is not None else None,
+            "thesis": thesis,
+        }
+
     def export_state_snapshot(self) -> dict[str, Any]:
         return {
             "prices": list(self.prices),

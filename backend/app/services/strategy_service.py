@@ -788,7 +788,7 @@ class StrategyService:
                     broker_reference=engine.current_position.broker_reference,
                 )
 
-                risk_percent = metadata.risk_per_trade if metadata else 0.0
+                risk_percent = 0.0
                 current_position_risk = getattr(engine.current_position, "risk_percent", None)
                 if current_position_risk is not None:
                     risk_percent = current_position_risk
@@ -910,7 +910,7 @@ class StrategyService:
                         )
                 risk_budget = float(allocation_risk_amount or 0.0)
                 if risk_budget <= 0:
-                    risk_budget = metadata.risk_per_trade if metadata and metadata.risk_per_trade else 1.0
+                    risk_budget = max(abs(trade.open_price * trade.size), 1.0)
                 trade.r_multiple = round(trade.pnl / risk_budget, 2)
                 trade.reason = f"{trade.strategy_name} exit triggered"
                 existing_position = trade_service.get_open_position(

@@ -291,8 +291,6 @@ class TradeAllocatorService:
 
     @staticmethod
     def _candidate_risk_percent(candidate: SignalCandidate) -> float:
-        if candidate.metadata is not None and getattr(candidate.metadata, "risk_per_trade", None) is not None:
-            return float(candidate.metadata.risk_per_trade)
         signal = candidate.signal
         if isinstance(signal, EntrySignal) and signal.risk_percent is not None:
             return float(signal.risk_percent)

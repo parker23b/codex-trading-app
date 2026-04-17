@@ -93,6 +93,18 @@ class Strategy(ABC):
     def on_entry_failed(self) -> None:
         """Optional lifecycle hook invoked when an entry order fails."""
 
+    def entry_signal_hints(self) -> dict[str, Any]:
+        """
+        Return optional non-binding alpha hints for the next entry signal.
+
+        This is the clean handoff point from strategy logic into the external
+        allocation/risk pipeline. Strategies may describe thesis, stop distance,
+        or reward/risk context here, but the platform remains authoritative for
+        sizing, admission, and execution.
+        """
+
+        return {}
+
     def export_state_snapshot(self) -> dict[str, Any]:
         """
         Return a JSON-serializable snapshot of internal strategy state.

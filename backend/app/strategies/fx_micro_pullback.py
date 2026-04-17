@@ -139,6 +139,19 @@ class FxMicroPullbackStrategy(Strategy):
         self._entry_direction = None
         self._entry_price = None
 
+    def entry_signal_hints(self) -> dict[str, Any]:
+        if not self._has_enough_data():
+            return {}
+        hints: dict[str, Any] = {
+            "expected_reward_risk": round(self.take_profit_threshold / max(self.max_adverse_threshold, 1e-9), 4),
+            "volatility_estimate": round(abs(self._recent_momentum()), 8),
+        }
+        if self._entry_direction is OrderDirection.BUY:
+            hints["thesis"] = "short_term_trend_continuation_long"
+        elif self._entry_direction is OrderDirection.SELL:
+            hints["thesis"] = "short_term_trend_continuation_short"
+        return hints
+
     def _has_enough_data(self) -> bool:
         required = self.slow_window + self.momentum_window
         return len(self.prices) >= required and self.last_price is not None

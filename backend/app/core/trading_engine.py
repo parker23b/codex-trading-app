@@ -8,7 +8,7 @@ from uuid import uuid4
 from app.core.broker import Broker, OrderDirection
 from app.core.logging import get_logger
 from app.core.signals import EntrySignal, ExitSignal, SignalKind
-from app.models.trade import Position, Trade
+from app.models.trade import Position
 from app.strategies.base import PriceUpdate, Strategy
 
 logger = get_logger(__name__)
@@ -27,7 +27,7 @@ class TradingEngine:
     broker: Broker
     instrument: str
     runtime_id: str = field(default_factory=lambda: str(uuid4()))
-    trade_size: float = 1.0
+    trade_size: float = 0.0
     active_profile_name: str | None = None
     strategy_parameters: dict[str, Any] = field(default_factory=dict)
     runtime_mode: str = "NORMAL"
@@ -81,20 +81,21 @@ class TradingEngine:
             # This is the raw alpha signal boundary. The engine packages strategy
             # intent into an `EntrySignal`, but it is only a proposal; sizing,
             # admission, and execution authority now live in TradeDecisionService.
-            return EntrySignal(
+            signal = EntrySignal(
                 kind=SignalKind.ENTRY,
                 strategy_name=self.strategy.name,
                 instrument=self.instrument,
                 observed_price=update.price,
                 signal_at=signal_time,
                 direction=direction,
-                size=self.trade_size,
+                size=0.0,
                 risk_percent=0.0,
                 bid=update.bid,
                 ask=update.ask,
                 market_status=update.market_status,
                 tradable=update.tradable,
             )
+            return self._apply_entry_signal_hints(signal)
 
         if self.current_position is not None and self.strategy.should_exit_trade():
             logger.info(
@@ -136,3 +137,24 @@ class TradingEngine:
             },
         )
         return None
+
+    def _apply_entry_signal_hints(self, signal: EntrySignal) -> EntrySignal:
+        hints = self.strategy.entry_signal_hints() or {}
+        if not hints:
+            return signal
+        strategy_metadata = dict(signal.strategy_metadata)
+        for key, value in hints.items():
+            if key == "stop_loss_price":
+                signal.stop_loss_price = float(value) if value is not None else None
+            elif key == "take_profit_price":
+                signal.take_profit_price = float(value) if value is not None else None
+            elif key == "expected_reward_risk":
+                signal.expected_reward_risk = float(value) if value is not None else None
+            elif key == "volatility_estimate":
+                signal.volatility_estimate = float(value) if value is not None else None
+            elif key == "thesis":
+                signal.thesis = str(value) if value is not None else None
+            elif value is not None:
+                strategy_metadata[key] = value
+        signal.strategy_metadata = strategy_metadata
+        return signal

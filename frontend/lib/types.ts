@@ -702,12 +702,20 @@ export type AimeeControlPlaneSummary = {
   configured_autonomous_control_enabled: boolean;
   autonomy_override_active: boolean;
   autonomy_override_reason?: string | null;
+  entry_eligible?: boolean;
+  exit_eligible?: boolean;
+  entry_block_reason?: string | null;
+  exit_block_reason?: string | null;
+  open_risk_management_state?: string | null;
+  open_risk_management_reason?: string | null;
   misaligned_count: number;
   counts: Record<string, number>;
   families: Array<{
     strategy_name: string;
     deployment?: {
       state?: string | null;
+      open_risk_management_state?: string | null;
+      open_risk_management_reason?: string | null;
       blocked_reason?: string | null;
       degraded_reason?: string | null;
       selected_instrument?: string | null;

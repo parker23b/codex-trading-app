@@ -84,7 +84,6 @@ class StrategyRuntimeManager:
                 },
             )
 
-        metadata = strategy_registry.get_metadata(strategy_name)
         resolved_profile = self.resolve_profile(strategy_name, profile_name=profile_name, strategy_parameters=strategy_parameters)
         strategy = strategy_registry.create(strategy_name, parameters=resolved_profile.constructor_kwargs)
         if strategy_snapshot:
@@ -98,7 +97,6 @@ class StrategyRuntimeManager:
             strategy_parameters=dict(resolved_profile.parameter_values),
             runtime_mode=runtime_mode,
         )
-        engine.trade_size = metadata.position_size
         engine.current_position = clone_position(current_position)
         if activate:
             engine.start()

@@ -491,9 +491,14 @@ class TradeDecisionService:
                 details={
                     "source_tier": candidate.source_tier,
                     "strategy_hints": {
-                        "metadata_position_size": getattr(candidate.metadata, "position_size", None),
-                        "metadata_risk_per_trade": getattr(candidate.metadata, "risk_per_trade", None),
                         "signal_size_hint": signal.size,
+                        "signal_risk_percent_hint": signal.risk_percent,
+                        "signal_stop_loss_price": signal.stop_loss_price,
+                        "signal_take_profit_price": signal.take_profit_price,
+                        "signal_expected_reward_risk": signal.expected_reward_risk,
+                        "signal_volatility_estimate": signal.volatility_estimate,
+                        "signal_thesis": signal.thesis,
+                        "signal_strategy_metadata": dict(signal.strategy_metadata),
                     },
                     "allocation": {
                         "cycle_id": allocation.cycle_id,

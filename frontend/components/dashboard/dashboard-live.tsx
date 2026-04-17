@@ -10,6 +10,8 @@ import {
   StatusPill,
   StatusStrip,
 } from "@/components/console/primitives";
+import { RiskAllocationPanel } from "@/components/dashboard/risk-allocation-panel";
+import { RiskPanel } from "@/components/dashboard/risk-panel";
 import { RiskInspectorDrawer } from "@/components/risk/risk-inspector-drawer";
 import { RiskStatusBlock } from "@/components/risk/risk-status-block";
 import {
@@ -768,6 +770,10 @@ export function DashboardLive({
                     </div>
                   </div>
                   <RiskStatusBlock summary={riskSummary} onOpenDrawer={() => setInspectorMode("risk")} />
+                  <div className="risk-budget-grid">
+                    <RiskPanel summary={riskSummary} />
+                    <RiskAllocationPanel exposure={allocationExposure} summary={riskSummary} />
+                  </div>
                 </section>
               </div>
             </Panel>

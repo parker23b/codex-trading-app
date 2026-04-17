@@ -39,8 +39,8 @@ def _candidate(
         observed_price=price,
         signal_at=signal_at,
         direction=direction,
-        size=0.0,
-        risk_percent=0.0,
+        size=position_size,
+        risk_percent=risk_per_trade,
         bid=price - 0.0001,
         ask=price + 0.0001,
         market_status=market_status,
@@ -53,7 +53,7 @@ def _candidate(
         engine=SimpleNamespace(strategy=SimpleNamespace(name=strategy_name), broker=broker, instrument=instrument),
         source_tier="TIER1",
         confidence=confidence,
-        metadata=SimpleNamespace(position_size=position_size, risk_per_trade=risk_per_trade),
+        metadata=SimpleNamespace(position_size=position_size),
     )
 
 

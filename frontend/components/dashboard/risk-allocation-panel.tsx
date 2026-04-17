@@ -1,37 +1,29 @@
 import { Card } from "@/components/ui/card";
 import { formatInstrumentLabel, formatPercent } from "@/lib/format";
-
-type InstrumentAllocation = {
-  instrument: string;
-  allocation: number;
-};
+import { buildRiskAllocationSummary, type RiskConsoleSummary } from "@/lib/risk-allocation";
+import { type AllocationExposureSummary } from "@/lib/types";
 
 type RiskAllocationPanelProps = {
-  longExposure: number;
-  shortExposure: number;
-  allocations: InstrumentAllocation[];
-  grossExposurePercent: number;
-  netExposurePercent: number;
-  positionCount: number;
+  exposure: AllocationExposureSummary;
+  summary: RiskConsoleSummary;
 };
 
-export function RiskAllocationPanel({
-  longExposure,
-  shortExposure,
-  allocations,
-  grossExposurePercent,
-  netExposurePercent,
-  positionCount,
-}: RiskAllocationPanelProps) {
-  const totalDirectional = Math.max(longExposure + shortExposure, 1);
-  const netBiasLabel = netExposurePercent > 0.1 ? "Net Long" : netExposurePercent < -0.1 ? "Net Short" : "Balanced";
+export function RiskAllocationPanel({ exposure, summary }: RiskAllocationPanelProps) {
+  const allocation = buildRiskAllocationSummary(exposure);
+  const totalDirectional = Math.max(allocation.longRiskPercent + allocation.shortRiskPercent, 1);
+  const netBiasLabel =
+    allocation.netRiskPercent > 0.1 ? "Net Long" : allocation.netRiskPercent < -0.1 ? "Net Short" : "Balanced";
 
   return (
-    <Card title="Allocation" subtitle="Directional split and position sizing." className="card--compact allocation-card">
+    <Card
+      title="Allocation"
+      subtitle="Directional and instrument concentration from the live allocation read model."
+      className="card--compact allocation-card"
+    >
       <div className="allocation-summary">
         <div className="allocation-summary__item">
-          <span className="eyebrow">Gross Exposure</span>
-          <strong>{formatPercent(grossExposurePercent)}</strong>
+          <span className="eyebrow">Gross Risk</span>
+          <strong>{formatPercent(allocation.grossRiskPercent)}</strong>
         </div>
         <div className="allocation-summary__item">
           <span className="eyebrow">Net Bias</span>
@@ -39,31 +31,41 @@ export function RiskAllocationPanel({
         </div>
         <div className="allocation-summary__item">
           <span className="eyebrow">Open Lines</span>
-          <strong>{positionCount}</strong>
+          <strong>{allocation.openPositionCount}</strong>
         </div>
       </div>
       <div className="allocation-split">
         <div className="allocation-split__row">
           <div className="allocation-split__meta">
             <span>Gross Long vs Short</span>
-            <span>{formatPercent((longExposure / totalDirectional) * 100)} / {formatPercent((shortExposure / totalDirectional) * 100)}</span>
+            <span>
+              {formatPercent((allocation.longRiskPercent / totalDirectional) * 100)} / {formatPercent((allocation.shortRiskPercent / totalDirectional) * 100)}
+            </span>
           </div>
           <div className="allocation-split__track">
-            <div className="allocation-split__long" style={{ width: `${(longExposure / totalDirectional) * 100}%` }} />
-            <div className="allocation-split__short" style={{ width: `${(shortExposure / totalDirectional) * 100}%` }} />
+            <div
+              className="allocation-split__long"
+              style={{ width: `${(allocation.longRiskPercent / totalDirectional) * 100}%` }}
+            />
+            <div
+              className="allocation-split__short"
+              style={{ width: `${(allocation.shortRiskPercent / totalDirectional) * 100}%` }}
+            />
           </div>
         </div>
       </div>
-      <div className="status-note">Allocation uses gross exposure share, so a balanced book can still be large overall.</div>
+      <div className="status-note">
+        {summary.lastCycleStatus.meta}. {allocation.reservedIntentCount} reserved intents are holding additional capital outside the live book.
+      </div>
       <div className="bar-chart">
-        {allocations.map((allocation) => (
-          <div className="bar-row" key={allocation.instrument}>
+        {allocation.topInstruments.map((bucket) => (
+          <div className="bar-row" key={bucket.instrument}>
             <div className="bar-meta">
-              <span>{formatInstrumentLabel(allocation.instrument)}</span>
-              <span>{formatPercent(allocation.allocation)}</span>
+              <span>{formatInstrumentLabel(bucket.instrument)}</span>
+              <span>{formatPercent(bucket.totalRiskPercent)}</span>
             </div>
             <div className="bar-track">
-              <div className="bar-fill" style={{ width: `${allocation.allocation}%` }} />
+              <div className="bar-fill" style={{ width: `${Math.min(bucket.utilizationPercent ?? bucket.totalRiskPercent, 100)}%` }} />
             </div>
           </div>
         ))}

@@ -1,12 +1,9 @@
 import { Card } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { formatPercent } from "@/lib/format";
+import { type RiskConsoleSummary } from "@/lib/risk-allocation";
 
 type RiskPanelProps = {
-  capitalAtRisk: number;
-  largestPosition: number;
-  concentration: number;
-  drawdown: number;
+  summary: RiskConsoleSummary;
 };
 
 function getRiskTone(value: number, warningThreshold: number, dangerThreshold: number) {
@@ -19,37 +16,32 @@ function getRiskTone(value: number, warningThreshold: number, dangerThreshold: n
   return { label: "Safe", tone: "positive" as const };
 }
 
-export function RiskPanel({
-  capitalAtRisk,
-  largestPosition,
-  concentration,
-  drawdown,
-}: RiskPanelProps) {
-  const overall = getRiskTone(Math.max(capitalAtRisk, largestPosition, concentration, drawdown), 4, 7);
+export function RiskPanel({ summary }: RiskPanelProps) {
+  const overall = getRiskTone(summary.totalActiveRiskPercent, 3.5, 5);
   const items = [
-    { label: "Capital At Risk", value: capitalAtRisk, thresholds: [2, 4] as const },
-    { label: "Largest Position", value: largestPosition, thresholds: [15, 25] as const },
-    { label: "Concentration", value: concentration, thresholds: [35, 50] as const },
-    { label: "Current Drawdown", value: drawdown, thresholds: [3, 6] as const },
+    summary.metrics[0],
+    summary.metrics[1],
+    summary.metrics[2],
+    summary.metrics[3],
   ];
 
   return (
     <Card
       title="Risk"
-      subtitle="Core portfolio limits for the current book."
+      subtitle="Canonical portfolio risk summary from allocation, drift, and alerts."
       action={<StatusBadge label={overall.label} tone={overall.tone} />}
       className="risk-panel card--compact board-surface board-surface--rail"
     >
       <div className="risk-grid">
         {items.map((item) => {
-          const status = getRiskTone(item.value, item.thresholds[0], item.thresholds[1]);
           return (
             <div key={item.label} className="risk-item">
               <div>
                 <div className="eyebrow">{item.label}</div>
-                <div className="risk-item__value">{formatPercent(item.value)}</div>
+                <div className="risk-item__value">{item.value}</div>
+                {item.meta ? <div className="text-xs text-muted-foreground">{item.meta}</div> : null}
               </div>
-              <StatusBadge label={status.label} tone={status.tone} />
+              <StatusBadge label={item.tone === "negative" ? "Danger" : item.tone === "warning" ? "Warning" : "Nominal"} tone={item.tone === "inactive" ? "neutral" : item.tone} />
             </div>
           );
         })}
