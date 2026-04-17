@@ -44,7 +44,8 @@ def _enable_live_operational_context(monkeypatch: pytest.MonkeyPatch, fixed_now)
                     "desired_instruments": (),
                     "last_tick_at": now,
                 },
-            )()
+            )(),
+            "get_last_tick_at": lambda self, instrument: now,
         },
     )()
     monkeypatch.setattr("app.services.operational_state_service.get_operational_streaming_service", lambda: stub)
@@ -798,6 +799,48 @@ def test_partial_close_result_moves_execution_to_manual_review(session, broker, 
     assert executions[0].phase == ExecutionPhase.CLOSE.value
     assert executions[0].filled_size == 0.1
     assert executions[0].average_fill_price == 101.0
+
+
+def test_partial_entry_fill_keeps_position_but_restricts_runtime(session, broker, fixed_now):
+    service = StrategyService(session)
+    trade_service = TradeService(session)
+    service.start_strategy(STRATEGY, INSTRUMENT)
+    broker.place_order_outcomes.append(
+        BrokerOrderResult(
+            broker_reference="entry-partial-1",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.5,
+            executed_at=fixed_now + timedelta(seconds=1),
+            status=BrokerOrderStatus.PARTIALLY_FILLED,
+            filled_size=0.1,
+            average_fill_price=100.5,
+            submitted_at=fixed_now + timedelta(seconds=1),
+            acknowledged_at=fixed_now + timedelta(seconds=1),
+            requires_manual_review=True,
+        )
+    )
+
+    service.process_price_update(INSTRUMENT, 100.0, bid=99.99, ask=100.01, market_status="TRADEABLE", tradable=True, received_at=fixed_now)
+    service.process_price_update(INSTRUMENT, 100.5, bid=100.49, ask=100.51, market_status="TRADEABLE", tradable=True, received_at=fixed_now + timedelta(seconds=1))
+
+    intent = trade_service.list_trade_intents(limit=1)[0]
+    execution = trade_service.list_executions(limit=1)[0]
+    runtime = session.exec(
+        select(StrategyRuntimeState)
+        .where(StrategyRuntimeState.strategy_name == STRATEGY)
+        .where(StrategyRuntimeState.instrument == INSTRUMENT)
+    ).one()
+
+    assert len(trade_service.list_positions()) == 1
+    assert intent.state == TradeIntentState.PARTIALLY_FILLED.value
+    assert intent.position_id is not None
+    assert execution.status == ExecutionStatus.NEEDS_MANUAL_REVIEW.value
+    assert execution.requires_manual_review is True
+    assert execution.local_position_id == intent.position_id
+    assert runtime.runtime_mode == "EXITS_ONLY"
+    assert runtime_manager.get_engine(STRATEGY, INSTRUMENT).runtime_mode == "EXITS_ONLY"
 
 
 def test_exits_only_runtime_mode_suppresses_new_entries(session, broker, fixed_now):

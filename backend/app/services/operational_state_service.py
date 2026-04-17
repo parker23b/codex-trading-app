@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.core.config import get_settings
+from app.core.runtime import runtime_manager
 from app.models.runtime import StrategyRuntimeState
 from app.models.strategy_deployment import StrategyDeployment
 from app.models.trade import Position
@@ -73,19 +74,46 @@ class OperationalStateService:
         now = datetime.now(UTC)
         health_details = self.health_service.get_system_health()
         stream_health = get_operational_streaming_service().get_health()
-        broker_connected = bool(health_details.broker_connected)
-        price_fresh = self._is_fresh(health_details.last_price_update, now)
-        live_stream_fresh = (
-            bool(health_details.stream_connected)
-            and bool(stream_health.connected)
-            and self._is_fresh(stream_health.last_tick_at, now)
+        return self._build_summary(
+            broker_connected=bool(health_details.broker_connected),
+            price_updated_at=health_details.last_price_update,
+            stream_tick_at=stream_health.last_tick_at,
+            stream_connected=bool(health_details.stream_connected) and bool(stream_health.connected),
+            now=now,
         )
+
+    def get_summary_for_instrument(self, instrument: str) -> OperationalStateSnapshot:
+        now = datetime.now(UTC)
+        health_details = self.health_service.get_system_health()
+        stream_health = get_operational_streaming_service().get_health()
+        return self._build_summary(
+            broker_connected=bool(health_details.broker_connected),
+            price_updated_at=(
+                runtime_manager.get_last_price_updated_at(instrument)
+                or self._get_runtime_last_price_seen_at(instrument)
+            ),
+            stream_tick_at=get_operational_streaming_service().get_last_tick_at(instrument),
+            stream_connected=bool(health_details.stream_connected) and bool(stream_health.connected),
+            now=now,
+        )
+
+    def _build_summary(
+        self,
+        *,
+        broker_connected: bool,
+        price_updated_at: datetime | None,
+        stream_tick_at: datetime | None,
+        stream_connected: bool,
+        now: datetime,
+    ) -> OperationalStateSnapshot:
+        price_fresh = self._is_fresh(price_updated_at, now)
+        live_stream_fresh = stream_connected and self._is_fresh(stream_tick_at, now)
 
         if live_stream_fresh:
             feed_source_state = FeedSourceState.LIVE
         elif broker_connected and price_fresh and not live_stream_fresh:
             feed_source_state = FeedSourceState.POLLING_FALLBACK
-        elif health_details.last_price_update is not None:
+        elif price_updated_at is not None:
             feed_source_state = FeedSourceState.STALE
         else:
             feed_source_state = FeedSourceState.DISCONNECTED
@@ -178,6 +206,18 @@ class OperationalStateService:
         normalized = value.astimezone(UTC) if value.tzinfo is not None else value.replace(tzinfo=UTC)
         age_ms = (now - normalized).total_seconds() * 1000
         return age_ms <= self.settings.max_price_age_ms
+
+    def _get_runtime_last_price_seen_at(self, instrument: str) -> datetime | None:
+        if self.session is None:
+            return None
+        runtime = self.session.exec(
+            select(StrategyRuntimeState.last_price_seen_at)
+            .where(StrategyRuntimeState.instrument == instrument)
+            .where(StrategyRuntimeState.status == "RUNNING")
+            .order_by(StrategyRuntimeState.updated_at.desc())
+            .limit(1)
+        ).first()
+        return runtime
 
     def _open_risk_management_state(self) -> OpenRiskManagementState:
         if self.session is None:

@@ -1712,65 +1712,145 @@ class StrategyService:
             reason=f"{signal.strategy_name} entry approved",
         )
         persisted_position = trade_service.record_broker_position(engine.current_position)
-        trade_service.transition_execution(
-            execution,
-            status=ExecutionStatus.POSITION_OPENED,
-            trade_intent_id=intent.id,
-            client_request_id=execution.client_request_id,
-            local_position_id=persisted_position.id,
-            broker_reference=persisted_position.broker_reference,
-            completed_at=persisted_position.broker_open_confirmed_at or persisted_position.open_time,
-            average_fill_price=persisted_position.open_price,
-            filled_size=persisted_position.size,
-            intended_risk_amount=intent.estimated_risk_amount,
-            submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
-            fill_derived_risk_amount=fill_risk_tracking.get("fill_derived_risk_amount"),
-            risk_truth_confidence=str(fill_risk_tracking.get("risk_truth_confidence") or "INCOMPLETE_DEGRADED"),
-            reason="Position opened",
-            details={"risk_tracking": fill_risk_tracking, "risk_reconciliation": fill_risk_reconciliation},
-        )
-        trade_service.transition_trade_intent(
-            intent,
-            state=TradeIntentState.POSITION_OPENED,
-            broker_reference=persisted_position.broker_reference,
-            position_id=persisted_position.id,
-            submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
-            fill_derived_risk_amount=fill_risk_tracking.get("fill_derived_risk_amount"),
-            risk_truth_confidence=str(fill_risk_tracking.get("risk_truth_confidence") or "INCOMPLETE_DEGRADED"),
-            average_fill_price=persisted_position.open_price,
-            filled_size=persisted_position.size,
-            completed_at=persisted_position.broker_open_confirmed_at or persisted_position.open_time,
-            opened_at=persisted_position.open_time,
-            details={
-                **StrategyService._allocation_outcome_update(
-                    stage=(
-                        "position_opened_partial_fill"
-                        if order.status is BrokerOrderStatus.PARTIALLY_FILLED
-                        else "position_opened"
+        if order.status is BrokerOrderStatus.PARTIALLY_FILLED:
+            residual_size = max(size_validation.normalized_size - filled_size, 0.0)
+            engine.runtime_mode = "EXITS_ONLY"
+            trade_service.transition_execution(
+                execution,
+                status=ExecutionStatus.NEEDS_MANUAL_REVIEW,
+                trade_intent_id=intent.id,
+                client_request_id=execution.client_request_id,
+                local_position_id=persisted_position.id,
+                broker_reference=persisted_position.broker_reference,
+                completed_at=persisted_position.broker_open_confirmed_at or persisted_position.open_time,
+                average_fill_price=persisted_position.open_price,
+                filled_size=persisted_position.size,
+                intended_risk_amount=intent.estimated_risk_amount,
+                submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
+                fill_derived_risk_amount=fill_risk_tracking.get("fill_derived_risk_amount"),
+                risk_truth_confidence=str(fill_risk_tracking.get("risk_truth_confidence") or "INCOMPLETE_DEGRADED"),
+                reason="Entry partially filled; runtime restricted to exits only pending review.",
+                requires_manual_review=True,
+                details={
+                    "risk_tracking": fill_risk_tracking,
+                    "risk_reconciliation": fill_risk_reconciliation,
+                    "partial_fill": {
+                        "submitted_size": size_validation.normalized_size,
+                        "filled_size": filled_size,
+                        "residual_size": residual_size,
+                    },
+                },
+            )
+            trade_service.transition_trade_intent(
+                intent,
+                state=TradeIntentState.PARTIALLY_FILLED,
+                broker_reference=persisted_position.broker_reference,
+                position_id=persisted_position.id,
+                submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
+                fill_derived_risk_amount=fill_risk_tracking.get("fill_derived_risk_amount"),
+                risk_truth_confidence=str(fill_risk_tracking.get("risk_truth_confidence") or "INCOMPLETE_DEGRADED"),
+                average_fill_price=persisted_position.open_price,
+                filled_size=persisted_position.size,
+                completed_at=persisted_position.broker_open_confirmed_at or persisted_position.open_time,
+                opened_at=persisted_position.open_time,
+                details={
+                    **StrategyService._allocation_outcome_update(
+                        stage="position_partially_opened_pending_review",
+                        final_status=TradeIntentState.PARTIALLY_FILLED.value,
+                        hard_risk_passed=True,
+                        execution_submitted=True,
+                        fill_status=TradeIntentState.PARTIALLY_FILLED.value,
                     ),
-                    final_status=TradeIntentState.POSITION_OPENED.value,
-                    hard_risk_passed=True,
-                    execution_submitted=True,
-                    fill_status=(
-                        TradeIntentState.PARTIALLY_FILLED.value
-                        if order.status is BrokerOrderStatus.PARTIALLY_FILLED
-                        else TradeIntentState.FILLED.value
+                    "risk_tracking": fill_risk_tracking,
+                    "risk_reconciliation": StrategyService._build_risk_reconciliation(
+                        intent=intent,
+                        submitted_risk_tracking=submitted_risk_tracking,
+                        fill_risk_tracking=fill_risk_tracking,
+                        submitted_size=size_validation.normalized_size,
+                        filled_size=filled_size,
+                        submitted_price=signal.observed_price,
+                        fill_price=persisted_position.open_price,
+                        live_position=persisted_position,
+                        fill_status=order.status.value,
                     ),
-                ),
-                "risk_tracking": fill_risk_tracking,
-                "risk_reconciliation": StrategyService._build_risk_reconciliation(
-                    intent=intent,
-                    submitted_risk_tracking=submitted_risk_tracking,
-                    fill_risk_tracking=fill_risk_tracking,
-                    submitted_size=size_validation.normalized_size,
-                    filled_size=filled_size,
-                    submitted_price=signal.observed_price,
-                    fill_price=persisted_position.open_price,
-                    live_position=persisted_position,
-                    fill_status=order.status.value,
-                ),
-            },
-        )
+                    "partial_fill": {
+                        "submitted_size": size_validation.normalized_size,
+                        "filled_size": filled_size,
+                        "residual_size": residual_size,
+                    },
+                },
+            )
+            domain_event_service.record_event(
+                event_type="execution.partial_fill_requires_review",
+                category="execution",
+                severity="warning",
+                source="strategy_service.execute_entry_signal",
+                title="Entry partially filled",
+                message=f"{signal.strategy_name} entry on {signal.instrument} partially filled and was restricted to EXITS_ONLY.",
+                correlation_id=execution.client_request_id,
+                strategy_name=signal.strategy_name,
+                instrument=signal.instrument,
+                position_id=persisted_position.id,
+                execution_id=execution.id,
+                payload_json={
+                    "trade_intent_id": intent.id,
+                    "submitted_size": size_validation.normalized_size,
+                    "filled_size": filled_size,
+                    "residual_size": residual_size,
+                },
+            )
+        else:
+            trade_service.transition_execution(
+                execution,
+                status=ExecutionStatus.POSITION_OPENED,
+                trade_intent_id=intent.id,
+                client_request_id=execution.client_request_id,
+                local_position_id=persisted_position.id,
+                broker_reference=persisted_position.broker_reference,
+                completed_at=persisted_position.broker_open_confirmed_at or persisted_position.open_time,
+                average_fill_price=persisted_position.open_price,
+                filled_size=persisted_position.size,
+                intended_risk_amount=intent.estimated_risk_amount,
+                submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
+                fill_derived_risk_amount=fill_risk_tracking.get("fill_derived_risk_amount"),
+                risk_truth_confidence=str(fill_risk_tracking.get("risk_truth_confidence") or "INCOMPLETE_DEGRADED"),
+                reason="Position opened",
+                details={"risk_tracking": fill_risk_tracking, "risk_reconciliation": fill_risk_reconciliation},
+            )
+            trade_service.transition_trade_intent(
+                intent,
+                state=TradeIntentState.POSITION_OPENED,
+                broker_reference=persisted_position.broker_reference,
+                position_id=persisted_position.id,
+                submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
+                fill_derived_risk_amount=fill_risk_tracking.get("fill_derived_risk_amount"),
+                risk_truth_confidence=str(fill_risk_tracking.get("risk_truth_confidence") or "INCOMPLETE_DEGRADED"),
+                average_fill_price=persisted_position.open_price,
+                filled_size=persisted_position.size,
+                completed_at=persisted_position.broker_open_confirmed_at or persisted_position.open_time,
+                opened_at=persisted_position.open_time,
+                details={
+                    **StrategyService._allocation_outcome_update(
+                        stage="position_opened",
+                        final_status=TradeIntentState.POSITION_OPENED.value,
+                        hard_risk_passed=True,
+                        execution_submitted=True,
+                        fill_status=TradeIntentState.FILLED.value,
+                    ),
+                    "risk_tracking": fill_risk_tracking,
+                    "risk_reconciliation": StrategyService._build_risk_reconciliation(
+                        intent=intent,
+                        submitted_risk_tracking=submitted_risk_tracking,
+                        fill_risk_tracking=fill_risk_tracking,
+                        submitted_size=size_validation.normalized_size,
+                        filled_size=filled_size,
+                        submitted_price=signal.observed_price,
+                        fill_price=persisted_position.open_price,
+                        live_position=persisted_position,
+                        fill_status=order.status.value,
+                    ),
+                },
+            )
         if bool((fill_risk_reconciliation.get("flags") or {}).get("material_execution_drift")):
             domain_event_service.record_event(
                 event_type="allocation.execution_drift_detected",
@@ -1807,6 +1887,7 @@ class StrategyService:
         execution: Execution,
     ) -> Trade:
         if intent.state not in {
+            TradeIntentState.PARTIALLY_FILLED.value,
             TradeIntentState.POSITION_OPENED.value,
             TradeIntentState.EXTERNAL_POSITION_ADOPTED.value,
             TradeIntentState.RECOVERED_POSITION_ATTACHED.value,

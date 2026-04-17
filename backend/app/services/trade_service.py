@@ -242,6 +242,7 @@ class TradeService:
         statement = select(TradeIntent).where(
             TradeIntent.state.in_(
                 {
+                    TradeIntentState.PARTIALLY_FILLED.value,
                     TradeIntentState.POSITION_OPENED.value,
                     TradeIntentState.CLOSE_REQUESTED.value,
                     TradeIntentState.EXTERNAL_POSITION_ADOPTED.value,
@@ -273,6 +274,7 @@ class TradeService:
             TradeIntent.instrument == instrument,
             TradeIntent.state.in_(
                 {
+                    TradeIntentState.PARTIALLY_FILLED.value,
                     TradeIntentState.POSITION_OPENED.value,
                     TradeIntentState.EXTERNAL_POSITION_ADOPTED.value,
                     TradeIntentState.RECOVERED_POSITION_ATTACHED.value,

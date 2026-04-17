@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlmodel import select
 
+from app.core.broker import BrokerOrderResult, BrokerOrderStatus, OrderDirection
 from app.core.runtime import runtime_manager
 from app.models.runtime import StrategyRuntimeState
 from app.models.strategy_deployment import StrategyDeployment
@@ -70,7 +71,8 @@ def _enable_live_exit_context(monkeypatch, at: datetime) -> None:
                     "desired_instruments": (),
                     "last_tick_at": now,
                 },
-            )()
+            )(),
+            "get_last_tick_at": lambda self, instrument: now,
         },
     )()
     monkeypatch.setattr("app.services.operational_state_service.get_operational_streaming_service", lambda: stub)
@@ -84,6 +86,7 @@ def _attach_open_position(
     at: datetime,
     broker_reference: str = "pos-open-1",
 ) -> Position:
+    now = datetime.now(UTC)
     intent = TradeIntent(
         strategy_name=strategy_name,
         instrument=instrument,
@@ -121,6 +124,7 @@ def _attach_open_position(
     engine = runtime_manager.get_engine(strategy_name, instrument)
     if engine is not None:
         engine.current_position = position
+    runtime_manager.load_cached_price(instrument, price=position.current_price or position.open_price, updated_at=now)
     runtime = session.exec(
         select(StrategyRuntimeState).where(
             StrategyRuntimeState.strategy_name == strategy_name,
@@ -129,6 +133,8 @@ def _attach_open_position(
     ).first()
     if runtime is not None:
         runtime.current_position_broker_reference = broker_reference
+        runtime.last_price_seen = position.current_price
+        runtime.last_price_seen_at = now
         session.add(runtime)
         session.commit()
     return position
@@ -180,7 +186,8 @@ def test_control_plane_summary_exposes_operational_truth_fields(session, monkeyp
                     "desired_instruments": (),
                     "last_tick_at": now - timedelta(seconds=30),
                 },
-            )()
+            )(),
+            "get_last_tick_at": lambda self, instrument: now - timedelta(seconds=30),
         },
     )()
     monkeypatch.setattr("app.services.operational_state_service.get_operational_streaming_service", lambda: stub)
@@ -477,7 +484,7 @@ def test_reconcile_flags_unmanaged_open_risk_when_exits_not_eligible(session, br
         instrument="IX.D.FTSE.DAILY.IP",
         at=fixed_now,
     )
-    manager.operational_state_service.get_summary = lambda: OperationalStateSnapshot(
+    blocked_snapshot = OperationalStateSnapshot(
         feed_source_state=FeedSourceState.DISCONNECTED,
         feed_health_state=FeedHealthState.FAILED,
         broker_connectivity_state=BrokerConnectivityState.DISCONNECTED,
@@ -490,6 +497,8 @@ def test_reconcile_flags_unmanaged_open_risk_when_exits_not_eligible(session, br
         open_risk_management_state=OpenRiskManagementState.UNMANAGED_OPEN_RISK,
         open_risk_management_reason="broker_disconnected",
     )
+    manager.operational_state_service.get_summary = lambda: blocked_snapshot
+    manager.operational_state_service.get_summary_for_instrument = lambda instrument: blocked_snapshot
 
     governance_service.upsert_strategy(strategy_name="mean_reversion", emergency_stop=True)
     manager.reconcile(now=fixed_now + timedelta(minutes=1))
@@ -513,3 +522,177 @@ def test_reconcile_flags_unmanaged_open_risk_when_exits_not_eligible(session, br
     assert family["deployment"]["open_risk_management_state"] == "UNMANAGED_OPEN_RISK"
     assert telemetry["open_risk_management_state"] == "UNMANAGED_OPEN_RISK"
     assert "open position" in (deployment.open_risk_management_reason or "").lower()
+
+
+def test_reconcile_rotation_keeps_old_open_risk_exit_capable(session, broker, fixed_now, monkeypatch):
+    now = datetime.now(UTC)
+    _enable_live_exit_context(monkeypatch, fixed_now)
+    governance_service = StrategyGovernanceService(session)
+    governance_service.ensure_defaults()
+    governance_service.upsert_strategy(
+        strategy_name="mean_reversion",
+        autonomous_operation_allowed=True,
+        approved_asset_classes=["INDICES"],
+        approved_instruments=["IX.D.FTSE.DAILY.IP", "IX.D.DAX.DAILY.IP"],
+        approved_profile_names=["default"],
+    )
+    manager = StrategyDeploymentManagerService(session)
+    manager.settings.autonomous_control_enabled = True
+    _force_deployable_candidate(manager, instrument="IX.D.FTSE.DAILY.IP")
+    manager.reconcile(now=fixed_now)
+    _attach_open_position(
+        session,
+        strategy_name="mean_reversion",
+        instrument="IX.D.FTSE.DAILY.IP",
+        at=fixed_now,
+    )
+    runtime_manager.load_cached_price("IX.D.FTSE.DAILY.IP", price=100.0, updated_at=now)
+
+    _force_deployable_candidate(manager, instrument="IX.D.DAX.DAILY.IP")
+    runtime_manager.load_cached_price("IX.D.DAX.DAILY.IP", price=150.0, updated_at=now)
+    manager.reconcile(now=fixed_now + timedelta(minutes=1))
+
+    deployment = session.exec(
+        select(StrategyDeployment).where(StrategyDeployment.strategy_name == "mean_reversion")
+    ).one()
+    runtimes = list(
+        session.exec(
+            select(StrategyRuntimeState).where(StrategyRuntimeState.strategy_name == "mean_reversion")
+        )
+    )
+    runtimes_by_instrument = {runtime.instrument: runtime for runtime in runtimes}
+
+    assert deployment.state == "AUTO_DEPLOYED"
+    assert deployment.selected_instrument == "IX.D.DAX.DAILY.IP"
+    assert deployment.open_risk_management_state == "EXITS_ONLY"
+    assert runtimes_by_instrument["IX.D.FTSE.DAILY.IP"].status == "RUNNING"
+    assert runtimes_by_instrument["IX.D.FTSE.DAILY.IP"].runtime_mode == "EXITS_ONLY"
+    assert runtimes_by_instrument["IX.D.DAX.DAILY.IP"].status == "RUNNING"
+    assert runtimes_by_instrument["IX.D.DAX.DAILY.IP"].runtime_mode == "NORMAL"
+
+
+def test_reconcile_uses_instrument_specific_exit_eligibility(session, broker, fixed_now, monkeypatch):
+    now = datetime.now(UTC)
+    _enable_live_exit_context(monkeypatch, fixed_now)
+    governance_service = StrategyGovernanceService(session)
+    governance_service.ensure_defaults()
+    governance_service.upsert_strategy(
+        strategy_name="mean_reversion",
+        autonomous_operation_allowed=True,
+        approved_asset_classes=["INDICES"],
+        approved_instruments=["IX.D.FTSE.DAILY.IP"],
+        approved_profile_names=["default"],
+    )
+    manager = StrategyDeploymentManagerService(session)
+    manager.settings.autonomous_control_enabled = True
+    _force_deployable_candidate(manager, instrument="IX.D.FTSE.DAILY.IP")
+    manager.reconcile(now=fixed_now)
+    _attach_open_position(
+        session,
+        strategy_name="mean_reversion",
+        instrument="IX.D.FTSE.DAILY.IP",
+        at=fixed_now,
+    )
+    runtime_manager.load_cached_price("IX.D.FTSE.DAILY.IP", price=100.0, updated_at=now - timedelta(seconds=30))
+
+    stale_snapshot = OperationalStateSnapshot(
+        feed_source_state=FeedSourceState.STALE,
+        feed_health_state=FeedHealthState.DEGRADED,
+        broker_connectivity_state=BrokerConnectivityState.CONNECTED,
+        entry_eligible=False,
+        exit_eligible=False,
+        entry_eligibility_state=ExecutionEligibilityState.BLOCKED,
+        exit_eligibility_state=ExecutionEligibilityState.BLOCKED,
+        entry_block_reason="stale_price_data",
+        exit_block_reason="stale_price_data",
+        open_risk_management_state=OpenRiskManagementState.UNMANAGED_OPEN_RISK,
+        open_risk_management_reason="stale_price_data",
+    )
+    manager.operational_state_service.get_summary_for_instrument = lambda instrument: stale_snapshot
+
+    governance_service.upsert_strategy(strategy_name="mean_reversion", emergency_stop=True)
+    manager.reconcile(now=fixed_now + timedelta(minutes=1))
+
+    deployment = session.exec(
+        select(StrategyDeployment).where(StrategyDeployment.strategy_name == "mean_reversion")
+    ).one()
+    runtime = session.exec(
+        select(StrategyRuntimeState).where(StrategyRuntimeState.strategy_name == "mean_reversion")
+    ).one()
+
+    assert deployment.open_risk_management_state == "UNMANAGED_OPEN_RISK"
+    assert "stale_price_data" in (deployment.open_risk_management_reason or "")
+    assert runtime.status == "STOPPED"
+
+
+def test_reconcile_preserves_selected_runtime_exits_only_after_partial_fill(session, broker, fixed_now, monkeypatch):
+    _enable_live_exit_context(monkeypatch, fixed_now)
+    governance_service = StrategyGovernanceService(session)
+    governance_service.ensure_defaults()
+    governance_service.upsert_strategy(
+        strategy_name="smoke_test_hold",
+        autonomous_operation_allowed=True,
+        approved_asset_classes=["FOREX"],
+        approved_instruments=["CS.D.EURUSD.MINI.IP"],
+        approved_profile_names=["default"],
+    )
+    manager = StrategyDeploymentManagerService(session)
+    manager.settings.autonomous_control_enabled = True
+    _force_deployable_candidate(manager, instrument="CS.D.EURUSD.MINI.IP")
+    manager.reconcile(now=fixed_now)
+
+    service = StrategyService(session)
+    broker.place_order_outcomes.append(
+        BrokerOrderResult(
+            broker_reference="entry-partial-reconcile-1",
+            instrument="CS.D.EURUSD.MINI.IP",
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.5,
+            executed_at=fixed_now + timedelta(seconds=1),
+            status=BrokerOrderStatus.PARTIALLY_FILLED,
+            filled_size=0.1,
+            average_fill_price=100.5,
+            submitted_at=fixed_now + timedelta(seconds=1),
+            acknowledged_at=fixed_now + timedelta(seconds=1),
+            requires_manual_review=True,
+        )
+    )
+
+    service.process_price_update(
+        "CS.D.EURUSD.MINI.IP",
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        "CS.D.EURUSD.MINI.IP",
+        100.5,
+        bid=100.49,
+        ask=100.51,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
+
+    runtime_before = session.exec(
+        select(StrategyRuntimeState)
+        .where(StrategyRuntimeState.strategy_name == "smoke_test_hold")
+        .where(StrategyRuntimeState.instrument == "CS.D.EURUSD.MINI.IP")
+    ).one()
+    assert runtime_before.runtime_mode == "EXITS_ONLY"
+
+    manager.reconcile(now=fixed_now + timedelta(minutes=1))
+
+    runtime_after = session.exec(
+        select(StrategyRuntimeState)
+        .where(StrategyRuntimeState.strategy_name == "smoke_test_hold")
+        .where(StrategyRuntimeState.instrument == "CS.D.EURUSD.MINI.IP")
+    ).one()
+
+    assert runtime_after.status == "RUNNING"
+    assert runtime_after.runtime_mode == "EXITS_ONLY"
+    assert runtime_manager.get_engine("smoke_test_hold", "CS.D.EURUSD.MINI.IP").runtime_mode == "EXITS_ONLY"

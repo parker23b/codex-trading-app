@@ -74,16 +74,19 @@ class StrategyDeploymentManagerService:
                     restart_reason = self._ensure_auto_runtime(
                         strategy_name=governance.strategy_name,
                         instrument=selected_instrument,
+                        open_positions=open_positions,
                         deployment_id=deployment.id,
                         profile_name=selected_profile,
                         strategy_parameters=selected_parameters,
                     )
-                    if selected_instrument is not None and runtime_manager.get_engine(governance.strategy_name, selected_instrument) is not None:
-                        self.strategy_service.set_runtime_mode(
-                            strategy_name=governance.strategy_name,
-                            instrument=selected_instrument,
-                            runtime_mode="NORMAL",
-                        )
+                    if selected_instrument is not None:
+                        selected_engine = runtime_manager.get_engine(governance.strategy_name, selected_instrument)
+                        if selected_engine is not None and getattr(selected_engine, "runtime_mode", "NORMAL") == "NORMAL":
+                            self.strategy_service.set_runtime_mode(
+                                strategy_name=governance.strategy_name,
+                                instrument=selected_instrument,
+                                runtime_mode="NORMAL",
+                            )
                     if restart_reason is not None:
                         deployment.last_restart_reason = restart_reason
                         domain_event_service.record_event(
@@ -102,8 +105,9 @@ class StrategyDeploymentManagerService:
                             },
                             created_at=current_time,
                         )
-                open_risk_management_state = (
-                    OpenRiskManagementState.MANAGED.value if open_positions else OpenRiskManagementState.NO_OPEN_RISK.value
+                open_risk_management_state, open_risk_management_reason = self._assess_open_risk_management(
+                    strategy_name=governance.strategy_name,
+                    open_positions=open_positions,
                 )
             else:
                 open_risk_management_state, open_risk_management_reason = self._handle_non_auto_runtime_transition(
@@ -351,6 +355,7 @@ class StrategyDeploymentManagerService:
         *,
         strategy_name: str,
         instrument: str | None,
+        open_positions: list[Position],
         deployment_id: int,
         profile_name: str | None,
         strategy_parameters: dict[str, object],
@@ -362,7 +367,17 @@ class StrategyDeploymentManagerService:
         for runtime in running_auto_runtimes:
             if runtime.instrument != instrument:
                 restart_reason = f"Instrument changed from {runtime.instrument} to {instrument}."
-                self.strategy_service.stop_strategy(strategy_name=strategy_name, instrument=runtime.instrument)
+                if self._instrument_has_open_risk(runtime.instrument, open_positions=open_positions):
+                    self.strategy_service.set_runtime_mode(
+                        strategy_name=strategy_name,
+                        instrument=runtime.instrument,
+                        runtime_mode="EXITS_ONLY",
+                        recovery_reason=(
+                            f"Autonomy rotated to {instrument} while {runtime.instrument} still has open risk."
+                        ),
+                    )
+                else:
+                    self.strategy_service.stop_strategy(strategy_name=strategy_name, instrument=runtime.instrument)
             elif runtime.active_profile_name != profile_name or (runtime.parameters or {}) != strategy_parameters:
                 restart_reason = f"Profile changed from {runtime.active_profile_name or 'unassigned'} to {profile_name or 'default'}."
                 self.strategy_service.stop_strategy(strategy_name=strategy_name, instrument=runtime.instrument)
@@ -379,6 +394,10 @@ class StrategyDeploymentManagerService:
             if restart_reason is None:
                 restart_reason = f"Runtime started with profile {profile_name or 'default'}."
         return restart_reason
+
+    @staticmethod
+    def _instrument_has_open_risk(instrument: str, *, open_positions: list[Position]) -> bool:
+        return any(position.instrument == instrument for position in open_positions)
 
     def _stop_auto_runtimes(self, strategy_name: str) -> None:
         for runtime in self._get_running_auto_runtimes(strategy_name):
@@ -405,26 +424,41 @@ class StrategyDeploymentManagerService:
             self._stop_auto_runtimes(strategy_name)
             return (OpenRiskManagementState.NO_OPEN_RISK.value, None)
 
-        operational_state = self.operational_state_service.get_summary()
         running_auto_runtimes = self._get_running_auto_runtimes(strategy_name)
-        if operational_state.exit_eligible and running_auto_runtimes:
+        runtime_by_instrument = {
+            runtime.instrument: runtime
+            for runtime in running_auto_runtimes
+            if runtime_manager.get_engine(strategy_name, runtime.instrument) is not None
+        }
+        open_instruments = sorted({position.instrument for position in open_positions})
+        blocked_instruments: list[tuple[str, str | None]] = []
+
+        for instrument in open_instruments:
+            operational_state = self.operational_state_service.get_summary_for_instrument(instrument)
+            if not operational_state.exit_eligible or instrument not in runtime_by_instrument:
+                blocked_instruments.append((instrument, operational_state.exit_block_reason))
+
+        if not blocked_instruments and runtime_by_instrument:
             reason = (
                 f"{len(open_positions)} open position(s) remain; runtime retained in EXITS_ONLY while deployment is {target_state}."
             )
             for runtime in running_auto_runtimes:
-                if runtime_manager.get_engine(strategy_name, runtime.instrument) is not None:
+                if runtime.instrument in open_instruments and runtime_manager.get_engine(strategy_name, runtime.instrument) is not None:
                     self.strategy_service.set_runtime_mode(
                         strategy_name=strategy_name,
                         instrument=runtime.instrument,
                         runtime_mode="EXITS_ONLY",
                         recovery_reason=reason,
                     )
+                elif runtime_manager.get_engine(strategy_name, runtime.instrument) is not None:
+                    self.strategy_service.stop_strategy(strategy_name=strategy_name, instrument=runtime.instrument)
             return (OpenRiskManagementState.EXITS_ONLY.value, reason)
 
         self._stop_auto_runtimes(strategy_name)
+        exit_block_reason = blocked_instruments[0][1] if blocked_instruments else "no_exit_capable_runtime"
         reason = (
             f"{len(open_positions)} open position(s) remain while exits are not operationally eligible; "
-            f"deployment moved to {target_state}."
+            f"deployment moved to {target_state} ({exit_block_reason})."
         )
         domain_event_service.record_event(
             event_type="risk.unmanaged_open_risk",
@@ -439,8 +473,64 @@ class StrategyDeploymentManagerService:
                 "deployment_state": target_state,
                 "deployment_reason": target_reason,
                 "open_position_count": len(open_positions),
-                "exit_eligible": operational_state.exit_eligible,
-                "exit_block_reason": operational_state.exit_block_reason,
+                "blocked_instruments": [
+                    {"instrument": instrument, "exit_block_reason": block_reason}
+                    for instrument, block_reason in blocked_instruments
+                ],
+                "exit_eligible": False,
+                "exit_block_reason": exit_block_reason,
             },
         )
         return (OpenRiskManagementState.UNMANAGED_OPEN_RISK.value, reason)
+
+    def _assess_open_risk_management(
+        self,
+        *,
+        strategy_name: str,
+        open_positions: list[Position],
+    ) -> tuple[str, str | None]:
+        if not open_positions:
+            return (OpenRiskManagementState.NO_OPEN_RISK.value, None)
+
+        running_auto_runtimes = {
+            runtime.instrument: runtime
+            for runtime in self._get_running_auto_runtimes(strategy_name)
+            if runtime_manager.get_engine(strategy_name, runtime.instrument) is not None
+        }
+        uncovered_instruments: list[str] = []
+        blocked_instruments: list[tuple[str, str | None]] = []
+        exits_only_instruments: list[str] = []
+
+        for instrument in sorted({position.instrument for position in open_positions}):
+            runtime = running_auto_runtimes.get(instrument)
+            if runtime is None:
+                uncovered_instruments.append(instrument)
+                continue
+            operational_state = self.operational_state_service.get_summary_for_instrument(instrument)
+            if not operational_state.exit_eligible:
+                blocked_instruments.append((instrument, operational_state.exit_block_reason))
+                continue
+            if runtime.runtime_mode == "EXITS_ONLY":
+                exits_only_instruments.append(instrument)
+
+        if uncovered_instruments:
+            return (
+                OpenRiskManagementState.UNMANAGED_OPEN_RISK.value,
+                f"Open positions remain on {', '.join(uncovered_instruments)} without an exit-capable AUTO runtime.",
+            )
+        if blocked_instruments:
+            blocked_reason = blocked_instruments[0][1] or "exit_not_eligible"
+            instruments = ", ".join(instrument for instrument, _ in blocked_instruments)
+            return (
+                OpenRiskManagementState.UNMANAGED_OPEN_RISK.value,
+                f"Open positions on {instruments} are not exit-eligible ({blocked_reason}).",
+            )
+        if exits_only_instruments:
+            return (
+                OpenRiskManagementState.EXITS_ONLY.value,
+                f"Open positions on {', '.join(exits_only_instruments)} are retained under EXITS_ONLY protection.",
+            )
+        return (
+            OpenRiskManagementState.MANAGED.value,
+            f"{len(open_positions)} open position(s) remain under active AUTO runtime management.",
+        )

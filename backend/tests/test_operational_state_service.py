@@ -2,15 +2,24 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from app.core.runtime import runtime_manager
 from app.services.health_service import get_health_service
 from app.services.operational_state_service import OperationalStateService
 
 
 class _StubStreamingService:
-    def __init__(self, *, connected: bool, enabled: bool = True, last_tick_at: datetime | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        connected: bool,
+        enabled: bool = True,
+        last_tick_at: datetime | None = None,
+        last_tick_at_by_instrument: dict[str, datetime] | None = None,
+    ) -> None:
         self._connected = connected
         self._enabled = enabled
         self._last_tick_at = last_tick_at
+        self._last_tick_at_by_instrument = last_tick_at_by_instrument or {}
 
     def get_health(self):
         return type(
@@ -24,6 +33,9 @@ class _StubStreamingService:
                 "last_tick_at": self._last_tick_at,
             },
         )()
+
+    def get_last_tick_at(self, instrument: str) -> datetime | None:
+        return self._last_tick_at_by_instrument.get(instrument, self._last_tick_at)
 
 
 def test_operational_state_live_stream_allows_entries(session, monkeypatch):
@@ -120,3 +132,27 @@ def test_operational_state_disconnected_feed_blocks_entries_and_exits(session, m
     assert summary.exit_eligible is False
     assert summary.entry_block_reason == "data_disconnected"
     assert summary.exit_block_reason == "data_disconnected"
+
+
+def test_operational_state_instrument_summary_uses_instrument_specific_freshness(session, monkeypatch):
+    now = datetime.now(UTC)
+    stale_at = now - timedelta(seconds=30)
+    health_service = get_health_service()
+    health_service.update_broker_state(connected=True, latency_ms=5.0)
+    health_service.record_price_update(now, stream_connected=True)
+    runtime_manager.load_cached_price("IX.D.FTSE.DAILY.IP", price=100.0, updated_at=stale_at)
+    monkeypatch.setattr(
+        "app.services.operational_state_service.get_operational_streaming_service",
+        lambda: _StubStreamingService(
+            connected=True,
+            last_tick_at=now,
+            last_tick_at_by_instrument={"IX.D.FTSE.DAILY.IP": stale_at},
+        ),
+    )
+
+    summary = OperationalStateService(session).get_summary_for_instrument("IX.D.FTSE.DAILY.IP")
+
+    assert summary.feed_source_state == "STALE"
+    assert summary.entry_eligible is False
+    assert summary.exit_eligible is False
+    assert summary.exit_block_reason == "stale_price_data"
