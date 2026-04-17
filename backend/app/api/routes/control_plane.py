@@ -34,6 +34,15 @@ class ControlPlaneSummaryResponse(BaseModel):
     autonomy_override_value: bool | None
     autonomy_override_reason: str | None
     autonomy_updated_at: datetime | None
+    feed_source_state: str
+    feed_health_state: str
+    broker_connectivity_state: str
+    entry_eligible: bool
+    exit_eligible: bool
+    entry_block_reason: str | None
+    exit_block_reason: str | None
+    open_risk_management_state: str
+    open_risk_management_reason: str | None
     families: list[dict[str, object]]
     counts: dict[str, int]
     misaligned_count: int

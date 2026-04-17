@@ -164,6 +164,25 @@ class RuntimeRecoveryService:
                 )
                 continue
 
+            if runtime.runtime_mode == "STOPPED":
+                self.runtime_state_service.mark_recovery_state(
+                    strategy_name=runtime.strategy_name,
+                    instrument=runtime.instrument,
+                    recovery_state="PAUSED",
+                    recovery_reason="Persisted runtime mode is STOPPED.",
+                    status="STOPPED",
+                    runtime_mode="STOPPED",
+                    current_position_broker_reference=runtime.current_position_broker_reference,
+                )
+                outcomes.append(
+                    {
+                        "strategy": runtime.strategy_name,
+                        "instrument": runtime.instrument,
+                        "outcome": "stopped",
+                    }
+                )
+                continue
+
             current_position = local_position
             if current_position is None and remote_position is not None:
                 current_position = self._position_from_remote(runtime.strategy_name, remote_position)
@@ -199,9 +218,13 @@ class RuntimeRecoveryService:
             engine = runtime_manager.start(
                 runtime.strategy_name,
                 runtime.instrument,
+                profile_name=runtime.active_profile_name,
+                strategy_parameters=runtime.parameters,
                 runtime_id=runtime.runtime_id,
                 strategy_snapshot=runtime.strategy_state_snapshot,
                 current_position=clone_position(current_position),
+                runtime_mode=runtime.runtime_mode,
+                startup_source="runtime_recovery_service.recover",
             )
             self.runtime_state_service.sync_engine_state(
                 strategy_name=runtime.strategy_name,
@@ -209,6 +232,11 @@ class RuntimeRecoveryService:
                 status="RUNNING",
                 recovery_state="RUNNING",
                 recovery_reason=None,
+                control_mode=runtime.control_mode,
+                runtime_mode=runtime.runtime_mode,
+                deployment_id=runtime.deployment_id,
+                active_profile_name=runtime.active_profile_name,
+                parameters=runtime.parameters,
                 auto_resume=runtime.auto_resume,
                 started_at=runtime.started_at,
                 last_price_seen=runtime.last_price_seen,

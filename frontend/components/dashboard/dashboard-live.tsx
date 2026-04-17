@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-
 import {
   CompactTable,
   DataIndicator,
@@ -11,7 +10,14 @@ import {
   StatusPill,
   StatusStrip,
 } from "@/components/console/primitives";
+import { RiskInspectorDrawer } from "@/components/risk/risk-inspector-drawer";
+import { RiskStatusBlock } from "@/components/risk/risk-status-block";
 import {
+  getAllocationAlerts,
+  getAllocationCycles,
+  getAllocationDriftSummary,
+  getAllocationExposureSummary,
+  getAllocationIntents,
   getBrokerAuthStatus,
   getControlPlaneSummary,
   getCoverageSummary,
@@ -31,6 +37,11 @@ import {
   formatSignedPercent,
 } from "@/lib/format";
 import {
+  AllocationAlert,
+  AllocationCycle,
+  AllocationDriftSummary,
+  AllocationExposureSummary,
+  AllocationIntent,
   BrokerAuthStatus,
   ControlPlaneSummary,
   CoverageSummary,
@@ -41,6 +52,7 @@ import {
   SystemOperatingLimits,
   Trade,
 } from "@/lib/types";
+import { buildRiskConsoleSummary } from "@/lib/risk-allocation";
 
 type DashboardLiveProps = {
   initialPositions: Position[];
@@ -52,6 +64,11 @@ type DashboardLiveProps = {
   initialCoverage: CoverageSummary;
   initialControlPlane: ControlPlaneSummary;
   initialOperatingLimits: SystemOperatingLimits;
+  initialAllocationExposure: AllocationExposureSummary;
+  initialAllocationAlerts: AllocationAlert[];
+  initialAllocationDrift: AllocationDriftSummary;
+  initialAllocationCycles: AllocationCycle[];
+  initialAllocationIntents: AllocationIntent[];
   initialErrors: {
     positions: string | null;
     trades: string | null;
@@ -62,10 +79,15 @@ type DashboardLiveProps = {
     coverage: string | null;
     controlPlane: string | null;
     operatingLimits: string | null;
+    allocationExposure: string | null;
+    allocationAlerts: string | null;
+    allocationDrift: string | null;
+    allocationCycles: string | null;
+    allocationIntents: string | null;
   };
 };
 
-type InspectorMode = "positions" | "trades" | "activity" | null;
+type InspectorMode = "positions" | "trades" | "activity" | "risk" | null;
 
 function formatTimestamp(value?: string | null) {
   if (!value) {
@@ -105,6 +127,11 @@ export function DashboardLive({
   initialCoverage,
   initialControlPlane,
   initialOperatingLimits,
+  initialAllocationExposure,
+  initialAllocationAlerts,
+  initialAllocationDrift,
+  initialAllocationCycles,
+  initialAllocationIntents,
   initialErrors,
 }: DashboardLiveProps) {
   const [positions, setPositions] = useState(initialPositions);
@@ -116,6 +143,11 @@ export function DashboardLive({
   const [coverage, setCoverage] = useState(initialCoverage);
   const [controlPlane, setControlPlane] = useState(initialControlPlane);
   const [operatingLimits, setOperatingLimits] = useState(initialOperatingLimits);
+  const [allocationExposure, setAllocationExposure] = useState(initialAllocationExposure);
+  const [allocationAlerts, setAllocationAlerts] = useState(initialAllocationAlerts);
+  const [allocationDrift, setAllocationDrift] = useState(initialAllocationDrift);
+  const [allocationCycles, setAllocationCycles] = useState(initialAllocationCycles);
+  const [allocationIntents, setAllocationIntents] = useState(initialAllocationIntents);
   const [errors, setErrors] = useState(initialErrors);
   const [inspectorMode, setInspectorMode] = useState<InspectorMode>(null);
 
@@ -129,6 +161,11 @@ export function DashboardLive({
     setCoverage(initialCoverage);
     setControlPlane(initialControlPlane);
     setOperatingLimits(initialOperatingLimits);
+    setAllocationExposure(initialAllocationExposure);
+    setAllocationAlerts(initialAllocationAlerts);
+    setAllocationDrift(initialAllocationDrift);
+    setAllocationCycles(initialAllocationCycles);
+    setAllocationIntents(initialAllocationIntents);
     setErrors(initialErrors);
   }, [
     initialPositions,
@@ -140,6 +177,11 @@ export function DashboardLive({
     initialCoverage,
     initialControlPlane,
     initialOperatingLimits,
+    initialAllocationExposure,
+    initialAllocationAlerts,
+    initialAllocationDrift,
+    initialAllocationCycles,
+    initialAllocationIntents,
     initialErrors,
   ]);
 
@@ -157,6 +199,11 @@ export function DashboardLive({
         nextCoverage,
         nextControlPlane,
         nextOperatingLimits,
+        nextAllocationExposure,
+        nextAllocationAlerts,
+        nextAllocationDrift,
+        nextAllocationCycles,
+        nextAllocationIntents,
       ] = await Promise.allSettled([
           getOpenPositions(),
           getTrades(),
@@ -167,6 +214,11 @@ export function DashboardLive({
           getCoverageSummary(),
           getControlPlaneSummary(),
           getSystemOperatingLimits(),
+          getAllocationExposureSummary(),
+          getAllocationAlerts({ limit: 40, refresh: true }),
+          getAllocationDriftSummary({ limit: 20, windowMinutes: 720 }),
+          getAllocationCycles(12),
+          getAllocationIntents({ limit: 40 }),
         ]);
       if (cancelled) {
         return;
@@ -198,6 +250,21 @@ export function DashboardLive({
       if (nextOperatingLimits.status === "fulfilled") {
         setOperatingLimits(nextOperatingLimits.value);
       }
+      if (nextAllocationExposure.status === "fulfilled") {
+        setAllocationExposure(nextAllocationExposure.value);
+      }
+      if (nextAllocationAlerts.status === "fulfilled") {
+        setAllocationAlerts(nextAllocationAlerts.value);
+      }
+      if (nextAllocationDrift.status === "fulfilled") {
+        setAllocationDrift(nextAllocationDrift.value);
+      }
+      if (nextAllocationCycles.status === "fulfilled") {
+        setAllocationCycles(nextAllocationCycles.value);
+      }
+      if (nextAllocationIntents.status === "fulfilled") {
+        setAllocationIntents(nextAllocationIntents.value);
+      }
       setErrors({
         positions: nextPositions.status === "rejected" ? (nextPositions.reason instanceof Error ? nextPositions.reason.message : "Failed to load positions.") : null,
         trades: nextTrades.status === "rejected" ? (nextTrades.reason instanceof Error ? nextTrades.reason.message : "Failed to load trades.") : null,
@@ -208,6 +275,11 @@ export function DashboardLive({
         coverage: nextCoverage.status === "rejected" ? (nextCoverage.reason instanceof Error ? nextCoverage.reason.message : "Failed to load coverage.") : null,
         controlPlane: nextControlPlane.status === "rejected" ? (nextControlPlane.reason instanceof Error ? nextControlPlane.reason.message : "Failed to load control plane.") : null,
         operatingLimits: nextOperatingLimits.status === "rejected" ? (nextOperatingLimits.reason instanceof Error ? nextOperatingLimits.reason.message : "Failed to load operating limits.") : null,
+        allocationExposure: nextAllocationExposure.status === "rejected" ? (nextAllocationExposure.reason instanceof Error ? nextAllocationExposure.reason.message : "Failed to load allocation exposure.") : null,
+        allocationAlerts: nextAllocationAlerts.status === "rejected" ? (nextAllocationAlerts.reason instanceof Error ? nextAllocationAlerts.reason.message : "Failed to load allocation alerts.") : null,
+        allocationDrift: nextAllocationDrift.status === "rejected" ? (nextAllocationDrift.reason instanceof Error ? nextAllocationDrift.reason.message : "Failed to load drift summary.") : null,
+        allocationCycles: nextAllocationCycles.status === "rejected" ? (nextAllocationCycles.reason instanceof Error ? nextAllocationCycles.reason.message : "Failed to load allocation cycles.") : null,
+        allocationIntents: nextAllocationIntents.status === "rejected" ? (nextAllocationIntents.reason instanceof Error ? nextAllocationIntents.reason.message : "Failed to load allocation intents.") : null,
       });
     };
 
@@ -240,17 +312,6 @@ export function DashboardLive({
     ...position,
     notional: position.open_price * position.size,
   }));
-  const longExposure = exposureRows
-    .filter((position) => position.direction === "BUY")
-    .reduce((sum, position) => sum + position.notional, 0);
-  const shortExposure = exposureRows
-    .filter((position) => position.direction === "SELL")
-    .reduce((sum, position) => sum + position.notional, 0);
-  const grossExposure = longExposure + shortExposure;
-  const netExposure = longExposure - shortExposure;
-  const largestPositionNotional = exposureRows.length ? Math.max(...exposureRows.map((position) => position.notional)) : 0;
-  const concentrationPercent = grossExposure > 0 ? (largestPositionNotional / grossExposure) * 100 : 0;
-  const topExposure = exposureRows.slice().sort((left, right) => right.notional - left.notional)[0];
 
   const manualReviewExecutions = recentExecutions.filter(
     (execution) =>
@@ -322,6 +383,18 @@ export function DashboardLive({
         ? "warning"
         : "positive";
 
+  const riskSummary = useMemo(
+    () =>
+      buildRiskConsoleSummary({
+        exposure: allocationExposure,
+        alerts: allocationAlerts,
+        drift: allocationDrift,
+        cycles: allocationCycles,
+        intents: allocationIntents,
+      }),
+    [allocationExposure, allocationAlerts, allocationDrift, allocationCycles, allocationIntents],
+  );
+
   const drawerTitle =
     inspectorMode === "positions"
       ? "Positions"
@@ -329,6 +402,8 @@ export function DashboardLive({
         ? "Trades"
         : inspectorMode === "activity"
           ? "Recent Activity"
+          : inspectorMode === "risk"
+            ? "Risk / Allocation Briefing"
           : "";
 
   return (
@@ -343,13 +418,19 @@ export function DashboardLive({
                   <>
                     -<DataIndicator state="error" message={errors.controlPlane} />
                   </>
+                ) : controlPlane.effective_autonomous_control_enabled && controlPlane.entry_eligible === false ? (
+                  "Authorized"
                 ) : controlPlane.effective_autonomous_control_enabled ? (
                   "Running"
                 ) : (
                   "Stopped"
                 ),
                 tone: errors.controlPlane ? "inactive" : healthTone,
-                meta: errors.controlPlane ?? `${runningCount} runtimes active`,
+                meta:
+                  errors.controlPlane ??
+                  (controlPlane.effective_autonomous_control_enabled && controlPlane.entry_eligible === false
+                    ? "permission on; new entries blocked"
+                    : `${runningCount} runtimes active`),
                 emphasis: "strong",
               },
               {
@@ -403,9 +484,22 @@ export function DashboardLive({
               },
               {
                 label: "Open Risk",
-                value: errors.dashboard || errors.operatingLimits ? "-" : formatPercent(dashboard.openRisk),
-                tone: errors.dashboard || errors.operatingLimits ? "inactive" : dashboard.openRisk > operatingLimits.risk.max_open_risk_percent ? "negative" : "neutral",
-                meta: errors.dashboard ?? errors.operatingLimits ?? `limit ${formatPercent(operatingLimits.risk.max_open_risk_percent)}`,
+                value: errors.dashboard || errors.operatingLimits ? "-" : controlPlane.open_risk_management_state ?? formatPercent(dashboard.openRisk),
+                tone:
+                  errors.dashboard || errors.operatingLimits
+                    ? "inactive"
+                    : controlPlane.open_risk_management_state === "UNMANAGED_OPEN_RISK"
+                      ? "negative"
+                      : controlPlane.open_risk_management_state === "EXITS_ONLY"
+                        ? "warning"
+                        : dashboard.openRisk > operatingLimits.risk.max_open_risk_percent
+                          ? "negative"
+                          : "neutral",
+                meta:
+                  errors.dashboard ??
+                  errors.operatingLimits ??
+                  controlPlane.open_risk_management_reason ??
+                  `limit ${formatPercent(operatingLimits.risk.max_open_risk_percent)}`,
               },
             ]}
           />
@@ -453,18 +547,36 @@ export function DashboardLive({
                         title={
                           errors.controlPlane
                             ? `Autonomy unknown. ${errors.controlPlane}`
-                            : controlPlane.effective_autonomous_control_enabled
-                              ? "Autonomy armed. Governed autonomous control is enabled."
+                            : controlPlane.effective_autonomous_control_enabled && controlPlane.entry_eligible === false
+                              ? "Autonomy authorized. This is permission only; new entries are currently blocked by operational policy."
+                              : controlPlane.effective_autonomous_control_enabled
+                              ? "Autonomy authorized. Governed autonomous control is enabled, but execution still depends on feed, broker, and risk state."
                               : "Autonomy stopped. Governed autonomous control is paused."
                         }
                       />
                       <StatusPill
                         label="Feed"
-                        tone={errors.streamHealth ? "inactive" : streamHealth.connected ? "positive" : "warning"}
+                        tone={
+                          errors.streamHealth
+                            ? "inactive"
+                            : controlPlane.feed_source_state === "LIVE"
+                              ? "positive"
+                              : controlPlane.feed_source_state === "POLLING_FALLBACK" || controlPlane.feed_source_state === "STALE"
+                                ? "warning"
+                                : streamHealth.connected
+                                  ? "positive"
+                                  : "negative"
+                        }
                         title={
                           errors.streamHealth
                             ? `Feed unknown. ${errors.streamHealth}`
-                            : streamHealth.connected
+                            : controlPlane.feed_source_state === "POLLING_FALLBACK"
+                              ? "Feed degraded. Polling fallback is active and new entries are blocked."
+                              : controlPlane.feed_source_state === "STALE"
+                                ? "Feed stale. Price freshness is below the current execution threshold."
+                                : controlPlane.feed_source_state === "DISCONNECTED"
+                                  ? "Feed disconnected. Live streaming and fallback freshness are unavailable."
+                                  : streamHealth.connected
                               ? "Feed live. Streaming market data is connected."
                               : `Feed degraded. ${streamHealth.last_status ?? "Streaming market data is interrupted."}`
                         }
@@ -478,6 +590,48 @@ export function DashboardLive({
                             : brokerAuth.state === "connected"
                               ? `Broker ready. ${brokerAuth.detail}`
                               : `Broker unavailable. ${brokerAuth.detail}`
+                        }
+                      />
+                      <StatusPill
+                        label="Execution"
+                        tone={
+                          errors.controlPlane
+                            ? "inactive"
+                            : controlPlane.entry_eligible
+                              ? "positive"
+                              : controlPlane.exit_eligible
+                                ? "warning"
+                                : "negative"
+                        }
+                        title={
+                          errors.controlPlane
+                            ? `Execution eligibility unknown. ${errors.controlPlane}`
+                            : controlPlane.entry_eligible
+                              ? "Execution ready. New entries and exits are currently eligible."
+                              : controlPlane.exit_eligible
+                                ? `Entries blocked, exits allowed. ${controlPlane.entry_block_reason?.replaceAll("_", " ") ?? "Operational policy is suppressing new entries."}`
+                                : `Execution blocked. ${controlPlane.entry_block_reason?.replaceAll("_", " ") ?? controlPlane.exit_block_reason?.replaceAll("_", " ") ?? "Feed, broker, or freshness conditions are preventing execution."}`
+                        }
+                      />
+                      <StatusPill
+                        label="Open Risk"
+                        tone={
+                          errors.controlPlane
+                            ? "inactive"
+                            : controlPlane.open_risk_management_state === "UNMANAGED_OPEN_RISK"
+                              ? "negative"
+                              : controlPlane.open_risk_management_state === "EXITS_ONLY"
+                                ? "warning"
+                                : "positive"
+                        }
+                        title={
+                          errors.controlPlane
+                            ? `Open-risk state unknown. ${errors.controlPlane}`
+                            : controlPlane.open_risk_management_state === "UNMANAGED_OPEN_RISK"
+                              ? `Unmanaged open risk. ${controlPlane.open_risk_management_reason ?? "Open positions are no longer under active automated exit management."}`
+                              : controlPlane.open_risk_management_state === "EXITS_ONLY"
+                                ? `Exit-only management. ${controlPlane.open_risk_management_reason ?? "Existing positions remain managed while new entries stay suppressed."}`
+                                : `Open-risk state: ${controlPlane.open_risk_management_state ?? "NO_OPEN_RISK"}.`
                         }
                       />
                     </div>
@@ -607,32 +761,31 @@ export function DashboardLive({
 
                 <section className="dashboard-overview-section">
                   <div className="dashboard-overview-section__header">
-                    <span className="console-kicker">Exposure</span>
-                  </div>
-                  <div className="summary-cluster">
-                    <div className="summary-cluster__row">
-                      <span>Gross</span>
-                      <strong>{errors.positions ? "-" : formatCurrency(grossExposure)}</strong>
-                    </div>
-                    <div className="summary-cluster__row">
-                      <span>Bias</span>
-                      <strong>{errors.positions ? "-" : `${netExposure >= 0 ? "Long" : "Short"} ${formatCurrency(Math.abs(netExposure))}`}</strong>
-                    </div>
-                    <div className="summary-cluster__row">
-                      <span>Concentration</span>
-                      <strong>{errors.positions ? "-" : formatPercent(concentrationPercent)}</strong>
-                    </div>
-                    <div className="summary-cluster__row">
-                      <span>Top line</span>
-                      <strong>{errors.positions ? "-" : topExposure ? formatInstrumentLabel(topExposure.instrument) : "none"}</strong>
+                    <span className="console-kicker">Risk</span>
+                    <div className="console-inline-actions">
+                      <StatusPill label={riskSummary.lastCycleStatus.label} tone={riskSummary.lastCycleStatus.tone} />
+                      {riskSummary.degradedSizingOrTruth ? <StatusPill label="Degraded" tone="warning" /> : null}
                     </div>
                   </div>
+                  <RiskStatusBlock summary={riskSummary} onOpenDrawer={() => setInspectorMode("risk")} />
                 </section>
               </div>
             </Panel>
           </div>
         </section>
       </main>
+
+      {inspectorMode === "risk" ? (
+        <RiskInspectorDrawer
+          open
+          onClose={() => setInspectorMode(null)}
+          exposure={allocationExposure}
+          alerts={allocationAlerts}
+          drift={allocationDrift}
+          cycles={allocationCycles}
+          intents={allocationIntents}
+        />
+      ) : null}
 
       <InspectorDrawer
         title={drawerTitle}
@@ -643,9 +796,11 @@ export function DashboardLive({
               ? "Recent closed trades."
               : inspectorMode === "activity"
                 ? "Recent execution and system transitions."
+                : inspectorMode === "risk"
+                  ? "Current allocation briefing."
                 : undefined
         }
-        open={inspectorMode !== null}
+        open={inspectorMode !== null && inspectorMode !== "risk"}
         onClose={() => setInspectorMode(null)}
       >
         {inspectorMode === "positions" ? (

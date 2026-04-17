@@ -7,6 +7,7 @@ from sqlmodel import Session
 from app.core.config import get_settings
 from app.services.health_service import get_health_service
 from app.services.ig_streaming_service import get_ig_streaming_service
+from app.services.operational_state_service import OperationalStateService
 from app.services.runtime_state_service import RuntimeStateService
 
 
@@ -16,12 +17,14 @@ class OperationalTelemetryService:
         self.settings = get_settings()
         self.health_service = get_health_service()
         self.runtime_state_service = RuntimeStateService(session)
+        self.operational_state_service = OperationalStateService(session)
 
     def get_summary(self) -> dict[str, object]:
         now = datetime.now(UTC)
         health_report = self.health_service.get_health_report()
         details = health_report["details"]
         stream_health = get_ig_streaming_service().get_health()
+        operational_state = self.operational_state_service.get_summary()
         runtimes = self.runtime_state_service.list_runtimes()
         active_runtimes = [runtime for runtime in runtimes if runtime.status == "RUNNING"]
         heartbeat_stale_after_seconds = self.settings.system_health_heartbeat_interval_seconds * 3
@@ -51,12 +54,21 @@ class OperationalTelemetryService:
             "last_price_age_ms": self._age_ms(details.last_price_update, now),
             "last_reconciliation": details.last_reconciliation,
             "last_reconciliation_age_ms": self._age_ms(details.last_reconciliation, now),
-            "stream_connected": details.stream_connected,
+            "stream_connected": operational_state.feed_source_state.value == "LIVE",
             "stream_last_tick_at": stream_health.last_tick_at,
             "stream_last_tick_age_ms": self._age_ms(stream_health.last_tick_at, now),
             "subscribed_instrument_count": len(stream_health.subscribed_instruments),
             "desired_instrument_count": len(stream_health.desired_instruments),
-            "broker_connected": details.broker_connected,
+            "broker_connected": operational_state.broker_connectivity_state.value == "CONNECTED",
+            "feed_source_state": operational_state.feed_source_state.value,
+            "feed_health_state": operational_state.feed_health_state.value,
+            "broker_connectivity_state": operational_state.broker_connectivity_state.value,
+            "entry_eligible": operational_state.entry_eligible,
+            "exit_eligible": operational_state.exit_eligible,
+            "entry_block_reason": operational_state.entry_block_reason,
+            "exit_block_reason": operational_state.exit_block_reason,
+            "open_risk_management_state": operational_state.open_risk_management_state.value,
+            "open_risk_management_reason": operational_state.open_risk_management_reason,
             "broker_latency_ms": details.broker_latency_ms,
             "runtime_count": len(runtimes),
             "active_runtime_count": len(active_runtimes),

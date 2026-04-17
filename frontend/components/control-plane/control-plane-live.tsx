@@ -26,8 +26,14 @@ function formatTime(value?: string | null) {
 
 function familyTone(summary: ControlPlaneSummary, family: ControlPlaneFamily) {
   const deploymentState = family.deployment?.state;
+  if (family.deployment?.open_risk_management_state === "UNMANAGED_OPEN_RISK") {
+    return "negative" as const;
+  }
   if (!summary.effective_autonomous_control_enabled || family.governance.emergency_stop || deploymentState === "BLOCKED" || deploymentState === "EMERGENCY_STOPPED") {
     return "negative" as const;
+  }
+  if (family.deployment?.open_risk_management_state === "EXITS_ONLY") {
+    return "warning" as const;
   }
   if (family.alignment.status !== "ALIGNED" || deploymentState === "DEGRADED") {
     return "warning" as const;
@@ -148,11 +154,12 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
                 -<DataIndicator state={summaryLoading ? "loading" : "error"} message={summaryError} />
               </>
             ) : summary.effective_autonomous_control_enabled ? (
-              "Armed"
+              "Authorized"
             ) : (
               "Paused"
             ),
             tone: summaryError ? "inactive" : summary.effective_autonomous_control_enabled ? "positive" : "negative",
+            meta: summaryError ?? "permission only",
             emphasis: "strong",
           },
           {
@@ -168,9 +175,38 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
             tone: summaryError ? "inactive" : summary.families.some((family) => family.governance.emergency_stop) ? "negative" : "positive",
           },
           {
-            label: "Auto Deployed",
-            value: summaryError ? "-" : summary.counts.AUTO_DEPLOYED ?? 0,
-            tone: summaryError ? "inactive" : "neutral",
+            label: "Entries",
+            value: summaryError ? "-" : summary.entry_eligible ? "Allowed" : "Blocked",
+            tone:
+              summaryError
+                ? "inactive"
+                : summary.entry_eligible
+                  ? "positive"
+                  : "warning",
+            meta: summaryError ?? (summary.entry_block_reason ? summary.entry_block_reason.replaceAll("_", " ") : "live execution allowed"),
+          },
+          {
+            label: "Exits",
+            value: summaryError ? "-" : summary.exit_eligible ? "Allowed" : "Blocked",
+            tone:
+              summaryError
+                ? "inactive"
+                : summary.exit_eligible
+                  ? "positive"
+                  : "negative",
+            meta: summaryError ?? (summary.exit_block_reason ? summary.exit_block_reason.replaceAll("_", " ") : "existing risk can still be managed"),
+          },
+          {
+            label: "Open Risk",
+            value: summaryError ? "-" : summary.open_risk_management_state ?? "NO_OPEN_RISK",
+            tone:
+              summaryError
+                ? "inactive"
+                : summary.open_risk_management_state === "UNMANAGED_OPEN_RISK"
+                  ? "negative"
+                  : summary.open_risk_management_state === "EXITS_ONLY"
+                    ? "warning"
+                    : "positive",
           },
         ]}
       />
@@ -178,7 +214,7 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
       <section className="grid gap-3 lg:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.95fr)]">
         <Panel
           title="Family Alignment"
-          subtitle="Exceptions are surfaced first, then stable families."
+          subtitle="Permission, deployment, runtime mode, and open-risk management are separated so full AUTO is not mistaken for immediate entry readiness."
           priority="primary"
           tone={exceptionFamilies.length ? "warning" : "neutral"}
           actions={
@@ -244,13 +280,18 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
                 header: "Runtime",
                 render: (family) =>
                   family.runtime.is_running
-                    ? `${family.runtime.active_profile_name ?? "n/a"} · ${family.runtime.active_instrument ?? "n/a"}`
+                    ? `${family.runtime.runtime_mode ?? "NORMAL"} · ${family.runtime.active_instrument ?? "n/a"}`
                     : "not running",
               },
               {
                 key: "state",
                 header: "Deploy",
                 render: (family) => family.deployment?.state ?? "UNASSIGNED",
+              },
+              {
+                key: "open-risk",
+                header: "Risk",
+                render: (family) => family.deployment?.open_risk_management_state ?? "NO_OPEN_RISK",
               },
             ]}
           />
@@ -272,9 +313,9 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
                     <em>{selectedFamily.description}</em>
                   </div>
                   <div className="summary-bar__item">
-                    <span>Status</span>
-                    <strong>{selectedFamily.deployment?.state ?? "UNASSIGNED"}</strong>
-                    <em>{selectedFamily.alignment.status}</em>
+                    <span>Control</span>
+                    <strong>{selectedFamily.deployment?.open_risk_management_state ?? selectedFamily.deployment?.state ?? "UNASSIGNED"}</strong>
+                    <em>{selectedFamily.deployment?.state ?? selectedFamily.alignment.status}</em>
                   </div>
                   <div className="summary-bar__item">
                     <span>Updated</span>
@@ -285,14 +326,17 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
 
                 <div className="detail-block">
                   <span className="console-kicker">Why This Is Priority</span>
-                  <p>{selectedFamily.deployment?.blocked_reason || selectedFamily.deployment?.degraded_reason || selectedFamily.alignment.reason}</p>
+                  <p>{selectedFamily.deployment?.open_risk_management_reason || selectedFamily.deployment?.blocked_reason || selectedFamily.deployment?.degraded_reason || selectedFamily.alignment.reason}</p>
                 </div>
 
                 <div className="detail-block">
                   <span className="console-kicker">Observed State</span>
+                  <p>Permission: {selectedFamily.governance.autonomous_operation_allowed ? "authorized for autonomous deployment" : "not authorized for autonomous deployment"}</p>
                   <p>Governance: {selectedFamily.governance.approval_state}</p>
-                  <p>Runtime: {selectedFamily.runtime.is_running ? `${selectedFamily.runtime.control_mode ?? "UNKNOWN"} active` : "not running"}</p>
+                  <p>Runtime: {selectedFamily.runtime.is_running ? `${selectedFamily.runtime.control_mode ?? "UNKNOWN"} / ${selectedFamily.runtime.runtime_mode ?? "NORMAL"} active` : "not running"}</p>
                   <p>Instrument: {selectedFamily.runtime.active_instrument ?? selectedFamily.deployment?.selected_instrument ?? "n/a"}</p>
+                  <p>Open risk: {selectedFamily.deployment?.open_risk_management_state ?? "NO_OPEN_RISK"}</p>
+                  <p>Deployment: {selectedFamily.deployment?.state ?? "UNASSIGNED"}</p>
                 </div>
 
                 <div className="console-inline-actions">

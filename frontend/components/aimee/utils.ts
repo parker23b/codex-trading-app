@@ -138,7 +138,7 @@ export function computeSystemTone(snapshot: AimeeSnapshot): Tone {
   if (
     criticalWarnings > 0 ||
     (telemetry !== null &&
-      (!telemetry.stream_connected ||
+      ((telemetry.feed_source_state ?? (telemetry.stream_connected ? "LIVE" : "DISCONNECTED")) === "DISCONNECTED" ||
         !telemetry.broker_connected ||
         telemetry.reconciliation_mismatches > 0 ||
         telemetry.order_failures_last_5m > 0))
@@ -150,7 +150,13 @@ export function computeSystemTone(snapshot: AimeeSnapshot): Tone {
     warningCount > 0 ||
     (controlPlane !== null && controlPlane.misaligned_count > 0) ||
     (telemetry !== null &&
-      (telemetry.stale_runtime_count > 0 || telemetry.stale_price_runtime_count > 0 || telemetry.rejected_orders_last_5m > 0))
+      (
+        telemetry.feed_source_state === "POLLING_FALLBACK" ||
+        telemetry.feed_source_state === "STALE" ||
+        telemetry.stale_runtime_count > 0 ||
+        telemetry.stale_price_runtime_count > 0 ||
+        telemetry.rejected_orders_last_5m > 0
+      ))
   ) {
     return "warning";
   }
@@ -247,9 +253,26 @@ export function buildWhatMatters(snapshot: AimeeSnapshot, context: RouteContext)
       {
         id: "operate-stream",
         title: "Market data freshness",
-        detail: telemetry?.stream_last_tick_at ? `Last live tick ${formatRelativeDuration(telemetry.stream_last_tick_at)} ago.` : "Stream freshness is unavailable.",
-        meta: telemetry?.stream_connected ? "Streaming connected" : "Streaming disconnected",
-        tone: telemetry?.stream_connected ? "positive" : "negative",
+        detail:
+          telemetry?.feed_source_state === "POLLING_FALLBACK"
+            ? "Polling fallback is active. Live streaming is unavailable, and new entries are blocked."
+            : telemetry?.feed_source_state === "STALE"
+              ? "Price freshness is below the current execution threshold."
+              : telemetry?.stream_last_tick_at
+                ? `Last live tick ${formatRelativeDuration(telemetry.stream_last_tick_at)} ago.`
+                : "Stream freshness is unavailable.",
+        meta:
+          telemetry?.feed_source_state === "POLLING_FALLBACK"
+            ? "Polling fallback active"
+            : telemetry?.stream_connected
+              ? "Streaming connected"
+              : "Streaming disconnected",
+        tone:
+          telemetry?.feed_source_state === "POLLING_FALLBACK" || telemetry?.feed_source_state === "STALE"
+            ? "warning"
+            : telemetry?.stream_connected
+              ? "positive"
+              : "negative",
       },
     ];
   }
@@ -257,13 +280,49 @@ export function buildWhatMatters(snapshot: AimeeSnapshot, context: RouteContext)
   if (context === "control-plane" && controlPlane) {
     const blockedFamilies = controlPlane.families.filter((family) => family.deployment?.state === "BLOCKED");
     const degradedFamilies = controlPlane.families.filter((family) => family.deployment?.state === "DEGRADED");
+    const unmanagedRiskFamilies = controlPlane.families.filter(
+      (family) => family.deployment?.open_risk_management_state === "UNMANAGED_OPEN_RISK",
+    );
+    const exitsOnlyFamilies = controlPlane.families.filter(
+      (family) => family.deployment?.open_risk_management_state === "EXITS_ONLY",
+    );
     return [
       {
         id: "cp-mismatch",
-        title: "Governance alignment",
+        title: "Autonomy permission",
         detail: `${formatCount("family", controlPlane.misaligned_count)} currently misaligned with intended deployment or runtime state.`,
-        meta: controlPlane.effective_autonomous_control_enabled ? "Autonomy effective" : "Autonomy constrained",
+        meta: controlPlane.effective_autonomous_control_enabled ? "Permission authorized" : "Permission paused",
         tone: controlPlane.misaligned_count > 0 ? "warning" : "positive",
+      },
+      {
+        id: "cp-execution",
+        title: "Execution eligibility",
+        detail: controlPlane.entry_eligible
+          ? "New entries are currently allowed."
+          : controlPlane.exit_eligible
+            ? "New entries are blocked, but exits remain eligible."
+            : "Entries and exits are currently blocked.",
+        meta:
+          controlPlane.entry_block_reason?.replaceAll("_", " ") ??
+          controlPlane.exit_block_reason?.replaceAll("_", " ") ??
+          "no active block reason",
+        tone: controlPlane.entry_eligible ? "positive" : controlPlane.exit_eligible ? "warning" : "negative",
+      },
+      {
+        id: "cp-open-risk",
+        title: "Open-risk management",
+        detail: unmanagedRiskFamilies.length
+          ? unmanagedRiskFamilies.slice(0, 2).map((family) => family.strategy_name).join(", ")
+          : exitsOnlyFamilies.length
+            ? exitsOnlyFamilies.slice(0, 2).map((family) => `${family.strategy_name} (exits only)`).join(", ")
+            : "No unmanaged or exit-only open risk is currently surfaced.",
+        meta: controlPlane.open_risk_management_state ?? "NO_OPEN_RISK",
+        tone:
+          unmanagedRiskFamilies.length > 0
+            ? "negative"
+            : exitsOnlyFamilies.length > 0
+              ? "warning"
+              : "positive",
       },
       {
         id: "cp-blocked",
@@ -274,17 +333,10 @@ export function buildWhatMatters(snapshot: AimeeSnapshot, context: RouteContext)
       },
       {
         id: "cp-degraded",
-        title: "Degraded deployment",
+        title: "Deployment state",
         detail: degradedFamilies.length ? degradedFamilies.slice(0, 2).map((family) => family.strategy_name).join(", ") : "No degraded families detected.",
         meta: String(degradedFamilies.length),
         tone: degradedFamilies.length ? "warning" : "positive",
-      },
-      {
-        id: "cp-runtime",
-        title: "Runtime intent",
-        detail: `${formatCount("family", controlPlane.families.filter((family) => family.runtime.is_running).length)} currently running.`,
-        meta: `${formatCount("family", controlPlane.families.length)} tracked`,
-        tone: "neutral",
       },
     ];
   }
@@ -343,7 +395,12 @@ export function buildWhatMatters(snapshot: AimeeSnapshot, context: RouteContext)
         id: "events-recon",
         title: "Operational fault lines",
         detail: `${formatCount("reconciliation issue", snapshot.telemetry?.reconciliation_mismatches ?? 0)} and ${formatCount("order failure", snapshot.telemetry?.order_failures_last_5m ?? 0)} live.`,
-        meta: snapshot.telemetry?.stream_connected ? "Stream connected" : "Stream disconnected",
+        meta:
+          snapshot.telemetry?.feed_source_state === "POLLING_FALLBACK"
+            ? "Polling fallback active"
+            : snapshot.telemetry?.stream_connected
+              ? "Stream connected"
+              : "Stream disconnected",
         tone: (snapshot.telemetry?.reconciliation_mismatches ?? 0) > 0 || (snapshot.telemetry?.order_failures_last_5m ?? 0) > 0 ? "negative" : "neutral",
       },
       {
@@ -431,7 +488,21 @@ export function buildWarningItems(snapshot: AimeeSnapshot): WarningItem[] {
     });
 
   if (snapshot.telemetry) {
-    if (!snapshot.telemetry.stream_connected) {
+    if (snapshot.telemetry.feed_source_state === "POLLING_FALLBACK") {
+      items.push({
+        id: "polling-fallback",
+        title: "Polling fallback active",
+        detail: "Live streaming is unavailable; fresh polled prices remain available and new entries are blocked.",
+        tone: "warning",
+      });
+    } else if (snapshot.telemetry.feed_source_state === "STALE") {
+      items.push({
+        id: "feed-stale",
+        title: "Market-data feed stale",
+        detail: "Price freshness is below the current execution threshold.",
+        tone: "warning",
+      });
+    } else if (!snapshot.telemetry.stream_connected) {
       items.push({
         id: "stream-disconnected",
         title: "Market-data stream disconnected",

@@ -10,9 +10,11 @@ from app.core.runtime import runtime_manager
 from app.models.runtime import StrategyRuntimeState
 from app.models.strategy_deployment import StrategyDeployment, StrategyDeploymentState
 from app.models.strategy_governance import GovernanceApprovalState, StrategyFamilyGovernance
+from app.models.trade import Position
 from app.services.domain_event_service import domain_event_service
 from app.services.health_service import get_health_service
 from app.services.operator_control_service import OperatorControlService
+from app.services.operational_state_service import OpenRiskManagementState, OperationalStateService
 from app.services.regime_suitability_service import RegimeSuitabilityService
 from app.services.strategy_governance_service import StrategyGovernanceService
 from app.services.strategy_service import StrategyService
@@ -34,6 +36,7 @@ class StrategyDeploymentManagerService:
         self.settings = get_settings()
         self.governance_service = StrategyGovernanceService(session)
         self.operator_control_service = OperatorControlService(session)
+        self.operational_state_service = OperationalStateService(session)
         self.suitability_service = RegimeSuitabilityService()
         self.strategy_service = StrategyService(session)
 
@@ -54,6 +57,9 @@ class StrategyDeploymentManagerService:
                 governance=governance,
                 metadata=metadata,
             )
+            open_positions = self._list_open_positions(governance.strategy_name)
+            open_risk_management_state = OpenRiskManagementState.NO_OPEN_RISK.value
+            open_risk_management_reason: str | None = None
 
             if target_state == StrategyDeploymentState.AUTO_DEPLOYED.value:
                 manual_runtime = self._get_running_manual_runtime(governance.strategy_name)
@@ -72,6 +78,12 @@ class StrategyDeploymentManagerService:
                         profile_name=selected_profile,
                         strategy_parameters=selected_parameters,
                     )
+                    if selected_instrument is not None and runtime_manager.get_engine(governance.strategy_name, selected_instrument) is not None:
+                        self.strategy_service.set_runtime_mode(
+                            strategy_name=governance.strategy_name,
+                            instrument=selected_instrument,
+                            runtime_mode="NORMAL",
+                        )
                     if restart_reason is not None:
                         deployment.last_restart_reason = restart_reason
                         domain_event_service.record_event(
@@ -90,8 +102,17 @@ class StrategyDeploymentManagerService:
                             },
                             created_at=current_time,
                         )
+                open_risk_management_state = (
+                    OpenRiskManagementState.MANAGED.value if open_positions else OpenRiskManagementState.NO_OPEN_RISK.value
+                )
             else:
-                self._stop_auto_runtimes(governance.strategy_name)
+                open_risk_management_state, open_risk_management_reason = self._handle_non_auto_runtime_transition(
+                    strategy_name=governance.strategy_name,
+                    deployment=deployment,
+                    open_positions=open_positions,
+                    target_state=target_state,
+                    target_reason=reason,
+                )
 
             previous_state = deployment.state
             previous_profile = deployment.selected_profile
@@ -116,6 +137,8 @@ class StrategyDeploymentManagerService:
             } else None
             deployment.degraded_reason = reason if target_state == StrategyDeploymentState.DEGRADED.value else None
             deployment.last_evaluated_at = current_time
+            deployment.open_risk_management_state = open_risk_management_state
+            deployment.open_risk_management_reason = open_risk_management_reason
             if target_state != previous_state:
                 deployment.last_state_changed_at = current_time
             if target_state == StrategyDeploymentState.AUTO_DEPLOYED.value and previous_state != target_state:
@@ -348,6 +371,7 @@ class StrategyDeploymentManagerService:
                 strategy_name=strategy_name,
                 instrument=instrument,
                 control_mode="AUTO",
+                runtime_mode="NORMAL",
                 deployment_id=deployment_id,
                 profile_name=profile_name,
                 strategy_parameters=strategy_parameters,
@@ -360,3 +384,63 @@ class StrategyDeploymentManagerService:
         for runtime in self._get_running_auto_runtimes(strategy_name):
             if runtime_manager.get_engine(strategy_name, runtime.instrument) is not None:
                 self.strategy_service.stop_strategy(strategy_name=strategy_name, instrument=runtime.instrument)
+
+    def _list_open_positions(self, strategy_name: str) -> list[Position]:
+        statement = select(Position).where(
+            Position.strategy_name == strategy_name,
+            Position.is_open.is_(True),
+        )
+        return list(self.session.exec(statement))
+
+    def _handle_non_auto_runtime_transition(
+        self,
+        *,
+        strategy_name: str,
+        deployment: StrategyDeployment,
+        open_positions: list[Position],
+        target_state: str,
+        target_reason: str,
+    ) -> tuple[str, str | None]:
+        if not open_positions:
+            self._stop_auto_runtimes(strategy_name)
+            return (OpenRiskManagementState.NO_OPEN_RISK.value, None)
+
+        operational_state = self.operational_state_service.get_summary()
+        running_auto_runtimes = self._get_running_auto_runtimes(strategy_name)
+        if operational_state.exit_eligible and running_auto_runtimes:
+            reason = (
+                f"{len(open_positions)} open position(s) remain; runtime retained in EXITS_ONLY while deployment is {target_state}."
+            )
+            for runtime in running_auto_runtimes:
+                if runtime_manager.get_engine(strategy_name, runtime.instrument) is not None:
+                    self.strategy_service.set_runtime_mode(
+                        strategy_name=strategy_name,
+                        instrument=runtime.instrument,
+                        runtime_mode="EXITS_ONLY",
+                        recovery_reason=reason,
+                    )
+            return (OpenRiskManagementState.EXITS_ONLY.value, reason)
+
+        self._stop_auto_runtimes(strategy_name)
+        reason = (
+            f"{len(open_positions)} open position(s) remain while exits are not operationally eligible; "
+            f"deployment moved to {target_state}."
+        )
+        domain_event_service.record_event(
+            event_type="risk.unmanaged_open_risk",
+            category="risk",
+            severity="error",
+            source="strategy_deployment_manager.reconcile",
+            title="Open risk is no longer under active automated management",
+            message=f"{strategy_name} has open positions but no exit-capable AUTO runtime remains.",
+            strategy_name=strategy_name,
+            instrument=deployment.selected_instrument,
+            payload_json={
+                "deployment_state": target_state,
+                "deployment_reason": target_reason,
+                "open_position_count": len(open_positions),
+                "exit_eligible": operational_state.exit_eligible,
+                "exit_block_reason": operational_state.exit_block_reason,
+            },
+        )
+        return (OpenRiskManagementState.UNMANAGED_OPEN_RISK.value, reason)

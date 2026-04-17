@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -8,6 +8,7 @@ from app.core.broker import AccountType, BrokerAccountSummary, BrokerMarketDetai
 from app.core.runtime import runtime_manager
 from app.core.signals import EntrySignal, ExitSignal, SignalCandidate, SignalKind
 from app.models.trade import TradeIntent, TradeIntentState
+from app.services.health_service import get_health_service
 from app.services.strategy_service import StrategyService
 from app.services.trade_decision_service import TradeDecisionService
 from app.services.trade_service import ActiveTradeIntentConflictError, TradeService
@@ -56,7 +57,33 @@ def _candidate(
     )
 
 
-def test_decision_service_persists_proposed_signal_as_approved_trade_intent(session, broker, fixed_now):
+def _enable_live_entry_context(monkeypatch) -> None:
+    now = datetime.now(UTC)
+    health_service = get_health_service()
+    health_service.update_broker_state(connected=True, latency_ms=5.0)
+    health_service.record_price_update(now, stream_connected=True)
+    stub = type(
+        "StreamService",
+        (),
+        {
+            "get_health": lambda self: type(
+                "Health",
+                (),
+                {
+                    "enabled": True,
+                    "connected": True,
+                    "subscribed_instruments": (),
+                    "desired_instruments": (),
+                    "last_tick_at": now,
+                },
+            )()
+        },
+    )()
+    monkeypatch.setattr("app.services.operational_state_service.get_operational_streaming_service", lambda: stub)
+
+
+def test_decision_service_persists_proposed_signal_as_approved_trade_intent(session, broker, fixed_now, monkeypatch):
+    _enable_live_entry_context(monkeypatch)
     runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
     decision_service = TradeDecisionService(session)
     candidate = _candidate(
@@ -83,7 +110,8 @@ def test_decision_service_persists_proposed_signal_as_approved_trade_intent(sess
     assert intents[0].decision_reason_code == "approved"
 
 
-def test_decision_service_resolves_same_instrument_competition_explicitly(session, broker, fixed_now):
+def test_decision_service_resolves_same_instrument_competition_explicitly(session, broker, fixed_now, monkeypatch):
+    _enable_live_entry_context(monkeypatch)
     runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
     decision_service = TradeDecisionService(session)
     strong_buy = _candidate(
@@ -192,7 +220,8 @@ def test_decision_service_rejects_instrument_when_active_intent_exists(session, 
     assert result.intent.state == TradeIntentState.REJECTED.value
 
 
-def test_only_approved_trade_intents_reach_order_submission(session, broker, fixed_now):
+def test_only_approved_trade_intents_reach_order_submission(session, broker, fixed_now, monkeypatch):
+    _enable_live_entry_context(monkeypatch)
     service = StrategyService(session)
     trade_service = TradeService(session)
     runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
@@ -241,7 +270,8 @@ def test_only_approved_trade_intents_reach_order_submission(session, broker, fix
     assert len(broker.placed_orders) == 1
 
 
-def test_same_instrument_candidates_do_not_leave_multiple_active_proposals(session, broker, fixed_now):
+def test_same_instrument_candidates_do_not_leave_multiple_active_proposals(session, broker, fixed_now, monkeypatch):
+    _enable_live_entry_context(monkeypatch)
     runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
     decision_service = TradeDecisionService(session)
     first = _candidate(
@@ -346,3 +376,72 @@ def test_exit_candidate_is_rejected_without_linked_trade_intent(session, broker,
     assert decisions[0].admitted is False
     assert decisions[0].reason_code == "missing_open_trade_intent"
     assert broker.close_requests == []
+
+
+def test_fallback_operational_policy_blocks_new_autonomous_entry(session, broker, monkeypatch):
+    now = datetime.now(UTC)
+    runtime_manager.last_price_updated_at[INSTRUMENT] = now
+    health_service = get_health_service()
+    health_service.update_broker_state(connected=True, latency_ms=5.0)
+    health_service.record_price_update(now)
+    stub = type(
+        "StreamService",
+        (),
+        {
+            "get_health": lambda self: type(
+                "Health",
+                (),
+                {
+                    "enabled": True,
+                    "connected": False,
+                    "subscribed_instruments": (),
+                    "desired_instruments": (),
+                    "last_tick_at": now - timedelta(seconds=30),
+                },
+            )()
+        },
+    )()
+    monkeypatch.setattr("app.services.operational_state_service.get_operational_streaming_service", lambda: stub)
+    candidate = _candidate(
+        strategy_name="smoke_test_hold",
+        instrument=INSTRUMENT,
+        direction=OrderDirection.BUY,
+        signal_at=now,
+        confidence=0.9,
+        broker=broker,
+        position_size=0.2,
+        risk_per_trade=0.1,
+    )
+
+    result = TradeDecisionService(session).decide_signal_candidates([candidate], received_at=now)[0]
+
+    assert result.admitted is False
+    assert result.reason_code == "operational_policy_blocked"
+    assert result.intent is not None
+    assert result.intent.state == TradeIntentState.REJECTED.value
+    assert result.intent.decision_reason_code == "operational_policy_blocked"
+    assert ((result.intent.details or {}).get("risk_audit_summary") or {}).get("operational_policy", {}).get("entry_eligible") is False
+
+
+def test_runtime_exits_only_operational_policy_blocks_new_autonomous_entry(session, broker, fixed_now, monkeypatch):
+    _enable_live_entry_context(monkeypatch)
+    runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
+    candidate = _candidate(
+        strategy_name="smoke_test_hold",
+        instrument=INSTRUMENT,
+        direction=OrderDirection.BUY,
+        signal_at=fixed_now,
+        confidence=0.9,
+        broker=broker,
+        position_size=0.2,
+        risk_per_trade=0.1,
+    )
+    candidate.engine.runtime_mode = "EXITS_ONLY"
+
+    result = TradeDecisionService(session).decide_signal_candidates([candidate], received_at=fixed_now)[0]
+
+    assert result.admitted is False
+    assert result.reason_code == "operational_policy_blocked"
+    assert result.intent is not None
+    assert result.intent.state == TradeIntentState.REJECTED.value
+    assert "runtime_exits_only" in (result.intent.decision_reason or "")

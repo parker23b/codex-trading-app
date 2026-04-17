@@ -15,23 +15,36 @@ type AutonomyOverviewProps = {
 
 function buildNarrative(summary: ControlPlaneSummary, streamHealth: StreamHealthStatus, brokerAuth: BrokerAuthStatus) {
   const blockedOrDegraded = (summary.counts.BLOCKED ?? 0) + (summary.counts.DEGRADED ?? 0);
+  const openRiskState = summary.open_risk_management_state ?? "NO_OPEN_RISK";
 
+  if (openRiskState === "UNMANAGED_OPEN_RISK") {
+    return "Open positions are present without active automated exit management. Treat this as a control-plane priority ahead of generic autonomy or deployment labels.";
+  }
+  if (openRiskState === "EXITS_ONLY") {
+    return "Open risk is still under automated management, but only for exits. New entries are intentionally suppressed while the runtime protects existing positions.";
+  }
   if (!summary.effective_autonomous_control_enabled) {
-    return "Autonomous deployment is paused. The system can observe state, but it is not auto-deploying new strategy families.";
+    return "Autonomy is authorized off. The system can still observe and reconcile state, but it is not permitted to auto-deploy new strategy families.";
   }
   if ((summary.counts.EMERGENCY_STOPPED ?? 0) > 0) {
-    return "Emergency-stopped families are present. Review control-plane exceptions before trusting automated deployment to resume normally.";
+    return "Emergency-stopped families are present. Review control-plane exceptions before assuming automated control can resume normally.";
   }
   if (summary.misaligned_count > 0) {
     return "The system is running, but intent and runtime truth are misaligned for at least one strategy family.";
   }
+  if (summary.entry_eligible === false && summary.exit_eligible) {
+    return "Autonomy is authorized, but new entries are blocked by current operating conditions while exits remain eligible.";
+  }
+  if (summary.entry_eligible === false) {
+    return "Autonomy is authorized, but execution is currently blocked by feed, broker, or freshness constraints.";
+  }
   if (blockedOrDegraded > 0) {
-    return "Autonomy is enabled, but some families are blocked or degraded by suitability, governance, or runtime conditions.";
+    return "Autonomy is authorized, but some families are blocked or degraded by suitability, governance, or runtime conditions.";
   }
   if (!streamHealth.connected || brokerAuth.state !== "connected") {
-    return "Autonomy is armed, but external dependencies are degraded. Deployment confidence is reduced until stream and broker health recover.";
+    return "External dependencies are degraded. Permission to operate remains on, but execution readiness is reduced until stream and broker health recover.";
   }
-  return "Autonomy is enabled and the system is scanning and deploying within current governance, market, and health constraints.";
+  return "Autonomy is authorized and execution conditions currently support normal governed operation.";
 }
 
 export function AutonomyOverview({
@@ -62,20 +75,20 @@ export function AutonomyOverview({
     >
       <div className="summary-grid">
         <div className="summary-grid__item">
-          <span className="eyebrow">Autonomy</span>
-          <strong>{summary.effective_autonomous_control_enabled ? "Enabled" : "Paused"}</strong>
+          <span className="eyebrow">Permission</span>
+          <strong>{summary.effective_autonomous_control_enabled ? "Authorized" : "Paused"}</strong>
         </div>
         <div className="summary-grid__item">
-          <span className="eyebrow">Live Runtimes</span>
-          <strong>{activeRuntimeCount}</strong>
+          <span className="eyebrow">Entries</span>
+          <strong>{summary.entry_eligible ? "Allowed" : "Blocked"}</strong>
         </div>
         <div className="summary-grid__item">
-          <span className="eyebrow">Open Positions</span>
-          <strong>{positionCount}</strong>
+          <span className="eyebrow">Exits</span>
+          <strong>{summary.exit_eligible ? "Allowed" : "Blocked"}</strong>
         </div>
         <div className="summary-grid__item">
-          <span className="eyebrow">Exceptions</span>
-          <strong>{summary.misaligned_count + blockedOrDegraded + (summary.counts.EMERGENCY_STOPPED ?? 0)}</strong>
+          <span className="eyebrow">Open Risk</span>
+          <strong>{summary.open_risk_management_state ?? "NO_OPEN_RISK"}</strong>
         </div>
       </div>
 
@@ -83,16 +96,16 @@ export function AutonomyOverview({
 
       <div className="autonomy-overview__checks">
         <div className="status-note status-note--inline">
-          Broker: {brokerAuth.label} · {brokerAuth.detail}
+          Live runtimes: {activeRuntimeCount} · Open positions: {positionCount}
         </div>
         <div className="status-note status-note--inline">
-          Stream: {streamHealth.connected ? "connected" : "disconnected"} · {streamHealth.last_status ?? "status unavailable"}
+          Broker: {summary.broker_connectivity_state ?? brokerAuth.label} · {brokerAuth.detail}
         </div>
         <div className="status-note status-note--inline">
-          Families aligned: {summary.families.filter((family) => family.alignment.status === "ALIGNED").length}/{summary.families.length}
+          Feed: {summary.feed_source_state ?? (streamHealth.connected ? "LIVE" : "DISCONNECTED")} · {streamHealth.last_status ?? "status unavailable"}
         </div>
         <div className="status-note status-note--inline">
-          Blocked or degraded: {blockedOrDegraded} · Emergency stopped: {summary.counts.EMERGENCY_STOPPED ?? 0}
+          Families aligned: {summary.families.filter((family) => family.alignment.status === "ALIGNED").length}/{summary.families.length} · Exceptions: {summary.misaligned_count + blockedOrDegraded + (summary.counts.EMERGENCY_STOPPED ?? 0)}
         </div>
       </div>
     </Card>

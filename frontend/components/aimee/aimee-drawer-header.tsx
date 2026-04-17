@@ -7,7 +7,10 @@ type AimeeDrawerHeaderProps = {
   onClose: () => void;
 };
 
-export function AimeeDrawerHeader({ context, onClose }: AimeeDrawerHeaderProps) {
+export function AimeeDrawerHeader({
+  context,
+  onClose,
+}: AimeeDrawerHeaderProps) {
   return (
     <div className="flex items-start justify-between gap-4 border-b border-[color:var(--border)] px-5 py-4">
       <div className="flex min-w-0 items-start gap-3">
@@ -17,15 +20,19 @@ export function AimeeDrawerHeader({ context, onClose }: AimeeDrawerHeaderProps) 
         </div>
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-[1.04rem] font-semibold tracking-[-0.02em]">AIMEE</h2>
+            <h2 className="text-[1.04rem] font-semibold tracking-[-0.02em]">
+              A.I.M.E.E
+            </h2>
             <span className="rounded-full border border-[color:var(--glass-stroke)] bg-[color:var(--bg-muted)] px-2 py-1 text-[0.66rem] uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">
               {routeLabel(context)}
             </span>
           </div>
-          <p className="mt-1 text-[0.8rem] text-[color:var(--text-secondary)]">Autonomous Intelligence for Market Explanation &amp; Evaluation</p>
+          <p className="mt-1 text-[0.8rem] text-[color:var(--text-secondary)]">
+            Autonomous Intelligence for Market Explanation &amp; Evaluation
+          </p>
         </div>
       </div>
-      <AimeeCloseButton label="Close AIMEE" onClick={onClose} />
+      <AimeeCloseButton label="Close A.I.M.E.E" onClick={onClose} />
     </div>
   );
 }

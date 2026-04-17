@@ -29,6 +29,7 @@ class StrategyRuntimeState(SQLModel, table=True):
     last_price_seen_at: datetime | None = None
     current_position_broker_reference: str | None = Field(default=None, index=True)
     control_mode: str = Field(default="MANUAL", index=True)
+    runtime_mode: str = Field(default="NORMAL", index=True)
     deployment_id: int | None = Field(default=None, index=True)
     active_profile_name: str | None = Field(default=None, index=True)
     auto_resume: bool = True

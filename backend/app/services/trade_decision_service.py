@@ -9,6 +9,7 @@ from app.core.signals import EntrySignal, ExitSignal, SignalCandidate, SignalSta
 from app.models.trade import TradeIntent, TradeIntentState
 from app.services.capital_allocator_service import AllocationDecision, CapitalAllocatorService
 from app.services.market_status_service import get_market_status_service
+from app.services.operational_state_service import OperationalStateService
 from app.services.portfolio_risk_service import PortfolioRiskService
 from app.services.trade_service import ActiveTradeIntentConflictError, TradeService
 
@@ -70,6 +71,7 @@ class TradeDecisionService:
         self.risk_service = PortfolioRiskService(session)
         self.capital_allocator = CapitalAllocatorService(session)
         self.market_status_service = get_market_status_service()
+        self.operational_state_service = OperationalStateService(session)
 
     def decide_signal_candidates(
         self,
@@ -228,7 +230,9 @@ class TradeDecisionService:
                 )
                 continue
 
-            approved_signal = self._apply_market_status_gate(candidate=candidate, signal=signal)
+            approved_signal = self._apply_operational_policy_gate(candidate=candidate, signal=signal)
+            if approved_signal.status is not SignalStatus.REJECTED:
+                approved_signal = self._apply_market_status_gate(candidate=candidate, signal=approved_signal)
             if approved_signal.status is not SignalStatus.REJECTED:
                 approved_signal = self.risk_service.assess_entry(
                     approved_signal,
@@ -624,8 +628,46 @@ class TradeDecisionService:
             audit_summary=audit_summary,
         )
 
+    def _apply_operational_policy_gate(self, *, candidate: SignalCandidate, signal: EntrySignal) -> EntrySignal:
+        operational_state = self.operational_state_service.get_summary()
+        audit_summary = dict(signal.audit_summary)
+        audit_summary["operational_policy"] = operational_state.model_dump(mode="json")
+        runtime_mode = str(getattr(candidate.engine, "runtime_mode", "NORMAL") or "NORMAL")
+        if operational_state.entry_eligible and runtime_mode != "EXITS_ONLY":
+            return replace(signal, audit_summary=audit_summary)
+        audit_trail = list(signal.audit_trail)
+        gate_reason = "runtime_exits_only" if runtime_mode == "EXITS_ONLY" else operational_state.entry_block_reason
+        rejection_reason = f"Operational policy blocked new autonomous entries: {gate_reason}."
+        audit_trail.append(
+            {
+                "layer": "operational_policy",
+                "status": "REJECTED",
+                "passed": False,
+                "reason": rejection_reason,
+                "checks": [
+                    {
+                        "code": "entry_eligible",
+                        "passed": False,
+                        "reason": gate_reason,
+                        "actual": {**operational_state.model_dump(mode="json"), "runtime_mode": runtime_mode},
+                    }
+                ],
+            }
+        )
+        audit_summary.update({"approved": False, "rejection_layer": "operational_policy"})
+        return replace(
+            signal,
+            status=SignalStatus.REJECTED,
+            reason=rejection_reason,
+            rejection_layer="operational_policy",
+            audit_trail=audit_trail,
+            audit_summary=audit_summary,
+        )
+
     @staticmethod
     def _reason_code_from_signal(signal: EntrySignal) -> str:
+        if signal.rejection_layer == "operational_policy":
+            return "operational_policy_blocked"
         if signal.rejection_layer == "market_status":
             return "market_closed" if "closed" in (signal.reason or "").lower() else "instrument_not_tradable"
         if signal.rejection_layer in {"portfolio", "kill_switch"}:

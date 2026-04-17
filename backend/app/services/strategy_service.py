@@ -30,6 +30,7 @@ from app.services.trade_decision_service import TradeDecisionResult, TradeDecisi
 from app.services.domain_event_service import domain_event_service
 from app.services.health_service import get_health_service
 from app.services.market_status_service import MarketStatus, get_market_status_service
+from app.services.operational_state_service import OperationalStateService
 from app.services.runtime_state_service import RuntimeStateService
 from app.services.strategy_governance_service import StrategyGovernanceService
 from app.services.trade_service import TradeService
@@ -215,6 +216,11 @@ class StrategyService:
                                 if runtimes_by_key.get((metadata.name, engine.instrument)) is not None
                                 else "EPHEMERAL"
                             ),
+                            "runtime_mode": (
+                                runtimes_by_key.get((metadata.name, engine.instrument)).runtime_mode
+                                if runtimes_by_key.get((metadata.name, engine.instrument)) is not None
+                                else getattr(engine, "runtime_mode", "NORMAL")
+                            ),
                             "control_mode": (
                                 runtimes_by_key.get((metadata.name, engine.instrument)).control_mode
                                 if runtimes_by_key.get((metadata.name, engine.instrument)) is not None
@@ -257,6 +263,7 @@ class StrategyService:
                             "last_price_seen": runtime.last_price_seen,
                             "last_price_seen_at": runtime.last_price_seen_at,
                             "control_mode": runtime.control_mode,
+                            "runtime_mode": runtime.runtime_mode,
                             "deployment_id": runtime.deployment_id,
                             "active_profile_name": runtime.active_profile_name,
                             "parameters": runtime.parameters,
@@ -285,15 +292,27 @@ class StrategyService:
         instrument: str,
         *,
         control_mode: str = "MANUAL",
+        runtime_mode: str | None = None,
         deployment_id: int | None = None,
         profile_name: str | None = None,
         strategy_parameters: dict[str, object] | None = None,
     ) -> None:
+        # Service-layer start is the authoritative path for runtime startup.
+        # It resolves persisted runtime mode and deployment/open-risk context
+        # before the engine is created, so callers should not bypass it by
+        # invoking `runtime_manager.start(...)` directly.
+        resolved_runtime_mode = self._resolve_runtime_start_mode(
+            strategy_name=strategy_name,
+            instrument=instrument,
+            requested_runtime_mode=runtime_mode,
+        )
         engine = runtime_manager.start(
             strategy_name=strategy_name,
             instrument=instrument,
             profile_name=profile_name,
             strategy_parameters=strategy_parameters,
+            runtime_mode=resolved_runtime_mode,
+            startup_source="strategy_service.start_strategy",
         )
         if self.runtime_state_service is not None:
             self.runtime_state_service.sync_engine_state(
@@ -302,6 +321,7 @@ class StrategyService:
                 status="RUNNING",
                 recovery_state="RUNNING",
                 control_mode=control_mode,
+                runtime_mode=resolved_runtime_mode,
                 deployment_id=deployment_id,
                 active_profile_name=engine.active_profile_name,
                 parameters=engine.strategy_parameters,
@@ -322,12 +342,85 @@ class StrategyService:
             payload_json={
                 "status": "RUNNING",
                 "control_mode": control_mode,
+                "runtime_mode": resolved_runtime_mode,
                 "deployment_id": deployment_id,
                 "active_profile_name": engine.active_profile_name,
                 "strategy_parameters": engine.strategy_parameters,
             },
         )
         self._refresh_paused_strategy_count()
+
+    def _resolve_runtime_start_mode(
+        self,
+        *,
+        strategy_name: str,
+        instrument: str,
+        requested_runtime_mode: str | None,
+    ) -> str:
+        # Default starts must never silently erase persisted EXITS_ONLY or
+        # unmanaged-risk context by normalizing back to NORMAL.
+        if self.session is None or self.runtime_state_service is None:
+            return requested_runtime_mode or "NORMAL"
+
+        deployment = self.session.exec(
+            select(StrategyDeployment).where(StrategyDeployment.strategy_name == strategy_name)
+        ).first()
+        if (
+            deployment is not None
+            and deployment.open_risk_management_state == "UNMANAGED_OPEN_RISK"
+            and requested_runtime_mode in {None, "NORMAL"}
+        ):
+            raise ValueError(
+                f"Cannot start {strategy_name} on {instrument} in NORMAL mode while open risk is marked UNMANAGED_OPEN_RISK."
+            )
+
+        if requested_runtime_mode is not None:
+            return requested_runtime_mode
+
+        persisted_runtime = self.runtime_state_service.get_runtime(strategy_name, instrument)
+        if persisted_runtime is not None and persisted_runtime.runtime_mode in {"NORMAL", "EXITS_ONLY"}:
+            return persisted_runtime.runtime_mode
+        if deployment is not None and deployment.open_risk_management_state == "EXITS_ONLY":
+            return "EXITS_ONLY"
+        return "NORMAL"
+
+    def set_runtime_mode(
+        self,
+        *,
+        strategy_name: str,
+        instrument: str,
+        runtime_mode: str,
+        recovery_reason: str | None = None,
+    ) -> None:
+        engine = runtime_manager.get_engine(strategy_name, instrument)
+        if engine is None:
+            raise ValueError(f"No active engine for strategy '{strategy_name}' on '{instrument}'.")
+        engine.runtime_mode = runtime_mode
+        if self.runtime_state_service is not None:
+            self.runtime_state_service.sync_engine_state(
+                strategy_name=strategy_name,
+                instrument=instrument,
+                status="RUNNING",
+                recovery_state="RUNNING",
+                control_mode="AUTO",
+                runtime_mode=runtime_mode,
+                last_price_seen=runtime_manager.get_last_price(instrument),
+                last_price_seen_at=runtime_manager.get_last_price_updated_at(instrument),
+                current_position=engine.current_position,
+                recovery_reason=recovery_reason,
+            )
+        self.event_service.record_event(
+            event_type="strategy.runtime_mode_changed",
+            category="strategy",
+            severity="warning" if runtime_mode == "EXITS_ONLY" else "info",
+            source="strategy_service.set_runtime_mode",
+            title="Strategy runtime mode changed",
+            message=f"{strategy_name} runtime on {instrument} changed to {runtime_mode}.",
+            runtime_id=engine.runtime_id,
+            strategy_name=strategy_name,
+            instrument=instrument,
+            payload_json={"runtime_mode": runtime_mode, "reason": recovery_reason},
+        )
 
     def stop_strategy(self, instrument: str | None = None, strategy_name: str | None = None) -> None:
         stopped_engines = runtime_manager.stop(instrument=instrument, strategy_name=strategy_name)
@@ -361,6 +454,28 @@ class StrategyService:
             ]
         )
         self.health_service.set_paused_strategies(paused_count)
+
+    @staticmethod
+    def _entry_execution_policy_block(*, session: Session, engine) -> tuple[str, str, dict[str, object]] | None:
+        # This late guard intentionally mirrors the admission-time policy.
+        # It must remain in place even if earlier layers already blocked
+        # entries, because runtime mode or operational eligibility can change
+        # after admission but before broker submission.
+        runtime_mode = str(getattr(engine, "runtime_mode", "NORMAL") or "NORMAL")
+        if runtime_mode in {"EXITS_ONLY", "STOPPED"}:
+            return (
+                "entry_execution_blocked_runtime_mode_changed",
+                f"Entry execution blocked because runtime mode is {runtime_mode}.",
+                {"runtime_mode": runtime_mode},
+            )
+        operational_state = OperationalStateService(session).get_summary()
+        if not operational_state.entry_eligible:
+            return (
+                "entry_execution_blocked_operational_policy",
+                f"Entry execution blocked by operational policy: {operational_state.entry_block_reason}.",
+                {"operational_policy": operational_state.model_dump(mode="json"), "runtime_mode": runtime_mode},
+            )
+        return None
 
     def process_price_update(
         self,
@@ -437,6 +552,7 @@ class StrategyService:
                     instrument=update_result.engine.instrument,
                     status="RUNNING",
                     recovery_state="RUNNING",
+                    runtime_mode=update_result.engine.runtime_mode,
                     last_price_seen=price,
                     last_price_seen_at=received_at or datetime.now(UTC),
                     current_position=update_result.engine.current_position,
@@ -540,6 +656,25 @@ class StrategyService:
                 # and only materialize execution rows once an approved intent is
                 # actually entering broker-submission orchestration.
                 if decision.admitted and intent is not None:
+                    late_block = self._entry_execution_policy_block(session=self.session, engine=engine)
+                    if late_block is not None:
+                        code, reason, details = late_block
+                        trade_service.transition_trade_intent(
+                            intent,
+                            state=TradeIntentState.FAILED,
+                            decision_reason_code=code,
+                            decision_reason=reason,
+                            details={
+                                **StrategyService._allocation_outcome_update(
+                                    stage="execution_policy_blocked",
+                                    final_status=TradeIntentState.FAILED.value,
+                                    hard_risk_passed=True,
+                                    execution_blocked=True,
+                                ),
+                                "execution_policy_block": details,
+                            },
+                        )
+                        continue
                     execution, should_submit = self._prepare_execution(
                         trade_service=trade_service,
                         trade_intent_id=intent.id,
@@ -636,6 +771,7 @@ class StrategyService:
                                 instrument=engine.instrument,
                                 status="RUNNING",
                                 recovery_state="RUNNING",
+                                runtime_mode=engine.runtime_mode,
                                 last_price_seen=price,
                                 last_price_seen_at=received_at or datetime.now(UTC),
                                 current_position=created_position,
@@ -845,6 +981,7 @@ class StrategyService:
                         instrument=engine.instrument,
                         status="RUNNING",
                         recovery_state="RUNNING",
+                        runtime_mode=engine.runtime_mode,
                         last_price_seen=trade.close_price,
                         last_price_seen_at=trade.close_time,
                         current_position=None,
@@ -1246,10 +1383,42 @@ class StrategyService:
         trade_service: TradeService,
         execution: Execution,
     ) -> Position:
+        # Keep this late policy check here even if orchestration also blocks.
+        # `_execute_entry_signal(...)` is the last broker-submission boundary
+        # for entries and must remain safe if future callers reach it directly.
         if intent.state != TradeIntentState.APPROVED.value:
             raise ValueError(
                 f"Entry execution requires an APPROVED trade intent; got {intent.state} for intent {intent.id}."
             )
+        late_block = StrategyService._entry_execution_policy_block(session=trade_service.session, engine=engine)
+        if late_block is not None:
+            code, reason, details = late_block
+            trade_service.transition_execution(
+                execution,
+                status=ExecutionStatus.FAILED,
+                trade_intent_id=intent.id,
+                client_request_id=execution.client_request_id,
+                reason=reason,
+                error_message=reason,
+                requires_manual_review=False,
+                details={"execution_policy_block": details},
+            )
+            trade_service.transition_trade_intent(
+                intent,
+                state=TradeIntentState.FAILED,
+                decision_reason_code=code,
+                decision_reason=reason,
+                details={
+                    **StrategyService._allocation_outcome_update(
+                        stage="execution_policy_blocked",
+                        final_status=TradeIntentState.FAILED.value,
+                        hard_risk_passed=True,
+                        execution_blocked=True,
+                    ),
+                    "execution_policy_block": details,
+                },
+            )
+            raise ValueError(reason)
         conflicting_active = trade_service.find_active_trade_intent_for_instrument_excluding(
             signal.instrument,
             exclude_intent_id=intent.id,

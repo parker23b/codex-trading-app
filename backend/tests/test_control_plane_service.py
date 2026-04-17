@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlmodel import select
 
@@ -8,10 +8,20 @@ from app.core.runtime import runtime_manager
 from app.models.runtime import StrategyRuntimeState
 from app.models.strategy_deployment import StrategyDeployment
 from app.models.strategy_governance import StrategyFamilyGovernance
+from app.models.trade import Position, TradeIntent, TradeIntentState
 from app.services.control_plane_service import ControlPlaneService
 from app.services.health_service import get_health_service
 from app.services.operator_control_service import OperatorControlService
 from app.services.market_status_service import MarketStatus
+from app.services.operational_state_service import (
+    BrokerConnectivityState,
+    ExecutionEligibilityState,
+    FeedHealthState,
+    FeedSourceState,
+    OpenRiskManagementState,
+    OperationalStateSnapshot,
+)
+from app.services.operational_telemetry_service import OperationalTelemetryService
 from app.services.regime_suitability_service import DeploymentCandidate
 from app.services.strategy_deployment_manager_service import StrategyDeploymentManagerService
 from app.services.strategy_governance_service import StrategyGovernanceService
@@ -40,6 +50,90 @@ def _force_deployable_candidate(manager: StrategyDeploymentManagerService, *, in
     )
 
 
+def _enable_live_exit_context(monkeypatch, at: datetime) -> None:
+    now = datetime.now(UTC)
+    health_service = get_health_service()
+    health_service.update_broker_state(connected=True, latency_ms=2.0)
+    health_service.set_stream_connected(True)
+    health_service.record_price_update(now, stream_connected=True)
+    stub = type(
+        "StreamService",
+        (),
+        {
+            "get_health": lambda self: type(
+                "Health",
+                (),
+                {
+                    "enabled": True,
+                    "connected": True,
+                    "subscribed_instruments": (),
+                    "desired_instruments": (),
+                    "last_tick_at": now,
+                },
+            )()
+        },
+    )()
+    monkeypatch.setattr("app.services.operational_state_service.get_operational_streaming_service", lambda: stub)
+
+
+def _attach_open_position(
+    session,
+    *,
+    strategy_name: str,
+    instrument: str,
+    at: datetime,
+    broker_reference: str = "pos-open-1",
+) -> Position:
+    intent = TradeIntent(
+        strategy_name=strategy_name,
+        instrument=instrument,
+        direction="BUY",
+        state=TradeIntentState.POSITION_OPENED.value,
+        signal_time=at,
+        proposed_size=0.2,
+        allocated_size=0.2,
+        proposed_risk_percent=0.1,
+        allocated_risk_percent=0.1,
+        broker_reference=broker_reference,
+    )
+    session.add(intent)
+    session.commit()
+    session.refresh(intent)
+    position = Position(
+        trade_intent_id=intent.id,
+        strategy_name=strategy_name,
+        instrument=instrument,
+        broker_reference=broker_reference,
+        direction="BUY",
+        size=0.2,
+        open_price=100.0,
+        current_price=101.0,
+        unrealized_pnl=0.2,
+        open_time=at,
+        risk_percent=0.1,
+        account_type="DEMO",
+        is_open=True,
+        broker_sync_status="CONFIRMED",
+    )
+    session.add(position)
+    session.commit()
+    session.refresh(position)
+    engine = runtime_manager.get_engine(strategy_name, instrument)
+    if engine is not None:
+        engine.current_position = position
+    runtime = session.exec(
+        select(StrategyRuntimeState).where(
+            StrategyRuntimeState.strategy_name == strategy_name,
+            StrategyRuntimeState.instrument == instrument,
+        )
+    ).first()
+    if runtime is not None:
+        runtime.current_position_broker_reference = broker_reference
+        session.add(runtime)
+        session.commit()
+    return position
+
+
 def test_control_plane_seeds_governance_defaults(session):
     service = ControlPlaneService(session)
 
@@ -65,6 +159,40 @@ def test_control_plane_reports_effective_autonomy_override(session):
     assert summary["effective_autonomous_control_enabled"] is False
     assert summary["autonomy_override_active"] is True
     assert summary["autonomy_override_reason"] == "operator paused governed autonomy"
+
+
+def test_control_plane_summary_exposes_operational_truth_fields(session, monkeypatch):
+    now = datetime.now(UTC)
+    health_service = get_health_service()
+    health_service.update_broker_state(connected=True, latency_ms=2.0)
+    health_service.record_price_update(now)
+    stub = type(
+        "StreamService",
+        (),
+        {
+            "get_health": lambda self: type(
+                "Health",
+                (),
+                {
+                    "enabled": True,
+                    "connected": False,
+                    "subscribed_instruments": (),
+                    "desired_instruments": (),
+                    "last_tick_at": now - timedelta(seconds=30),
+                },
+            )()
+        },
+    )()
+    monkeypatch.setattr("app.services.operational_state_service.get_operational_streaming_service", lambda: stub)
+
+    summary = ControlPlaneService(session).get_summary()
+
+    assert summary["feed_source_state"] == "POLLING_FALLBACK"
+    assert summary["feed_health_state"] == "DEGRADED"
+    assert summary["broker_connectivity_state"] == "CONNECTED"
+    assert summary["entry_eligible"] is False
+    assert summary["exit_eligible"] is True
+    assert summary["entry_block_reason"] == "polling_fallback_active"
 
 
 def test_governance_service_upgrades_legacy_default_false_to_allowed(session, fixed_now):
@@ -188,7 +316,9 @@ def test_reconcile_emergency_stop_blocks_and_stops_auto_runtime(session, broker,
 
     assert result.emergency_stopped >= 1
     assert deployment.state == "EMERGENCY_STOPPED"
+    assert deployment.open_risk_management_state == "NO_OPEN_RISK"
     assert runtime.status == "STOPPED"
+    assert runtime.runtime_mode == "STOPPED"
     assert runtime_manager.get_engine("mean_reversion", "IX.D.FTSE.DAILY.IP") is None
 
 
@@ -279,3 +409,107 @@ def test_control_plane_reports_runtime_deployment_mismatch(session, broker, fixe
         check["code"] == "profile_match" and check["passed"] is False
         for check in family["alignment"]["checks"]
     )
+
+
+def test_reconcile_keeps_open_positions_in_exits_only_when_family_leaves_full_auto(session, broker, fixed_now, monkeypatch):
+    _enable_live_exit_context(monkeypatch, fixed_now)
+    governance_service = StrategyGovernanceService(session)
+    governance_service.ensure_defaults()
+    governance_service.upsert_strategy(
+        strategy_name="mean_reversion",
+        autonomous_operation_allowed=True,
+        approved_asset_classes=["INDICES"],
+        approved_instruments=["IX.D.FTSE.DAILY.IP"],
+        approved_profile_names=["default"],
+    )
+    manager = StrategyDeploymentManagerService(session)
+    manager.settings.autonomous_control_enabled = True
+    _force_deployable_candidate(manager, instrument="IX.D.FTSE.DAILY.IP")
+    manager.reconcile(now=fixed_now)
+    _attach_open_position(
+        session,
+        strategy_name="mean_reversion",
+        instrument="IX.D.FTSE.DAILY.IP",
+        at=fixed_now,
+    )
+
+    governance_service.upsert_strategy(strategy_name="mean_reversion", emergency_stop=True)
+    manager.reconcile(now=fixed_now + timedelta(minutes=1))
+
+    deployment = session.exec(
+        select(StrategyDeployment).where(StrategyDeployment.strategy_name == "mean_reversion")
+    ).one()
+    runtime = session.exec(
+        select(StrategyRuntimeState).where(StrategyRuntimeState.strategy_name == "mean_reversion")
+    ).one()
+    family = ControlPlaneService(session).get_family_detail("mean_reversion")
+    telemetry = OperationalTelemetryService(session).get_summary()
+
+    assert deployment.state == "EMERGENCY_STOPPED"
+    assert deployment.open_risk_management_state == "EXITS_ONLY"
+    assert runtime.status == "RUNNING"
+    assert runtime.runtime_mode == "EXITS_ONLY"
+    assert runtime_manager.get_engine("mean_reversion", "IX.D.FTSE.DAILY.IP") is not None
+    assert runtime_manager.get_engine("mean_reversion", "IX.D.FTSE.DAILY.IP").runtime_mode == "EXITS_ONLY"
+    assert family["runtime"]["runtime_mode"] == "EXITS_ONLY"
+    assert family["deployment"]["open_risk_management_state"] == "EXITS_ONLY"
+    assert telemetry["open_risk_management_state"] == "EXITS_ONLY"
+
+
+def test_reconcile_flags_unmanaged_open_risk_when_exits_not_eligible(session, broker, fixed_now, monkeypatch):
+    _enable_live_exit_context(monkeypatch, fixed_now)
+    governance_service = StrategyGovernanceService(session)
+    governance_service.ensure_defaults()
+    governance_service.upsert_strategy(
+        strategy_name="mean_reversion",
+        autonomous_operation_allowed=True,
+        approved_asset_classes=["INDICES"],
+        approved_instruments=["IX.D.FTSE.DAILY.IP"],
+        approved_profile_names=["default"],
+    )
+    manager = StrategyDeploymentManagerService(session)
+    manager.settings.autonomous_control_enabled = True
+    _force_deployable_candidate(manager, instrument="IX.D.FTSE.DAILY.IP")
+    manager.reconcile(now=fixed_now)
+    _attach_open_position(
+        session,
+        strategy_name="mean_reversion",
+        instrument="IX.D.FTSE.DAILY.IP",
+        at=fixed_now,
+    )
+    manager.operational_state_service.get_summary = lambda: OperationalStateSnapshot(
+        feed_source_state=FeedSourceState.DISCONNECTED,
+        feed_health_state=FeedHealthState.FAILED,
+        broker_connectivity_state=BrokerConnectivityState.DISCONNECTED,
+        entry_eligible=False,
+        exit_eligible=False,
+        entry_eligibility_state=ExecutionEligibilityState.BLOCKED,
+        exit_eligibility_state=ExecutionEligibilityState.BLOCKED,
+        entry_block_reason="broker_disconnected",
+        exit_block_reason="broker_disconnected",
+        open_risk_management_state=OpenRiskManagementState.UNMANAGED_OPEN_RISK,
+        open_risk_management_reason="broker_disconnected",
+    )
+
+    governance_service.upsert_strategy(strategy_name="mean_reversion", emergency_stop=True)
+    manager.reconcile(now=fixed_now + timedelta(minutes=1))
+
+    deployment = session.exec(
+        select(StrategyDeployment).where(StrategyDeployment.strategy_name == "mean_reversion")
+    ).one()
+    runtime = session.exec(
+        select(StrategyRuntimeState).where(StrategyRuntimeState.strategy_name == "mean_reversion")
+    ).one()
+    summary = ControlPlaneService(session).get_summary()
+    family = ControlPlaneService(session).get_family_detail("mean_reversion")
+    telemetry = OperationalTelemetryService(session).get_summary()
+
+    assert deployment.state == "EMERGENCY_STOPPED"
+    assert deployment.open_risk_management_state == "UNMANAGED_OPEN_RISK"
+    assert runtime.status == "STOPPED"
+    assert runtime.runtime_mode == "STOPPED"
+    assert runtime_manager.get_engine("mean_reversion", "IX.D.FTSE.DAILY.IP") is None
+    assert summary["open_risk_management_state"] == "UNMANAGED_OPEN_RISK"
+    assert family["deployment"]["open_risk_management_state"] == "UNMANAGED_OPEN_RISK"
+    assert telemetry["open_risk_management_state"] == "UNMANAGED_OPEN_RISK"
+    assert "open position" in (deployment.open_risk_management_reason or "").lower()

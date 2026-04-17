@@ -6,6 +6,7 @@ from sqlmodel import select
 
 from app.models.promotion_request import PromotionRequest
 from app.models.watchlist import WatchlistEntry, WatchlistTier
+from app.services.health_service import get_health_service
 from app.services.market_data_service import MarketDataService
 from app.services.watchlist_service import StreamingPlan, Tier2RefreshPlan
 
@@ -128,6 +129,60 @@ def test_polling_fallback_events_are_debounced(monkeypatch):
         "health.polling_fallback_stopped",
         "health.stream_recovered",
     ]
+
+
+def test_successful_polling_fallback_does_not_mark_stream_as_connected(monkeypatch):
+    service = MarketDataService(poll_prices=False)
+    instrument = "CS.D.EURUSD.CFD.IP"
+    health_service = get_health_service()
+    health_service.set_stream_connected(False)
+    stream_service = _StubStreamingService(
+        connected=False,
+        subscribed_instruments=(instrument,),
+        global_last_tick_at=None,
+        instrument_ticks={},
+    )
+    watchlist = type(
+        "Watchlist",
+        (),
+        {
+            "get_streaming_plan": lambda self: StreamingPlan(
+                instruments=(instrument,),
+                pinned_instruments=(),
+                capped_instruments=(),
+                asset_class_usage={},
+            )
+        },
+    )()
+    fake_engine = type("Engine", (), {"broker": type("Broker", (), {"get_market_details": lambda self, _: type(
+        "Details",
+        (),
+        {
+            "bid": 1.1,
+            "offer": 1.2,
+            "high": 1.3,
+            "low": 1.0,
+            "market_status": "TRADEABLE",
+            "tradable": True,
+        },
+    )()})()})()
+
+    monkeypatch.setattr("app.services.market_data_service.get_watchlist_service", lambda: watchlist)
+    monkeypatch.setattr("app.services.market_data_service.get_ig_streaming_service", lambda: stream_service)
+    monkeypatch.setattr("app.services.market_data_service.runtime_manager.get_engines_for_instrument", lambda _: [("test", fake_engine)])
+    monkeypatch.setattr("app.services.market_data_service.BrokerService.reconcile_positions", lambda *args, **kwargs: None)
+    processed: list[str] = []
+    monkeypatch.setattr(
+        "app.services.market_data_service.StrategyService.process_price_update",
+        lambda self, *args, **kwargs: processed.append(args[0]),
+    )
+
+    import asyncio
+
+    asyncio.run(service._process_tier1_fallback_once())
+
+    assert processed == [instrument]
+    assert get_health_service().get_system_health().stream_connected is False
 
 
 def test_tier2_refresh_creates_promotion_request_for_high_scoring_candidate(session, monkeypatch):

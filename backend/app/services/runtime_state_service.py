@@ -43,6 +43,7 @@ class RuntimeStateService:
         recovery_state: str,
         recovery_reason: str | None = None,
         control_mode: str | None = None,
+        runtime_mode: str | None = None,
         deployment_id: int | None = None,
         active_profile_name: str | None = None,
         parameters: dict[str, Any] | None = None,
@@ -70,6 +71,7 @@ class RuntimeStateService:
                 parameters=parameters or {parameter.key: parameter.value for parameter in metadata.parameters},
                 started_at=started_at or now,
                 control_mode=control_mode or "MANUAL",
+                runtime_mode=runtime_mode or "NORMAL",
                 deployment_id=deployment_id,
                 active_profile_name=active_profile_name,
             )
@@ -83,6 +85,7 @@ class RuntimeStateService:
         runtime.recovery_state = recovery_state
         runtime.recovery_reason = recovery_reason
         runtime.control_mode = control_mode or runtime.control_mode or "MANUAL"
+        runtime.runtime_mode = runtime_mode or runtime.runtime_mode or "NORMAL"
         runtime.deployment_id = deployment_id if deployment_id is not None else runtime.deployment_id
         runtime.active_profile_name = active_profile_name or engine.active_profile_name or runtime.active_profile_name
         runtime.auto_resume = auto_resume
@@ -115,6 +118,7 @@ class RuntimeStateService:
         runtime.status = "STOPPED"
         runtime.recovery_state = "PAUSED"
         runtime.recovery_reason = None
+        runtime.runtime_mode = "STOPPED"
         runtime.stopped_at = stopped_at or now
         runtime.last_heartbeat_at = runtime.stopped_at
         runtime.updated_at = now
@@ -131,6 +135,7 @@ class RuntimeStateService:
         recovery_state: str,
         recovery_reason: str | None,
         status: str | None = None,
+        runtime_mode: str | None = None,
         current_position_broker_reference: str | None = None,
     ) -> StrategyRuntimeState | None:
         runtime = self.get_runtime(strategy_name, instrument)
@@ -140,6 +145,8 @@ class RuntimeStateService:
         runtime.recovery_reason = recovery_reason
         if status is not None:
             runtime.status = status
+        if runtime_mode is not None:
+            runtime.runtime_mode = runtime_mode
         runtime.current_position_broker_reference = current_position_broker_reference
         runtime.updated_at = datetime.now(UTC)
         self.session.add(runtime)

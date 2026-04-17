@@ -74,6 +74,15 @@ class OperationalTelemetryResponse(BaseModel):
     subscribed_instrument_count: int
     desired_instrument_count: int
     broker_connected: bool
+    feed_source_state: str
+    feed_health_state: str
+    broker_connectivity_state: str
+    entry_eligible: bool
+    exit_eligible: bool
+    entry_block_reason: str | None
+    exit_block_reason: str | None
+    open_risk_management_state: str
+    open_risk_management_reason: str | None
     broker_latency_ms: float | None
     runtime_count: int
     active_runtime_count: int

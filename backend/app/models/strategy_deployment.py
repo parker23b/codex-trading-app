@@ -46,6 +46,8 @@ class StrategyDeployment(SQLModel, table=True):
     last_state_changed_at: datetime = Field(default_factory=utc_now, nullable=False)
     last_deployed_at: datetime | None = None
     operator_intervention_state: str | None = None
+    open_risk_management_state: str = Field(default="NO_OPEN_RISK", index=True)
+    open_risk_management_reason: str | None = None
     deployment_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utc_now, nullable=False)
     updated_at: datetime = Field(default_factory=utc_now, nullable=False)

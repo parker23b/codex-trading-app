@@ -74,7 +74,6 @@ class MarketDataService:
         active_instruments = list(get_watchlist_service().get_streaming_plan().instruments)
         if not active_instruments:
             return
-        self.health_service.set_stream_connected(True)
 
         with Session(engine) as session:
             BrokerService().reconcile_positions(session)
@@ -114,7 +113,7 @@ class MarketDataService:
                     tradable=market_details.tradable,
                     received_at=datetime.now(UTC),
                 )
-                self.health_service.record_price_update(stream_connected=True)
+                self.health_service.record_price_update()
 
     async def _refresh_tier2_once(self) -> None:
         if not self.settings.tier2_refresh_enabled:

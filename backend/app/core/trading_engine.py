@@ -30,6 +30,7 @@ class TradingEngine:
     trade_size: float = 1.0
     active_profile_name: str | None = None
     strategy_parameters: dict[str, Any] = field(default_factory=dict)
+    runtime_mode: str = "NORMAL"
     active: bool = False
     current_position: Position | None = field(default=None, init=False)
     last_heartbeat_at: datetime | None = field(default=None, init=False)
@@ -63,7 +64,7 @@ class TradingEngine:
         )
         self.strategy.on_price_update(update)
 
-        if self.current_position is None and self.strategy.should_enter_trade():
+        if self.runtime_mode != "EXITS_ONLY" and self.current_position is None and self.strategy.should_enter_trade():
             direction = self.strategy.entry_direction()
             logger.info(
                 "Strategy entry candidate emitted",

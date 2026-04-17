@@ -198,6 +198,8 @@ export type ControlPlaneFamily = {
   };
   deployment: {
     state: string;
+    open_risk_management_state?: string | null;
+    open_risk_management_reason?: string | null;
     selected_profile?: string | null;
     selected_profile_parameters: Record<string, number>;
     selected_instrument?: string | null;
@@ -220,6 +222,7 @@ export type ControlPlaneFamily = {
     active_profile_name?: string | null;
     active_parameters: Record<string, number>;
     control_mode?: string | null;
+    runtime_mode?: "NORMAL" | "EXITS_ONLY" | "STOPPED" | string | null;
     recovery_state?: string | null;
     updated_at?: string | null;
     persisted_runtimes: Array<{
@@ -227,6 +230,7 @@ export type ControlPlaneFamily = {
       status: string;
       instrument: string;
       control_mode?: string | null;
+      runtime_mode?: "NORMAL" | "EXITS_ONLY" | "STOPPED" | string | null;
       active_profile_name?: string | null;
       parameters: Record<string, number>;
       updated_at?: string | null;
@@ -262,6 +266,15 @@ export type ControlPlaneSummary = {
   autonomy_override_value?: boolean | null;
   autonomy_override_reason?: string | null;
   autonomy_updated_at?: string | null;
+  feed_source_state?: "LIVE" | "POLLING_FALLBACK" | "STALE" | "DISCONNECTED";
+  feed_health_state?: "HEALTHY" | "DEGRADED" | "FAILED";
+  broker_connectivity_state?: "CONNECTED" | "DISCONNECTED";
+  entry_eligible?: boolean;
+  exit_eligible?: boolean;
+  entry_block_reason?: string | null;
+  exit_block_reason?: string | null;
+  open_risk_management_state?: string;
+  open_risk_management_reason?: string | null;
   counts: Record<string, number>;
   misaligned_count: number;
   families: ControlPlaneFamily[];
@@ -344,6 +357,15 @@ export type OperationalTelemetry = {
   subscribed_instrument_count: number;
   desired_instrument_count: number;
   broker_connected: boolean;
+  feed_source_state?: "LIVE" | "POLLING_FALLBACK" | "STALE" | "DISCONNECTED";
+  feed_health_state?: "HEALTHY" | "DEGRADED" | "FAILED";
+  broker_connectivity_state?: "CONNECTED" | "DISCONNECTED";
+  entry_eligible?: boolean;
+  exit_eligible?: boolean;
+  entry_block_reason?: string | null;
+  exit_block_reason?: string | null;
+  open_risk_management_state?: string;
+  open_risk_management_reason?: string | null;
   broker_latency_ms?: number | null;
   runtime_count: number;
   active_runtime_count: number;
@@ -772,4 +794,244 @@ export type OperationalQuestionReviewResponse = {
     prompt_facts: Record<string, unknown>;
     raw_response?: string | null;
   } | null;
+};
+
+export type RiskTruthConfidence =
+  | "EXACT_FILL_DERIVED"
+  | "BROKER_CONFIRMED_AVERAGE_FILL_ESTIMATED"
+  | "PARTIAL_FILL_PROVISIONAL"
+  | "SUBMITTED_EXECUTABLE_ESTIMATE"
+  | "ALLOCATION_INTENT_ONLY"
+  | "INCOMPLETE_DEGRADED";
+
+export type AllocationCycle = {
+  cycle_id: string;
+  received_at: string;
+  completed_at: string;
+  candidate_count: number;
+  approved_count: number;
+  rejected_count: number;
+  total_requested_risk_percent: number;
+  total_allocated_risk_percent: number;
+  remaining_portfolio_risk_percent: number;
+  resized_candidate_count: number;
+  degraded_candidate_count: number;
+  blocked_unsupported_sizing_count: number;
+  blocked_approximate_live_count: number;
+  blocked_under_minimum_size_count: number;
+  blocked_budget_count: number;
+  blocked_conflict_count: number;
+  binding_budget_counts: Record<string, number>;
+  rejection_reason_counts: Record<string, number>;
+  details: Record<string, unknown>;
+  intents?: AllocationIntent[];
+};
+
+export type AllocationIntentExecution = {
+  id: number;
+  phase: string;
+  status: string;
+  client_request_id?: string | null;
+  broker_reference?: string | null;
+  submitted_at?: string | null;
+  acknowledged_at?: string | null;
+  completed_at?: string | null;
+  requested_size?: number | null;
+  filled_size?: number | null;
+  requested_price?: number | null;
+  average_fill_price?: number | null;
+  intended_risk_amount?: number | null;
+  submitted_risk_amount?: number | null;
+  fill_derived_risk_amount?: number | null;
+  risk_truth_confidence?: RiskTruthConfidence | null;
+  reason?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  requires_manual_review: boolean;
+  details: Record<string, unknown>;
+};
+
+export type AllocationIntentPosition = {
+  id: number;
+  broker_reference?: string | null;
+  instrument: string;
+  direction: "BUY" | "SELL";
+  size: number;
+  open_price: number;
+  current_price?: number | null;
+  unrealized_pnl?: number | null;
+  risk_percent?: number | null;
+  entry_risk_amount?: number | null;
+  risk_truth_confidence?: RiskTruthConfidence | null;
+  open_time: string;
+  close_time?: string | null;
+  is_open: boolean;
+};
+
+export type AllocationIntentTrade = {
+  id: number;
+  broker_reference?: string | null;
+  close_broker_reference?: string | null;
+  instrument: string;
+  direction: "BUY" | "SELL";
+  size: number;
+  open_price: number;
+  close_price: number;
+  pnl: number;
+  entry_risk_amount?: number | null;
+  risk_truth_confidence?: RiskTruthConfidence | null;
+  r_multiple?: number | null;
+  open_time: string;
+  close_time: string;
+  reason?: string | null;
+  outcome?: string | null;
+};
+
+export type AllocationIntent = {
+  id: number;
+  allocation_cycle_id?: string | null;
+  strategy_name: string;
+  family_name?: string | null;
+  instrument: string;
+  direction: "BUY" | "SELL";
+  state: string;
+  signal_time: string;
+  decision_reason_code?: string | null;
+  decision_reason?: string | null;
+  close_reason_code?: string | null;
+  close_reason?: string | null;
+  proposed_size?: number | null;
+  allocated_size?: number | null;
+  proposed_risk_percent?: number | null;
+  allocated_risk_percent?: number | null;
+  confidence?: number | null;
+  estimated_risk_amount?: number | null;
+  submitted_risk_amount?: number | null;
+  fill_derived_risk_amount?: number | null;
+  risk_truth_confidence?: RiskTruthConfidence | null;
+  risk_currency?: string | null;
+  allocation: Record<string, unknown>;
+  allocation_outcome: Record<string, unknown>;
+  risk_tracking: Record<string, unknown>;
+  risk_reconciliation: Record<string, unknown>;
+  latest_execution?: AllocationIntentExecution | null;
+  executions: AllocationIntentExecution[];
+  position?: AllocationIntentPosition | null;
+  trade?: AllocationIntentTrade | null;
+  details: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AllocationDriftIntentSummary = {
+  trade_intent_id: number;
+  strategy_name: string;
+  family_name?: string | null;
+  instrument: string;
+  state: string;
+  max_percent_drift: number;
+  drift_metrics: Record<string, unknown>;
+  updated_at: string;
+};
+
+export type AllocationDriftBucket = {
+  name: string;
+  count: number;
+  average_percent_drift: number;
+  max_percent_drift: number;
+};
+
+export type AllocationDriftSummary = {
+  window_minutes: number;
+  drift_warning_percent: number;
+  drift_critical_percent: number;
+  material_drift_count: number;
+  worst_intents: AllocationDriftIntentSummary[];
+  by_strategy: AllocationDriftBucket[];
+  by_family: AllocationDriftBucket[];
+  by_instrument: AllocationDriftBucket[];
+};
+
+export type AllocationAlertState = "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
+export type AllocationAlertSeverity = "info" | "warning" | "error";
+
+export type AllocationAlert = {
+  id: number;
+  alert_key: string;
+  alert_type: string;
+  severity: AllocationAlertSeverity;
+  state: AllocationAlertState;
+  escalation_level: number;
+  title: string;
+  message: string;
+  count: number;
+  recurrence_count: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  acknowledged_at?: string | null;
+  resolved_at?: string | null;
+  related_intent_ids: number[];
+  related_cycle_ids: string[];
+  related_execution_ids: number[];
+  details: Record<string, unknown>;
+};
+
+export type ExposureBucket = {
+  name: string;
+  bucket_type: string;
+  reserved_risk_percent: number;
+  live_risk_percent: number;
+  reserved_risk_amount: number;
+  live_risk_amount: number;
+  budget_limit_percent: number;
+  total_risk_percent: number;
+  utilization_percent?: number | null;
+  remaining_risk_percent: number;
+  risk_basis: string[];
+};
+
+export type DirectionalCurrencyExposureBucket = {
+  currency: string;
+  reserved_long_risk_percent: number;
+  reserved_short_risk_percent: number;
+  live_long_risk_percent: number;
+  live_short_risk_percent: number;
+  gross_risk_percent: number;
+  net_risk_percent: number;
+  gross_utilization_percent: number;
+  net_bias: "LONG" | "SHORT" | "FLAT";
+  risk_basis: string[];
+};
+
+export type ExposureHotspot = {
+  bucket_type: string;
+  name: string;
+  total_risk_percent: number;
+  budget_limit_percent: number;
+  utilization_percent: number;
+  risk_basis: string[];
+  bucket_mode: string;
+  net_bias?: "LONG" | "SHORT" | "FLAT";
+  net_risk_percent?: number;
+};
+
+export type AllocationExposureSummary = {
+  totals: {
+    reserved_risk_percent: number;
+    live_risk_percent: number;
+    provisional_live_risk_percent: number;
+    reserved_risk_amount: number;
+    live_risk_amount: number;
+    provisional_live_risk_amount: number;
+    reserved_intent_count: number;
+    open_position_count: number;
+    remaining_portfolio_risk_percent: number;
+  };
+  by_strategy: ExposureBucket[];
+  by_family: ExposureBucket[];
+  by_instrument: ExposureBucket[];
+  by_currency: ExposureBucket[];
+  currency_directional: DirectionalCurrencyExposureBucket[];
+  hotspots: ExposureHotspot[];
+  notes: Record<string, string>;
 };

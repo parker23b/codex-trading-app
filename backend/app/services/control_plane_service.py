@@ -9,6 +9,7 @@ from app.models.domain_event import DomainEvent
 from app.models.runtime import StrategyRuntimeState
 from app.models.strategy_deployment import StrategyDeployment
 from app.services.operator_control_service import OperatorControlService
+from app.services.operational_state_service import OperationalStateService
 from app.services.strategy_deployment_manager_service import StrategyDeploymentManagerService
 from app.services.strategy_governance_service import StrategyGovernanceService
 from app.strategies.registry import strategy_registry
@@ -19,6 +20,7 @@ class ControlPlaneService:
         self.session = session
         self.settings = get_settings()
         self.operator_control_service = OperatorControlService(session)
+        self.operational_state_service = OperationalStateService(session)
         self.governance_service = StrategyGovernanceService(session)
         self.deployment_manager = StrategyDeploymentManagerService(session)
 
@@ -27,6 +29,7 @@ class ControlPlaneService:
         counts = Counter(str(family["deployment"]["state"]) for family in families if family.get("deployment"))
         misaligned_count = len([family for family in families if family["alignment"]["is_aligned"] is False])
         operator_control = self.operator_control_service.get_summary()
+        operational_state = self.operational_state_service.get_summary().model_dump(mode="json")
         return {
             "autonomous_control_enabled": operator_control["effective_autonomous_control_enabled"],
             "configured_autonomous_control_enabled": operator_control["configured_autonomous_control_enabled"],
@@ -38,6 +41,7 @@ class ControlPlaneService:
             "counts": dict(counts),
             "misaligned_count": misaligned_count,
             "families": families,
+            **operational_state,
         }
 
     def get_family_detail(self, strategy_name: str) -> dict[str, object]:
@@ -110,7 +114,9 @@ class ControlPlaneService:
             "control_plane.reconciliation_cycle_completed",
             "operator.governance_updated",
             "strategy.runtime_started",
+            "strategy.runtime_mode_changed",
             "strategy.runtime_stopped",
+            "risk.unmanaged_open_risk",
         ]
         statement = (
             select(DomainEvent)
@@ -153,6 +159,8 @@ class ControlPlaneService:
             return None
         return {
             "state": deployment.state,
+            "open_risk_management_state": deployment.open_risk_management_state,
+            "open_risk_management_reason": deployment.open_risk_management_reason,
             "selected_profile": deployment.selected_profile,
             "selected_profile_parameters": deployment.selected_profile_parameters,
             "selected_instrument": deployment.selected_instrument,
@@ -179,6 +187,7 @@ class ControlPlaneService:
                 "active_profile_name": None,
                 "active_parameters": {},
                 "control_mode": None,
+                "runtime_mode": "STOPPED",
                 "recovery_state": None,
                 "updated_at": None,
                 "persisted_runtimes": [
@@ -187,6 +196,7 @@ class ControlPlaneService:
                         "status": runtime.status,
                         "instrument": runtime.instrument,
                         "control_mode": runtime.control_mode,
+                        "runtime_mode": runtime.runtime_mode,
                         "active_profile_name": runtime.active_profile_name,
                         "parameters": runtime.parameters,
                         "updated_at": runtime.updated_at,
@@ -201,6 +211,7 @@ class ControlPlaneService:
             "active_profile_name": active_runtime.active_profile_name,
             "active_parameters": active_runtime.parameters,
             "control_mode": active_runtime.control_mode,
+            "runtime_mode": active_runtime.runtime_mode,
             "recovery_state": active_runtime.recovery_state,
             "updated_at": active_runtime.updated_at,
             "persisted_runtimes": [
@@ -209,6 +220,7 @@ class ControlPlaneService:
                     "status": runtime.status,
                     "instrument": runtime.instrument,
                     "control_mode": runtime.control_mode,
+                    "runtime_mode": runtime.runtime_mode,
                     "active_profile_name": runtime.active_profile_name,
                     "parameters": runtime.parameters,
                     "updated_at": runtime.updated_at,
@@ -276,6 +288,44 @@ class ControlPlaneService:
                     else "Runtime diverges from selected deployment profile or instrument."
                 ),
                 "checks": checks,
+            }
+        if deployment.open_risk_management_state == "EXITS_ONLY":
+            if active_runtime is None:
+                return {
+                    "is_aligned": False,
+                    "status": "MISMATCH",
+                    "reason": "Open positions require EXITS_ONLY management, but no runtime is active.",
+                    "checks": [{"code": "exit_only_runtime_present", "passed": False}],
+                }
+            checks = [
+                {
+                    "code": "runtime_mode_exit_only",
+                    "passed": active_runtime.runtime_mode == "EXITS_ONLY",
+                    "expected": "EXITS_ONLY",
+                    "actual": active_runtime.runtime_mode,
+                }
+            ]
+            passed = all(bool(check["passed"]) for check in checks)
+            return {
+                "is_aligned": passed,
+                "status": "ALIGNED" if passed else "MISMATCH",
+                "reason": (
+                    "Runtime retained in EXITS_ONLY mode to manage existing open risk."
+                    if passed
+                    else "Open-risk management expects EXITS_ONLY runtime mode."
+                ),
+                "checks": checks,
+            }
+        if deployment.open_risk_management_state == "UNMANAGED_OPEN_RISK":
+            return {
+                "is_aligned": active_runtime is None,
+                "status": "ALIGNED" if active_runtime is None else "MISMATCH",
+                "reason": (
+                    "Open risk is explicitly unmanaged and requires operator intervention."
+                    if active_runtime is None
+                    else "Runtime is still active while deployment is flagged as unmanaged open risk."
+                ),
+                "checks": [],
             }
         if active_runtime is not None and active_runtime.control_mode == "AUTO":
             return {

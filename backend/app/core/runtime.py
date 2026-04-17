@@ -56,11 +56,33 @@ class StrategyRuntimeManager:
         runtime_id: str | None = None,
         strategy_snapshot: dict[str, object] | None = None,
         current_position: Position | None = None,
+        runtime_mode: str = "NORMAL",
         activate: bool = True,
+        startup_source: str = "direct",
     ) -> TradingEngine:
+        """
+        Start an in-memory runtime engine.
+
+        This is an internal primitive. Production callers should normally go
+        through `StrategyService.start_strategy(...)` or
+        `RuntimeRecoveryService.recover()` so runtime mode, deployment/open-risk
+        context, and persisted runtime state are resolved before engine startup.
+        """
         key = self.make_key(strategy_name, instrument)
         if key in self.engines:
             raise ValueError(f"Strategy '{strategy_name}' is already running for instrument '{instrument}'.")
+        if startup_source == "direct":
+            logger.warning(
+                "Runtime started directly without service-layer startup safeguards",
+                extra={
+                    "strategy": strategy_name,
+                    "instrument": instrument,
+                    "runtime_mode": runtime_mode,
+                    "event_category": "runtime",
+                    "event_type": "runtime.direct_start",
+                    "event_title": "Direct runtime start bypassed service-layer safety checks",
+                },
+            )
 
         metadata = strategy_registry.get_metadata(strategy_name)
         resolved_profile = self.resolve_profile(strategy_name, profile_name=profile_name, strategy_parameters=strategy_parameters)
@@ -74,6 +96,7 @@ class StrategyRuntimeManager:
             runtime_id=runtime_id or str(uuid4()),
             active_profile_name=resolved_profile.profile_name,
             strategy_parameters=dict(resolved_profile.parameter_values),
+            runtime_mode=runtime_mode,
         )
         engine.trade_size = metadata.position_size
         engine.current_position = clone_position(current_position)
@@ -85,6 +108,7 @@ class StrategyRuntimeManager:
             extra={
                 "strategy": strategy_name,
                 "instrument": instrument,
+                "startup_source": startup_source,
                 "profile_name": resolved_profile.profile_name,
                 "strategy_parameters": resolved_profile.parameter_values,
             },

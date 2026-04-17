@@ -65,13 +65,21 @@ export function AimeeShell() {
         setLoadingError(null);
 
         const nextSignature = buildSnapshotSignature(nextSnapshot);
-        if (lastSignatureRef.current && lastSignatureRef.current !== nextSignature && !isOpen) {
+        if (
+          lastSignatureRef.current &&
+          lastSignatureRef.current !== nextSignature &&
+          !isOpen
+        ) {
           setHasAttentionPulse(true);
         }
         lastSignatureRef.current = nextSignature;
       } catch (error) {
         if (!cancelled) {
-          setLoadingError(error instanceof Error ? error.message : "Failed to load AIMEE context.");
+          setLoadingError(
+            error instanceof Error
+              ? error.message
+              : "Failed to load AIMEE context.",
+          );
         }
       } finally {
         if (!cancelled) {
@@ -122,7 +130,10 @@ export function AimeeShell() {
       return;
     }
 
-    if (container.scrollHeight > container.clientHeight + 24 && messages.length >= 2) {
+    if (
+      container.scrollHeight > container.clientHeight + 24 &&
+      messages.length >= 2
+    ) {
       setIsOverviewExpanded(false);
       setHasAutoCollapsed(true);
     }
@@ -140,8 +151,14 @@ export function AimeeShell() {
     });
   }, [messages]);
 
-  const systemSummary = useMemo(() => buildSystemSummary(snapshot, context), [context, snapshot]);
-  const whatMatters = useMemo(() => buildWhatMatters(snapshot, context), [context, snapshot]);
+  const systemSummary = useMemo(
+    () => buildSystemSummary(snapshot, context),
+    [context, snapshot],
+  );
+  const whatMatters = useMemo(
+    () => buildWhatMatters(snapshot, context),
+    [context, snapshot],
+  );
   const warningItems = useMemo(() => buildWarningItems(snapshot), [snapshot]);
   const recentChanges = useMemo(() => buildRecentChanges(snapshot), [snapshot]);
   const suggestedQuestions = SUGGESTED_QUESTIONS[context];
@@ -201,7 +218,10 @@ export function AimeeShell() {
             ? {
                 ...message,
                 status: "error",
-                error: error instanceof Error ? error.message : "AIMEE could not answer that question.",
+                error:
+                  error instanceof Error
+                    ? error.message
+                    : "AIMEE could not answer that question.",
               }
             : message,
         ),
@@ -216,7 +236,12 @@ export function AimeeShell() {
 
   return (
     <>
-      <div className={joinClasses("pointer-events-none fixed inset-0 z-40", isOpen ? "opacity-100" : "opacity-0")} aria-hidden={!isOpen}>
+      <div
+        className={joinClasses(
+          "pointer-events-none fixed inset-0 z-40",
+          isOpen ? "opacity-100" : "opacity-0",
+        )}
+        aria-hidden={!isOpen}>
         <button
           type="button"
           className={joinClasses(
@@ -225,21 +250,27 @@ export function AimeeShell() {
           )}
           onClick={() => setIsOpen(false)}
           tabIndex={isOpen ? 0 : -1}
-          aria-label="Close AIMEE panel"
+          aria-label="Close A.I.M.E.E panel"
         />
         <aside
           className={joinClasses(
             "pointer-events-auto absolute right-0 top-0 flex h-full w-full max-w-[620px] flex-col overflow-x-hidden border-l border-[color:var(--glass-stroke)] bg-[color:color-mix(in_srgb,var(--bg-shell)_96%,transparent)] shadow-[var(--shadow-raised)] backdrop-blur-[16px] transition-transform duration-200 ease-out max-[920px]:top-auto max-[920px]:h-[86vh] max-[920px]:rounded-t-[28px] max-[920px]:border-l-0 max-[920px]:border-t",
-            isOpen ? "translate-x-0 max-[920px]:translate-y-0" : "translate-x-full max-[920px]:translate-y-full",
+            isOpen
+              ? "translate-x-0 max-[920px]:translate-y-0"
+              : "translate-x-full max-[920px]:translate-y-full",
           )}
-          aria-label="AIMEE operator assistant"
+          aria-label="A.I.M.E.E operator assistant"
           onWheel={(event) => event.stopPropagation()}
-          onTouchMove={(event) => event.stopPropagation()}
-        >
-          <AimeeDrawerHeader context={context} onClose={() => setIsOpen(false)} />
+          onTouchMove={(event) => event.stopPropagation()}>
+          <AimeeDrawerHeader
+            context={context}
+            onClose={() => setIsOpen(false)}
+          />
 
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 pb-5">
-            <div ref={panelScrollRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
+            <div
+              ref={panelScrollRef}
+              className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
               <div className="flex min-h-full flex-col gap-4 pt-4">
                 <AimeeOverview
                   isExpanded={isOverviewExpanded}
@@ -268,7 +299,12 @@ export function AimeeShell() {
         </aside>
       </div>
 
-      <AimeeLauncher tone={systemSummary.tone} attentionCount={attentionCount} hasAttentionPulse={hasAttentionPulse} onOpen={() => setIsOpen(true)} />
+      <AimeeLauncher
+        tone={systemSummary.tone}
+        attentionCount={attentionCount}
+        hasAttentionPulse={hasAttentionPulse}
+        onOpen={() => setIsOpen(true)}
+      />
     </>
   );
 }

@@ -1,4 +1,9 @@
 import {
+  AllocationAlert,
+  AllocationCycle,
+  AllocationDriftSummary,
+  AllocationExposureSummary,
+  AllocationIntent,
   AimeeSnapshotResponse,
   BrokerAuthStatus,
   CoverageSummary,
@@ -77,6 +82,15 @@ export const EMPTY_CONTROL_PLANE_SUMMARY: ControlPlaneSummary = {
   autonomy_override_value: null,
   autonomy_override_reason: null,
   autonomy_updated_at: null,
+  feed_source_state: "DISCONNECTED",
+  feed_health_state: "FAILED",
+  broker_connectivity_state: "DISCONNECTED",
+  entry_eligible: false,
+  exit_eligible: false,
+  entry_block_reason: "data_disconnected",
+  exit_block_reason: "data_disconnected",
+  open_risk_management_state: "NO_OPEN_RISK",
+  open_risk_management_reason: null,
   counts: {},
   misaligned_count: 0,
   families: [],
@@ -96,6 +110,15 @@ export const EMPTY_OPERATIONAL_TELEMETRY: OperationalTelemetry = {
   subscribed_instrument_count: 0,
   desired_instrument_count: 0,
   broker_connected: false,
+  feed_source_state: "DISCONNECTED",
+  feed_health_state: "FAILED",
+  broker_connectivity_state: "DISCONNECTED",
+  entry_eligible: false,
+  exit_eligible: false,
+  entry_block_reason: "data_disconnected",
+  exit_block_reason: "data_disconnected",
+  open_risk_management_state: "NO_OPEN_RISK",
+  open_risk_management_reason: null,
   broker_latency_ms: null,
   runtime_count: 0,
   active_runtime_count: 0,
@@ -164,6 +187,38 @@ export const EMPTY_DASHBOARD_SNAPSHOT: DashboardSnapshot = {
   riskReward: null,
   brokerInfo: null,
   runningStrategies: [],
+};
+
+export const EMPTY_ALLOCATION_DRIFT_SUMMARY: AllocationDriftSummary = {
+  window_minutes: 0,
+  drift_warning_percent: 0,
+  drift_critical_percent: 0,
+  material_drift_count: 0,
+  worst_intents: [],
+  by_strategy: [],
+  by_family: [],
+  by_instrument: [],
+};
+
+export const EMPTY_ALLOCATION_EXPOSURE_SUMMARY: AllocationExposureSummary = {
+  totals: {
+    reserved_risk_percent: 0,
+    live_risk_percent: 0,
+    provisional_live_risk_percent: 0,
+    reserved_risk_amount: 0,
+    live_risk_amount: 0,
+    provisional_live_risk_amount: 0,
+    reserved_intent_count: 0,
+    open_position_count: 0,
+    remaining_portfolio_risk_percent: 0,
+  },
+  by_strategy: [],
+  by_family: [],
+  by_instrument: [],
+  by_currency: [],
+  currency_directional: [],
+  hotspots: [],
+  notes: {},
 };
 
 type BackendMode = "live";
@@ -311,6 +366,103 @@ export async function getOperationalTelemetry(): Promise<OperationalTelemetry> {
 
 export async function getSystemOperatingLimits(): Promise<SystemOperatingLimits> {
   return request<SystemOperatingLimits>("/system/limits");
+}
+
+export async function getAllocationCycles(limit = 25): Promise<AllocationCycle[]> {
+  return request<AllocationCycle[]>(`/allocation/cycles?limit=${limit}`);
+}
+
+export async function getAllocationCycle(cycleId: string): Promise<AllocationCycle> {
+  return request<AllocationCycle>(`/allocation/cycles/${cycleId}`);
+}
+
+export async function getAllocationIntents(params?: {
+  limit?: number;
+  cycleId?: string;
+  strategyName?: string;
+  instrument?: string;
+  state?: string[];
+}): Promise<AllocationIntent[]> {
+  const query = new URLSearchParams();
+  if (params?.limit) {
+    query.set("limit", String(params.limit));
+  }
+  if (params?.cycleId) {
+    query.set("cycle_id", params.cycleId);
+  }
+  if (params?.strategyName) {
+    query.set("strategy_name", params.strategyName);
+  }
+  if (params?.instrument) {
+    query.set("instrument", params.instrument);
+  }
+  params?.state?.forEach((value) => query.append("state", value));
+  const suffix = query.toString();
+  return request<AllocationIntent[]>(`/allocation/intents${suffix ? `?${suffix}` : ""}`);
+}
+
+export async function getAllocationIntent(tradeIntentId: number): Promise<AllocationIntent> {
+  return request<AllocationIntent>(`/allocation/intents/${tradeIntentId}`);
+}
+
+export async function getAllocationDriftSummary(params?: {
+  limit?: number;
+  windowMinutes?: number;
+}): Promise<AllocationDriftSummary> {
+  const query = new URLSearchParams();
+  if (params?.limit) {
+    query.set("limit", String(params.limit));
+  }
+  if (params?.windowMinutes) {
+    query.set("window_minutes", String(params.windowMinutes));
+  }
+  const suffix = query.toString();
+  return request<AllocationDriftSummary>(`/allocation/drift${suffix ? `?${suffix}` : ""}`);
+}
+
+export async function getAllocationAlerts(params?: {
+  limit?: number;
+  windowMinutes?: number;
+  includeResolved?: boolean;
+  refresh?: boolean;
+}): Promise<AllocationAlert[]> {
+  const query = new URLSearchParams();
+  if (params?.limit) {
+    query.set("limit", String(params.limit));
+  }
+  if (params?.windowMinutes) {
+    query.set("window_minutes", String(params.windowMinutes));
+  }
+  if (typeof params?.includeResolved === "boolean") {
+    query.set("include_resolved", String(params.includeResolved));
+  }
+  if (typeof params?.refresh === "boolean") {
+    query.set("refresh", String(params.refresh));
+  }
+  const suffix = query.toString();
+  return request<AllocationAlert[]>(`/allocation/alerts${suffix ? `?${suffix}` : ""}`);
+}
+
+export async function getUnresolvedCriticalAllocationAlerts(limit = 25): Promise<AllocationAlert[]> {
+  return request<AllocationAlert[]>(`/allocation/alerts/unresolved-critical?limit=${limit}`);
+}
+
+export async function acknowledgeAllocationAlert(alertId: number, actorId = "operator"): Promise<{ id: number; state: string; acknowledged_at?: string | null }> {
+  return request<{ id: number; state: string; acknowledged_at?: string | null }>(`/allocation/alerts/${alertId}/acknowledge`, {
+    method: "POST",
+    body: JSON.stringify({ actor_id: actorId }),
+  });
+}
+
+export async function resolveAllocationAlert(alertId: number, actorId = "operator"): Promise<{ id: number; state: string; resolved_at?: string | null }> {
+  return request<{ id: number; state: string; resolved_at?: string | null }>(`/allocation/alerts/${alertId}/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ actor_id: actorId }),
+  });
+}
+
+export async function getAllocationExposureSummary(): Promise<AllocationExposureSummary> {
+  return request<AllocationExposureSummary>("/allocation/exposure");
 }
 
 export async function withFallback<T>(loader: () => Promise<T>, fallback: T): Promise<T> {
