@@ -2,328 +2,324 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 
-import { CompactTable, DataIndicator, Panel, SplitPanel, StatusPill, StickyToolbar } from "@/components/console/primitives";
-import { getMarketOverview } from "@/lib/api";
-import { formatSignedPercent } from "@/lib/format";
-import { MarketCategory, MarketCategoryOverviewResponse } from "@/lib/types";
+import { CompactTable, DataIndicator, Panel, SplitPanel, StatusPill, StatusStrip, StickyToolbar } from "@/components/console/primitives";
+import {
+  addShortlistInstrument,
+  addStrategyWatchlistInstruments,
+  getMarketCatalogue,
+  getMarketOverview,
+  getStrategyWatchlist,
+  removeShortlistInstrument,
+} from "@/lib/api";
+import { formatInstrumentLabel } from "@/lib/format";
+import { MarketCatalogueInstrument, MarketCatalogueResponse, MarketCategoryOverviewResponse, StrategyWatchlistResponse } from "@/lib/types";
 
 type MarketOverviewDashboardProps = {
   initialOverview: MarketCategoryOverviewResponse;
   initialOverviewError: string | null;
+  initialCatalogue: MarketCatalogueResponse;
+  initialCatalogueError: string | null;
+  initialStrategyWatchlist: StrategyWatchlistResponse;
+  initialStrategyWatchlistError: string | null;
 };
 
-const WATCHLIST_STORAGE_KEY = "trading-platform-market-watchlist";
-const MARKET_CATEGORIES: MarketCategory[] = ["forex", "indices", "commodities", "stocks", "crypto"];
-const MARKET_LABELS: Record<MarketCategory, string> = {
-  forex: "Forex",
-  indices: "Indices",
-  commodities: "Commodities",
-  stocks: "Stocks",
-  crypto: "Crypto",
-};
-const MARKET_DESCRIPTIONS: Record<MarketCategory, string> = {
-  forex: "Session-aware currency routing.",
-  indices: "Benchmark contracts and venue state.",
-  commodities: "Metals and energy venue windows.",
-  stocks: "Primary cash-equity session coverage.",
-  crypto: "Always-on assets with tighter guardrails.",
-};
+const ASSET_CLASSES = ["ALL", "FOREX", "INDICES", "COMMODITIES", "STOCKS", "CRYPTO"];
 
-function formatCountdown(targetIso: string) {
-  const deltaMs = Math.max(0, new Date(targetIso).getTime() - Date.now());
-  const totalMinutes = Math.round(deltaMs / 60_000);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+function rowTone(row: MarketCatalogueInstrument) {
+  if (row.streaming_now) {
+    return "positive" as const;
+  }
+  if (row.in_strategy_watchlist) {
+    return "warning" as const;
+  }
+  if (row.shortlisted) {
+    return "neutral" as const;
+  }
+  return "inactive" as const;
 }
 
-export function MarketOverviewDashboard({ initialOverview, initialOverviewError }: MarketOverviewDashboardProps) {
-  const [selectedCategory, setSelectedCategory] = useState<MarketCategory>("forex");
-  const [selectedInstrumentId, setSelectedInstrumentId] = useState<string>(initialOverviewError ? "" : initialOverview.instruments[0]?.id ?? "");
+function canAdd(row: MarketCatalogueInstrument, limit: number, activeCount: number) {
+  if (row.in_strategy_watchlist) {
+    return "Already in strategy watchlist.";
+  }
+  if (limit > 0 && activeCount >= limit) {
+    return `Strategy watchlist limit reached (${limit}).`;
+  }
+  return null;
+}
+
+export function MarketOverviewDashboard({
+  initialOverview,
+  initialOverviewError,
+  initialCatalogue,
+  initialCatalogueError,
+  initialStrategyWatchlist,
+  initialStrategyWatchlistError,
+}: MarketOverviewDashboardProps) {
+  const [catalogue, setCatalogue] = useState(initialCatalogue);
+  const [strategyWatchlist, setStrategyWatchlist] = useState(initialStrategyWatchlist);
+  const [overviewError, setOverviewError] = useState(initialOverviewError);
+  const [catalogueError, setCatalogueError] = useState(initialCatalogueError);
+  const [watchlistError, setWatchlistError] = useState(initialStrategyWatchlistError);
   const [search, setSearch] = useState("");
-  const [showTradableOnly, setShowTradableOnly] = useState(false);
-  const [showActiveOnly, setShowActiveOnly] = useState(false);
-  const [starredIds, setStarredIds] = useState<string[]>([]);
+  const [assetClass, setAssetClass] = useState("FOREX");
+  const [currency, setCurrency] = useState("ALL");
+  const [forexMajorsOnly, setForexMajorsOnly] = useState(true);
+  const [tradableOnly, setTradableOnly] = useState(false);
+  const [shortlistedOnly, setShortlistedOnly] = useState(false);
+  const [watchlistOnly, setWatchlistOnly] = useState(false);
+  const [streamingOnly, setStreamingOnly] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const [loadedMarkets, setLoadedMarkets] = useState<Partial<Record<MarketCategory, MarketCategoryOverviewResponse>>>(
-    initialOverviewError ? {} : { forex: initialOverview },
+
+  useEffect(() => {
+    setCatalogue(initialCatalogue);
+    setStrategyWatchlist(initialStrategyWatchlist);
+    setOverviewError(initialOverviewError);
+    setCatalogueError(initialCatalogueError);
+    setWatchlistError(initialStrategyWatchlistError);
+  }, [initialCatalogue, initialCatalogueError, initialOverviewError, initialStrategyWatchlist, initialStrategyWatchlistError]);
+
+  const currencies = useMemo(
+    () => ["ALL", ...Array.from(new Set(catalogue.instruments.map((item) => item.quote_currency || item.currency).filter(Boolean) as string[])).sort()],
+    [catalogue.instruments],
   );
-  const [loadError, setLoadError] = useState<string | null>(initialOverviewError);
 
-  useEffect(() => {
-    const stored = window.localStorage.getItem(WATCHLIST_STORAGE_KEY);
-    if (stored) {
-      try {
-        setStarredIds(JSON.parse(stored) as string[]);
-      } catch {
-        window.localStorage.removeItem(WATCHLIST_STORAGE_KEY);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(starredIds));
-  }, [starredIds]);
-
-  useEffect(() => {
-    if (loadedMarkets[selectedCategory]) {
-      return;
-    }
-
-    startTransition(() => {
-      getMarketOverview(selectedCategory)
-        .then((overview) => {
-          setLoadedMarkets((current) => ({ ...current, [selectedCategory]: overview }));
-          setLoadError(null);
-        })
-        .catch((error: unknown) => {
-          setLoadError(error instanceof Error ? error.message : "Failed to load market data.");
-        });
-    });
-  }, [loadedMarkets, selectedCategory]);
-
-  const selectedMarket = loadedMarkets[selectedCategory];
-  const selectedSummary = selectedMarket?.summary ?? null;
-  const summaries = MARKET_CATEGORIES.map((category) => ({
-    category,
-    label: loadedMarkets[category]?.summary.label ?? MARKET_LABELS[category],
-    description: loadedMarkets[category]?.summary.description ?? MARKET_DESCRIPTIONS[category],
-  }));
-
-  const filteredInstruments = useMemo(() => {
+  const filteredRows = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
-    const rows = selectedMarket?.instruments ?? [];
-
-    return rows
-      .filter((instrument) => {
-        if (showTradableOnly && !instrument.tradable) {
+    return catalogue.instruments
+      .filter((row) => {
+        if (assetClass !== "ALL" && row.asset_class !== assetClass) {
           return false;
         }
-        if (showActiveOnly && !instrument.active) {
+        if (currency !== "ALL" && row.quote_currency !== currency && row.currency !== currency) {
+          return false;
+        }
+        if (forexMajorsOnly && !row.forex_major) {
+          return false;
+        }
+        if (tradableOnly && !row.tradable) {
+          return false;
+        }
+        if (shortlistedOnly && !row.shortlisted) {
+          return false;
+        }
+        if (watchlistOnly && !row.in_strategy_watchlist) {
+          return false;
+        }
+        if (streamingOnly && !row.streaming_now) {
           return false;
         }
         if (!normalizedSearch) {
           return true;
         }
         return (
-          instrument.name.toLowerCase().includes(normalizedSearch) ||
-          instrument.symbol.toLowerCase().includes(normalizedSearch) ||
-          instrument.strategyCompatibility.some((strategy) => strategy.toLowerCase().includes(normalizedSearch))
+          row.name.toLowerCase().includes(normalizedSearch) ||
+          row.symbol.toLowerCase().includes(normalizedSearch) ||
+          row.instrument.toLowerCase().includes(normalizedSearch) ||
+          row.strategy_compatibility.some((strategy) => strategy.toLowerCase().includes(normalizedSearch))
         );
       })
-      .sort((left, right) => {
-        const leftStarred = starredIds.includes(left.id) ? 1 : 0;
-        const rightStarred = starredIds.includes(right.id) ? 1 : 0;
-        if (leftStarred !== rightStarred) {
-          return rightStarred - leftStarred;
-        }
-        if (left.tradable !== right.tradable) {
-          return Number(right.tradable) - Number(left.tradable);
-        }
-        return left.name.localeCompare(right.name);
-      });
-  }, [search, selectedMarket?.instruments, showActiveOnly, showTradableOnly, starredIds]);
+      .sort((left, right) => Number(right.streaming_now) - Number(left.streaming_now) || Number(right.in_strategy_watchlist) - Number(left.in_strategy_watchlist) || Number(right.shortlisted) - Number(left.shortlisted) || left.symbol.localeCompare(right.symbol));
+  }, [assetClass, catalogue.instruments, currency, forexMajorsOnly, search, shortlistedOnly, streamingOnly, tradableOnly, watchlistOnly]);
 
-  useEffect(() => {
-    if (filteredInstruments.some((instrument) => instrument.id === selectedInstrumentId)) {
-      return;
+  const shortlistedRows = catalogue.instruments.filter((row) => row.shortlisted);
+  const strategyRowsById = new Set(strategyWatchlist.instruments.map((row) => row.instrument));
+
+  const refreshAll = async () => {
+    const [nextCatalogue, nextWatchlist, nextOverview] = await Promise.allSettled([
+      getMarketCatalogue(),
+      getStrategyWatchlist(),
+      getMarketOverview("forex"),
+    ]);
+    if (nextCatalogue.status === "fulfilled") {
+      setCatalogue(nextCatalogue.value);
+      setCatalogueError(null);
+    } else {
+      setCatalogueError(nextCatalogue.reason instanceof Error ? nextCatalogue.reason.message : "Catalogue unavailable.");
     }
-    setSelectedInstrumentId(filteredInstruments[0]?.id ?? "");
-  }, [filteredInstruments, selectedInstrumentId]);
-
-  const selectedInstrument = filteredInstruments.find((instrument) => instrument.id === selectedInstrumentId) ?? null;
-
-  const refreshSelectedMarket = async () => {
-    try {
-      const overview = await getMarketOverview(selectedCategory);
-      setLoadedMarkets((current) => ({ ...current, [selectedCategory]: overview }));
-      setLoadError(null);
-    } catch (error: unknown) {
-      setLoadError(error instanceof Error ? error.message : "Failed to refresh market data.");
+    if (nextWatchlist.status === "fulfilled") {
+      setStrategyWatchlist(nextWatchlist.value);
+      setWatchlistError(null);
+    } else {
+      setWatchlistError(nextWatchlist.reason instanceof Error ? nextWatchlist.reason.message : "Strategy watchlist unavailable.");
     }
+    setOverviewError(nextOverview.status === "rejected" ? (nextOverview.reason instanceof Error ? nextOverview.reason.message : "Market overview unavailable.") : null);
   };
 
-  const toggleStar = (instrumentId: string) => {
-    setStarredIds((current) =>
-      current.includes(instrumentId) ? current.filter((id) => id !== instrumentId) : [...current, instrumentId],
-    );
+  const toggleShortlist = (instrumentId: string, currentlyShortlisted: boolean) => {
+    startTransition(async () => {
+      try {
+        if (currentlyShortlisted) {
+          await removeShortlistInstrument(instrumentId);
+          setStatusMessage(`${formatInstrumentLabel(instrumentId)} removed from shortlist.`);
+        } else {
+          await addShortlistInstrument(instrumentId);
+          setStatusMessage(`${formatInstrumentLabel(instrumentId)} added to shortlist.`);
+        }
+        await refreshAll();
+      } catch (error) {
+        setStatusMessage(error instanceof Error ? error.message : "Shortlist update failed.");
+      }
+    });
   };
 
-  const selectedInstrumentTone = !selectedInstrument
-    ? "inactive"
-    : !selectedInstrument.tradable
-      ? "negative"
-      : selectedInstrument.status !== "OPEN"
-        ? "warning"
-        : "positive";
+  const addToStrategyWatchlist = (instrumentIds: string[]) => {
+    startTransition(async () => {
+      try {
+        const result = await addStrategyWatchlistInstruments(instrumentIds);
+        const skippedReasons = result.skipped
+          .slice(0, 3)
+          .map((item) => `${formatInstrumentLabel(item.instrument)}: ${item.reason_detail?.label ?? item.reason}`)
+          .join(" · ");
+        setStatusMessage(`${result.added.length} added, ${result.skipped.length} blocked.${skippedReasons ? ` ${skippedReasons}` : ""}`);
+        setSelectedIds([]);
+        await refreshAll();
+      } catch (error) {
+        setStatusMessage(error instanceof Error ? error.message : "Strategy watchlist update failed.");
+      }
+    });
+  };
+
+  const selectedRows = catalogue.instruments.filter((row) => selectedIds.includes(row.instrument));
+  const addableShortlist = shortlistedRows.filter((row) => !canAdd(row, strategyWatchlist.limit, strategyWatchlist.active_count));
 
   return (
     <main className="console-page console-page--dense">
+      <StatusStrip
+        items={[
+          { label: "Catalogue", value: catalogue.summary.total_count, tone: catalogueError ? "inactive" : "neutral", meta: catalogueError ?? "available markets" },
+          { label: "Shortlist", value: catalogue.summary.shortlisted_count, tone: "neutral", meta: "operator interest" },
+          {
+            label: "Strategy Watchlist",
+            value: `${strategyWatchlist.active_count}/${strategyWatchlist.limit || "-"}`,
+            tone: watchlistError ? "inactive" : strategyWatchlist.cap_exceeded_by_protective_coverage ? "warning" : strategyWatchlist.active_count >= strategyWatchlist.limit ? "warning" : "positive",
+            meta: watchlistError ?? (strategyWatchlist.cap_exceeded_by_protective_coverage ? "protective coverage above cap" : "eligible for evaluation"),
+          },
+          { label: "Live", value: strategyWatchlist.streaming_count, tone: strategyWatchlist.streaming_count ? "positive" : "inactive", meta: "streaming now" },
+        ]}
+      />
+
       <StickyToolbar className="toolbar-markets">
         <div className="toolbar-group">
-              {summaries.map((summary) => (
-            <button
-              key={summary.category}
-              type="button"
-              className={`console-chip${summary.category === selectedCategory ? " is-active" : ""}`}
-              onClick={() => setSelectedCategory(summary.category)}
-            >
-              {summary.label}
-            </button>
-          ))}
+          <input className="console-input" type="search" placeholder="Search catalogue" value={search} onChange={(event) => setSearch(event.target.value)} />
+          <select className="console-select" value={assetClass} onChange={(event) => setAssetClass(event.target.value)}>
+            {ASSET_CLASSES.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+          <select className="console-select" value={currency} onChange={(event) => setCurrency(event.target.value)}>
+            {currencies.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
         </div>
         <div className="toolbar-group">
-          <input
-            type="search"
-            className="console-input"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search instruments or strategy fit"
-          />
-          <label className="console-toggle">
-            <input type="checkbox" checked={showTradableOnly} onChange={() => setShowTradableOnly((current) => !current)} />
-            Tradable
-          </label>
-          <label className="console-toggle">
-            <input type="checkbox" checked={showActiveOnly} onChange={() => setShowActiveOnly((current) => !current)} />
-            Active
-          </label>
-          <button
-            type="button"
-            className="console-button console-button--ghost"
-            disabled={isPending}
-            onClick={() => startTransition(() => void refreshSelectedMarket())}
-          >
-            Refresh
-          </button>
+          <label className="console-toggle"><input type="checkbox" checked={forexMajorsOnly} onChange={() => setForexMajorsOnly((value) => !value)} />Forex majors</label>
+          <label className="console-toggle"><input type="checkbox" checked={tradableOnly} onChange={() => setTradableOnly((value) => !value)} />Tradable</label>
+          <label className="console-toggle"><input type="checkbox" checked={shortlistedOnly} onChange={() => setShortlistedOnly((value) => !value)} />Shortlisted</label>
+          <label className="console-toggle"><input type="checkbox" checked={watchlistOnly} onChange={() => setWatchlistOnly((value) => !value)} />Strategy watchlist</label>
+          <label className="console-toggle"><input type="checkbox" checked={streamingOnly} onChange={() => setStreamingOnly((value) => !value)} />Streaming</label>
+          <button type="button" className="console-button console-button--ghost" disabled={isPending} onClick={() => startTransition(() => void refreshAll())}>Refresh</button>
         </div>
       </StickyToolbar>
 
       <SplitPanel
         className="layout-markets items-start"
         left={
-          <Panel title="Instrument List" priority="secondary" tone="neutral" compact>
-            <div className="list-panel">
-              {filteredInstruments.length ? (
-                filteredInstruments.map((instrument) => {
-                  const isActive = instrument.id === selectedInstrumentId;
-                  const tone = !instrument.tradable ? "negative" : instrument.status !== "OPEN" ? "warning" : "positive";
-                  return (
-                    <button
-                      key={instrument.id}
-                      type="button"
-                      className={`list-item${isActive ? " is-active" : ""}`}
-                      onClick={() => setSelectedInstrumentId(instrument.id)}
-                    >
-                      <div className="list-item__main">
-                        <strong>{instrument.name}</strong>
-                        <span>{instrument.symbol}</span>
-                      </div>
-                      <div className="list-item__meta">
-                        <StatusPill label={instrument.status.toLowerCase()} tone={tone} quiet />
-                        <span>{instrument.tradable ? "tradable" : "blocked"}</span>
-                      </div>
+          <Panel title="Instrument Catalogue" subtitle="Available markets. Stars do not stream or trade." priority="primary" tone="neutral">
+            <CompactTable
+              rows={filteredRows}
+              emptyLabel={catalogueError ? "Catalogue unavailable." : "No instruments match the current filters."}
+              getRowTone={rowTone}
+              columns={[
+                {
+                  key: "star",
+                  header: "",
+                  render: (row) => (
+                    <button type="button" className={`star-button ${row.shortlisted ? "is-active" : ""}`.trim()} disabled={isPending} onClick={() => toggleShortlist(row.instrument, row.shortlisted)} aria-label={row.shortlisted ? "Remove from shortlist" : "Add to shortlist"}>
+                      {row.shortlisted ? "★" : "☆"}
                     </button>
-                  );
-                })
-              ) : (
-                <div className="console-empty">No instruments match the current filters.</div>
-              )}
-            </div>
+                  ),
+                },
+                {
+                  key: "select",
+                  header: "",
+                  render: (row) => (
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(row.instrument)}
+                      onChange={() => setSelectedIds((current) => current.includes(row.instrument) ? current.filter((id) => id !== row.instrument) : [...current, row.instrument])}
+                      aria-label={`Select ${row.symbol}`}
+                    />
+                  ),
+                },
+                { key: "instrument", header: "Instrument", render: (row) => <span>{row.name} <span className="muted">{row.symbol}</span></span> },
+                { key: "asset", header: "Class", render: (row) => row.asset_class },
+                { key: "state", header: "State", render: (row) => <StatusPill label={row.streaming_now ? "live" : row.in_strategy_watchlist ? "eligible" : row.shortlisted ? "shortlisted" : "catalogue"} tone={rowTone(row)} /> },
+                { key: "fit", header: "Strategy Fit", render: (row) => row.strategy_compatibility.slice(0, 2).join(", ") || "n/a" },
+              ]}
+            />
           </Panel>
         }
         center={
-          <Panel title="Selected Instrument" priority="primary" tone={selectedInstrumentTone}>
-            {selectedInstrument ? (
-              <div className="detail-stack">
-                <div className="summary-bar">
-                  <div className="summary-bar__item">
-                    <span>Venue</span>
-                    <strong>{selectedInstrument.status}</strong>
-                      <em>{selectedSummary?.label ?? MARKET_LABELS[selectedCategory]}</em>
-                  </div>
-                  <div className="summary-bar__item">
-                    <span>Tradable</span>
-                    <strong>{selectedInstrument.tradable ? "Yes" : "No"}</strong>
-                    <em>{selectedInstrument.active ? "active" : "inactive"}</em>
-                  </div>
-                  <div className="summary-bar__item">
-                    <span>Next transition</span>
-                    <strong>
-                      {selectedSummary?.nextTransitionAt ? formatCountdown(selectedSummary.nextTransitionAt) : "-"}
-                      {!selectedSummary ? <DataIndicator state={isPending ? "loading" : loadError ? "error" : "unavailable"} message={loadError ?? "Market summary has not loaded yet."} /> : null}
-                    </strong>
-                    <em>{selectedSummary?.nextTransitionLabel ?? "Pending data"}</em>
-                  </div>
-                </div>
-
-                <CompactTable
-                  rows={[selectedInstrument]}
-                  emptyLabel="No instrument selected."
-                  columns={[
-                    { key: "instrument", header: "Instrument", render: (row) => `${row.name} (${row.symbol})` },
-                    {
-                      key: "state",
-                      header: "State",
-                      render: (row) => <StatusPill label={row.status.toLowerCase()} tone={!row.tradable ? "negative" : row.status !== "OPEN" ? "warning" : "positive"} />,
-                    },
-                    { key: "activity", header: "Activity", render: (row) => row.activityLevel },
-                    { key: "price", header: "Price", render: (row) => row.price.toFixed(4) },
-                    { key: "change", header: "Change", render: (row) => formatSignedPercent(row.changePercent, 2) },
-                  ]}
-                />
-
-                <Panel title="Strategy Fit" priority="secondary" tone="neutral" compact>
-                  <CompactTable
-                    dense
-                    rows={(selectedInstrument.strategyCompatibility ?? []).map((strategy) => ({ strategy }))}
-                    emptyLabel="No compatible strategies."
-                    columns={[{ key: "strategy", header: "Strategy", render: (row) => row.strategy }]}
-                  />
-                </Panel>
-              </div>
-            ) : (
-              <div className="console-empty">Select an instrument from the list.</div>
-            )}
+          <Panel title="Shortlist" subtitle="Operator interest only." priority="secondary" tone="neutral" actions={<div className="console-inline-actions"><button type="button" className="console-button console-button--ghost" disabled={!selectedRows.length || isPending} onClick={() => addToStrategyWatchlist(selectedRows.map((row) => row.instrument))}>Add Selected</button><button type="button" className="console-button" disabled={!addableShortlist.length || isPending} onClick={() => addToStrategyWatchlist(addableShortlist.map((row) => row.instrument))}>Add All Eligible</button></div>}>
+            <CompactTable
+              rows={shortlistedRows}
+              emptyLabel="No shortlisted instruments yet."
+              getRowTone={(row) => (strategyRowsById.has(row.instrument) ? "positive" : "neutral")}
+              columns={[
+                { key: "instrument", header: "Instrument", render: (row) => `${row.name} (${row.symbol})` },
+                { key: "status", header: "Meaning", render: (row) => strategyRowsById.has(row.instrument) ? "in strategy watchlist" : "operator interest" },
+                {
+                  key: "reason",
+                  header: "Add Readiness",
+                  render: (row) => canAdd(row, strategyWatchlist.limit, strategyWatchlist.active_count) ?? "Can be added",
+                },
+                {
+                  key: "action",
+                  header: "Action",
+                  render: (row) => (
+                    <button type="button" className="console-button console-button--ghost" disabled={Boolean(canAdd(row, strategyWatchlist.limit, strategyWatchlist.active_count)) || isPending} onClick={() => addToStrategyWatchlist([row.instrument])}>
+                      Add
+                    </button>
+                  ),
+                },
+              ]}
+            />
           </Panel>
         }
         right={
           <div className="stack-layout">
-            <Panel title="Market State" priority="secondary" tone={selectedSummary?.status === "OPEN" ? "positive" : selectedSummary?.status === "LIMITED" ? "warning" : "inactive"} compact>
-              <div className="metric-stack">
-                <div className="metric-stack__row">
-                  <span>Status</span>
-                  <strong>
-                    {selectedSummary?.status ?? "-"}
-                    {!selectedSummary ? <DataIndicator state={isPending ? "loading" : loadError ? "error" : "unavailable"} message={loadError ?? "Market status has not loaded yet."} /> : null}
-                  </strong>
-                </div>
-                <div className="metric-stack__row">
-                  <span>Tradable</span>
-                  <strong>{selectedSummary ? `${selectedSummary.tradableCount}/${selectedSummary.totalCount}` : "-"}</strong>
-                </div>
-                <div className="metric-stack__row">
-                  <span>Active</span>
-                  <strong>{selectedSummary?.activeCount ?? "-"}</strong>
-                </div>
-              </div>
+            <Panel title="Strategy Watchlist" subtitle="Eligible for backend streaming/evaluation." priority="critical" tone={strategyWatchlist.active_count ? "positive" : "inactive"} compact>
+              <CompactTable
+                dense
+                rows={strategyWatchlist.instruments}
+                emptyLabel={watchlistError ? "Strategy watchlist unavailable." : "No active strategy watchlist instruments."}
+                getRowTone={(row) => row.streamed ? "positive" : "warning"}
+                columns={[
+                  { key: "instrument", header: "Instrument", render: (row) => formatInstrumentLabel(row.instrument) },
+                  { key: "state", header: "State", render: (row) => <StatusPill label={row.streamed ? "streaming" : "eligible"} tone={row.streamed ? "positive" : "warning"} /> },
+                  {
+                    key: "reason",
+                    header: "Source",
+                    render: (row) => (
+                      <span title={row.reason_detail ? `${row.reason_detail.operator_action} (${row.reason_detail.code})` : row.reason ?? undefined}>
+                        {row.reason_detail?.label ?? "Watchlist"}
+                      </span>
+                    ),
+                  },
+                ]}
+              />
             </Panel>
-
-            <Panel title="Local Actions" priority="passive" tone="inactive" compact>
-              {selectedInstrument ? (
-                <div className="detail-stack">
-                  <StatusPill label={starredIds.includes(selectedInstrument.id) ? "pinned" : "not pinned"} tone={starredIds.includes(selectedInstrument.id) ? "positive" : "inactive"} />
-                  <button type="button" className="console-button console-button--ghost" onClick={() => toggleStar(selectedInstrument.id)}>
-                    {starredIds.includes(selectedInstrument.id) ? "Remove Pin" : "Pin Instrument"}
-                  </button>
-                  {loadError ? <div className="console-alert console-alert--warning">{loadError}</div> : null}
-                </div>
-              ) : (
-                <div className="detail-stack">
-                  <div className="console-empty">No instrument selected.</div>
-                  {loadError ? <div className="console-alert console-alert--warning">{loadError}</div> : null}
-                </div>
-              )}
+            <Panel title="Operator Notes" priority="passive" tone="inactive" compact>
+              <div className="metric-stack">
+                <div className="metric-stack__row"><span>Catalogue</span><strong>Available markets</strong></div>
+                <div className="metric-stack__row"><span>Shortlist</span><strong>Operator interest</strong></div>
+                <div className="metric-stack__row"><span>Strategy watchlist</span><strong>Stream eligible</strong></div>
+                <div className="metric-stack__row"><span>Live</span><strong>Streaming/evaluating</strong></div>
+                <div className="metric-stack__row"><span>Protective coverage</span><strong>{strategyWatchlist.protective_count ?? 0} pinned</strong></div>
+              </div>
+              {overviewError || catalogueError || watchlistError ? <div className="console-alert console-alert--warning">{overviewError ?? catalogueError ?? watchlistError}<DataIndicator state="error" message={overviewError ?? catalogueError ?? watchlistError ?? "Market data unavailable."} /></div> : null}
+              {statusMessage ? <div className="console-alert console-alert--neutral">{statusMessage}</div> : null}
+              <div className="console-empty">Forex overview: {initialOverview.summary.detail}</div>
             </Panel>
           </div>
         }

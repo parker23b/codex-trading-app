@@ -3,20 +3,22 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { CompactTable, DataIndicator, InspectorDrawer, Panel, SplitPanel, StatusPill, StatusStrip } from "@/components/console/primitives";
-import { getCoverageSummary, getOperationalTelemetry, getSystemOperatingLimits } from "@/lib/api";
-import { formatRelativeDuration } from "@/lib/format";
-import { CoverageSummary, OperationalTelemetry, SystemOperatingLimits } from "@/lib/types";
+import { getCoverageSummary, getFeedState, getOperationalTelemetry, getSystemOperatingLimits } from "@/lib/api";
+import { formatInstrumentLabel, formatRelativeDuration } from "@/lib/format";
+import { CoverageSummary, FeedStateResponse, OperationalTelemetry, SystemOperatingLimits } from "@/lib/types";
 
 type CoverageResourceErrors = {
   coverage: string | null;
   telemetry: string | null;
   operatingLimits: string | null;
+  feedState: string | null;
 };
 
 type CoverageLiveProps = {
   initialCoverage: CoverageSummary;
   initialTelemetry: OperationalTelemetry;
   initialOperatingLimits: SystemOperatingLimits;
+  initialFeedState: FeedStateResponse;
   initialErrors: CoverageResourceErrors;
 };
 
@@ -30,10 +32,11 @@ function formatAge(ms?: number | null) {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-export function CoverageLive({ initialCoverage, initialTelemetry, initialOperatingLimits, initialErrors }: CoverageLiveProps) {
+export function CoverageLive({ initialCoverage, initialTelemetry, initialOperatingLimits, initialFeedState, initialErrors }: CoverageLiveProps) {
   const [coverage, setCoverage] = useState(initialCoverage);
   const [telemetry, setTelemetry] = useState(initialTelemetry);
   const [operatingLimits, setOperatingLimits] = useState(initialOperatingLimits);
+  const [feedState, setFeedState] = useState(initialFeedState);
   const [errors, setErrors] = useState(initialErrors);
   const [allocatorDrawerOpen, setAllocatorDrawerOpen] = useState(false);
 
@@ -41,16 +44,18 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
     setCoverage(initialCoverage);
     setTelemetry(initialTelemetry);
     setOperatingLimits(initialOperatingLimits);
+    setFeedState(initialFeedState);
     setErrors(initialErrors);
-  }, [initialCoverage, initialErrors, initialOperatingLimits, initialTelemetry]);
+  }, [initialCoverage, initialErrors, initialFeedState, initialOperatingLimits, initialTelemetry]);
 
   useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
-      const [nextCoverage, nextTelemetry, nextOperatingLimits] = await Promise.allSettled([
+      const [nextCoverage, nextTelemetry, nextOperatingLimits, nextFeedState] = await Promise.allSettled([
           getCoverageSummary(),
           getOperationalTelemetry(),
           getSystemOperatingLimits(),
+          getFeedState(),
         ]);
       if (!cancelled) {
         if (nextCoverage.status === "fulfilled") {
@@ -62,10 +67,14 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
         if (nextOperatingLimits.status === "fulfilled") {
           setOperatingLimits(nextOperatingLimits.value);
         }
+        if (nextFeedState.status === "fulfilled") {
+          setFeedState(nextFeedState.value);
+        }
         setErrors({
           coverage: nextCoverage.status === "rejected" ? (nextCoverage.reason instanceof Error ? nextCoverage.reason.message : "Failed to load coverage.") : null,
           telemetry: nextTelemetry.status === "rejected" ? (nextTelemetry.reason instanceof Error ? nextTelemetry.reason.message : "Failed to load telemetry.") : null,
           operatingLimits: nextOperatingLimits.status === "rejected" ? (nextOperatingLimits.reason instanceof Error ? nextOperatingLimits.reason.message : "Failed to load limits.") : null,
+          feedState: nextFeedState.status === "rejected" ? (nextFeedState.reason instanceof Error ? nextFeedState.reason.message : "Failed to load feed state.") : null,
         });
       }
     };
@@ -88,19 +97,20 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
     }
     return a.instrument.localeCompare(b.instrument);
   });
+  const feedByInstrument = new Map(feedState.instruments.map((row) => [row.instrument, row]));
 
   return (
     <main className="console-page console-page--dense">
       <StatusStrip
         items={[
           {
-            label: "Tier 1 Live",
+            label: "Strategy Watchlist",
             value: errors.coverage ? (
               <>
                 -<DataIndicator state="error" message={errors.coverage} />
               </>
             ) : (
-              coverage.streaming.active_instruments.length
+              `${coverage.streaming.active_instruments.length}/${operatingLimits.coverage.max_instruments || "-"}`
             ),
             tone: errors.coverage ? "inactive" : "positive",
             emphasis: "strong",
@@ -140,28 +150,43 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
       <SplitPanel
         className="layout-coverage items-start"
         left={
-          <Panel title="Monitored Universe" subtitle="Primary watch state." priority="primary" tone={blockedReadiness.length ? "warning" : "positive"}>
+          <Panel title="Strategy Watchlist" subtitle="Eligible for streaming and strategy evaluation." priority="primary" tone={blockedReadiness.length ? "warning" : "positive"}>
             <CompactTable
               rows={activeUniverseRows}
               emptyLabel={errors.coverage ? "Coverage feed unavailable." : "No active Tier 1 instruments."}
               getRowTone={(row) => (!row.streamed ? "inactive" : row.status !== "ACTIVE" ? "warning" : "positive")}
               columns={[
-                { key: "instrument", header: "Instrument", render: (row) => row.instrument },
-                { key: "tier", header: "Tier", render: (row) => row.tier },
+                { key: "instrument", header: "Instrument", render: (row) => formatInstrumentLabel(row.instrument) },
                 {
-                  key: "state",
-                  header: "State",
+                  key: "stream",
+                  header: "Stream",
                   render: (row) => (
                     <StatusPill
-                      label={row.streamed ? row.status.toLowerCase() : "not streaming"}
+                      label={feedByInstrument.get(row.instrument)?.stream_reason?.label ?? (row.streamed ? "Streaming" : "Eligible")}
                       tone={!row.streamed ? "inactive" : row.status !== "ACTIVE" ? "warning" : "positive"}
                     />
                   ),
                 },
                 {
-                  key: "age",
-                  header: "Last Stream",
-                  render: (row) => (row.last_streamed_at ? `${formatRelativeDuration(row.last_streamed_at)} ago` : "never"),
+                  key: "tick",
+                  header: "Last Tick",
+                  render: (row) => {
+                    const feed = feedByInstrument.get(row.instrument);
+                    return feed?.last_tick_age_ms != null ? formatAge(feed.last_tick_age_ms) : row.last_streamed_at ? `${formatRelativeDuration(row.last_streamed_at)} ago` : "never";
+                  },
+                },
+                {
+                  key: "spread",
+                  header: "Spread",
+                  render: (row) => feedByInstrument.get(row.instrument)?.spread ?? "n/a",
+                },
+                {
+                  key: "eligibility",
+                  header: "Evaluation",
+                  render: (row) => {
+                    const feed = feedByInstrument.get(row.instrument);
+                    return <StatusPill label={feed?.strategies_may_evaluate ? "May evaluate" : feed?.entry_eligibility_reason?.label ?? "Blocked"} tone={feed?.strategies_may_evaluate ? "positive" : "warning"} />;
+                  },
                 },
               ]}
             />

@@ -41,6 +41,106 @@
   --secondary: #ffb086;
 }
 
+.live-panel--chart {
+  grid-column: 1 / -1;
+}
+
+.live-chart-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.live-candle-chart {
+  min-height: 280px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg-surface-muted);
+}
+
+.live-candle-chart svg {
+  display: block;
+  width: 100%;
+  height: 280px;
+}
+
+.live-chart-axis {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+.live-candle line {
+  stroke-width: 1;
+}
+
+.live-candle rect {
+  stroke-width: 0;
+}
+
+.live-candle--up line,
+.live-candle--up rect {
+  stroke: #1f9d68;
+  fill: #1f9d68;
+}
+
+.live-candle--down line,
+.live-candle--down rect {
+  stroke: #c94f4f;
+  fill: #c94f4f;
+}
+
+.live-chart-marker {
+  stroke: var(--bg-surface);
+  stroke-width: 1.5;
+  fill: #7a7f87;
+}
+
+.live-chart-marker--selected,
+.live-chart-marker--promoted_to_trade_intent {
+  fill: #1f9d68;
+}
+
+.live-chart-marker--blocked_by_conflict {
+  fill: #d19922;
+}
+
+.live-chart-marker--blocked_by_risk,
+.live-chart-marker--expired {
+  fill: #c94f4f;
+}
+
+.live-feed-state {
+  display: grid;
+  gap: 8px;
+}
+
+.live-feed-state div {
+  display: grid;
+  gap: 4px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface-muted);
+}
+
+.live-feed-state span {
+  color: var(--text-tertiary);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.live-feed-state strong {
+  overflow-wrap: anywhere;
+  font-size: 0.84rem;
+}
+
+@media (max-width: 900px) {
+  .live-chart-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 .risk-command-panel {
   min-height: 100%;
 }

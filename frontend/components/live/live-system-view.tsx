@@ -11,6 +11,7 @@ import {
   getCoverageSummary,
   getDomainEvents,
   getExecutions,
+  getLiveInstrumentChart,
   getOperationalTelemetry,
   getOpenPositions,
   getStreamHealth,
@@ -25,6 +26,8 @@ import {
   type LiveStrategyItem,
 } from "@/lib/live-system-view";
 import { StatusPill } from "@/components/console/primitives";
+import type { LiveChartResponse } from "@/lib/types";
+import { formatInstrumentLabel } from "@/lib/format";
 
 type LiveSystemViewProps = {
   initialData: {
@@ -99,6 +102,15 @@ function modeTone(mode: LiveStrategyItem["mode"]) {
   return "inactive" as const;
 }
 
+function chartX(index: number, count: number) {
+  return count <= 1 ? 20 : 20 + (index / (count - 1)) * 560;
+}
+
+function chartY(value: number, min: number, max: number) {
+  const span = Math.max(max - min, 1e-9);
+  return 220 - ((value - min) / span) * 180;
+}
+
 export function LiveSystemView({ initialData, initialErrors }: LiveSystemViewProps) {
   const [data, setData] = useState(initialData);
   const [errors, setErrors] = useState(initialErrors);
@@ -110,6 +122,9 @@ export function LiveSystemView({ initialData, initialErrors }: LiveSystemViewPro
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
   const [selection, setSelection] = useState<LiveSelection>(null);
+  const [chartInstrument, setChartInstrument] = useState("");
+  const [chartData, setChartData] = useState<LiveChartResponse | null>(null);
+  const [chartError, setChartError] = useState<string | null>(null);
   const dataRef = useRef(data);
 
   useEffect(() => {
@@ -270,6 +285,51 @@ export function LiveSystemView({ initialData, initialErrors }: LiveSystemViewPro
     return [...groups.entries()];
   }, [filteredInstruments]);
 
+  const activeChartInstruments = useMemo(
+    () => model.instruments.filter((instrument) => instrument.state === "active" || instrument.state === "degraded" || instrument.state === "blocked"),
+    [model.instruments],
+  );
+
+  useEffect(() => {
+    if (chartInstrument || !activeChartInstruments[0]) {
+      return;
+    }
+    setChartInstrument(activeChartInstruments[0].id);
+  }, [activeChartInstruments, chartInstrument]);
+
+  useEffect(() => {
+    if (!chartInstrument) {
+      return;
+    }
+    let cancelled = false;
+    getLiveInstrumentChart(chartInstrument)
+      .then((payload) => {
+        if (!cancelled) {
+          setChartData(payload);
+          setChartError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setChartError(error instanceof Error ? error.message : "Chart unavailable.");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [chartInstrument, refreshedAt]);
+
+  const chartExtents = useMemo(() => {
+    const candles = chartData?.candles.slice(-80) ?? [];
+    const lows = candles.map((candle) => candle.low);
+    const highs = candles.map((candle) => candle.high);
+    return {
+      candles,
+      low: lows.length ? Math.min(...lows) : 0,
+      high: highs.length ? Math.max(...highs) : 1,
+    };
+  }, [chartData]);
+
   const filteredStrategies = useMemo(
     () =>
       model.strategies.filter((strategy) => {
@@ -406,6 +466,78 @@ export function LiveSystemView({ initialData, initialErrors }: LiveSystemViewPro
           </div>
 
           <div className="live-observation-grid">
+            <section className="live-panel live-panel--chart" aria-label="Selected active instrument chart">
+              <div className="live-panel__header">
+                <div>
+                  <span className="live-system-kicker">Backend chart</span>
+                  <h2>{chartInstrument ? formatInstrumentLabel(chartInstrument) : "Active instrument"} candles</h2>
+                </div>
+                <select className="console-select" value={chartInstrument} onChange={(event) => setChartInstrument(event.target.value)}>
+                  {activeChartInstruments.map((instrument) => (
+                    <option key={instrument.id} value={instrument.id}>
+                      {instrument.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="live-chart-layout">
+                <div className="live-candle-chart">
+                  {chartError ? (
+                    <div className="live-empty-state">{chartError}</div>
+                  ) : chartData?.data_state === "UNSUPPORTED" ? (
+                    <div className="live-empty-state">
+                      {chartData.reason_detail?.label ?? "Chart unavailable for this instrument."}
+                      <br />
+                      {chartData.reason_detail?.operator_action ?? "Select another active instrument."}
+                    </div>
+                  ) : chartExtents.candles.length ? (
+                    <svg viewBox="0 0 600 250" role="img" aria-label="Candlestick chart">
+                      <line x1="20" y1="230" x2="580" y2="230" className="live-chart-axis" />
+                      {chartExtents.candles.map((candle, index) => {
+                        const x = chartX(index, chartExtents.candles.length);
+                        const openY = chartY(candle.open, chartExtents.low, chartExtents.high);
+                        const closeY = chartY(candle.close, chartExtents.low, chartExtents.high);
+                        const highY = chartY(candle.high, chartExtents.low, chartExtents.high);
+                        const lowY = chartY(candle.low, chartExtents.low, chartExtents.high);
+                        const up = candle.close >= candle.open;
+                        return (
+                          <g key={`${candle.time}-${index}`} className={up ? "live-candle live-candle--up" : "live-candle live-candle--down"}>
+                            <line x1={x} x2={x} y1={highY} y2={lowY} />
+                            <rect x={x - 2.5} y={Math.min(openY, closeY)} width="5" height={Math.max(2, Math.abs(closeY - openY))} />
+                          </g>
+                        );
+                      })}
+                      {(chartData?.markers ?? []).slice(0, 24).map((marker, index) => {
+                        const markerTime = Number(marker.time ?? 0);
+                        const candleIndex = Math.max(0, chartExtents.candles.findIndex((candle) => candle.time >= markerTime));
+                        const x = chartX(candleIndex === -1 ? chartExtents.candles.length - 1 : candleIndex, chartExtents.candles.length);
+                        const y = 24 + (index % 4) * 12;
+                        const status = String(marker.status ?? "selected");
+                        return <circle key={`marker-${index}-${markerTime}`} cx={x} cy={y} r="4" className={`live-chart-marker live-chart-marker--${status}`} />;
+                      })}
+                    </svg>
+                  ) : (
+                    <div className="live-empty-state">
+                      {chartData?.reason_detail?.label ?? "No candle data is available for the selected instrument."}
+                      <br />
+                      {chartData?.reason_detail?.operator_action ?? "Wait for backend candle data or choose another instrument."}
+                    </div>
+                  )}
+                </div>
+                <aside className="live-feed-state">
+                  <div><span>Stream</span><strong>{String(chartData?.feed_state.stream_reason?.label ?? chartData?.feed_state.stream_status ?? "unknown")}</strong></div>
+                  <div><span>Last tick</span><strong>{chartData?.feed_state.last_tick_age_ms == null ? "n/a" : `${Number(chartData.feed_state.last_tick_age_ms).toFixed(0)}ms`}</strong></div>
+                  <div><span>Spread</span><strong>{chartData?.feed_state.spread == null ? "n/a" : String(chartData.feed_state.spread)}</strong></div>
+                  <div><span>Source</span><strong>{String(chartData?.feed_state.price_source ?? "backend")}</strong></div>
+                  <div><span>Entry</span><strong>{String(chartData?.feed_state.entry_eligibility_reason?.label ?? chartData?.feed_state.entry_eligibility ?? "unknown")}</strong></div>
+                  <div><span>Candidates</span><strong>{chartData?.markers.length ?? 0}</strong></div>
+                  <div><span>Positions</span><strong>{chartData?.position_overlays.length ?? 0}</strong></div>
+                  <div><span>Executions</span><strong>{chartData?.execution_markers.length ?? 0}</strong></div>
+                </aside>
+              </div>
+            </section>
+
             <section className="live-panel live-panel--activity" aria-labelledby="live-activity-heading">
               <div className="live-panel__header">
                 <div>

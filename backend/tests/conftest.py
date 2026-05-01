@@ -17,7 +17,7 @@ from app.models.runtime import StrategyRuntimeState
 from app.models.strategy_deployment import StrategyDeployment
 from app.models.strategy_governance import StrategyFamilyGovernance
 from app.models.trade import AllocationCycle, Execution, Position, ReconciliationEvent, Trade, TradeIntent
-from app.models.watchlist import WatchlistEntry
+from app.models.watchlist import OperatorShortlistEntry, WatchlistEntry
 from app.services.domain_event_service import domain_event_service
 from app.services.health_service import get_health_service
 from app.services.market_status_service import get_market_status_service
@@ -84,6 +84,7 @@ def session() -> Iterator[Session]:
         DomainEvent,
         OperatorControlState,
         WatchlistEntry,
+        OperatorShortlistEntry,
         PromotionRequest,
         StrategyFamilyGovernance,
         StrategyDeployment,

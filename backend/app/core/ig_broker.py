@@ -378,6 +378,51 @@ class IGBroker(Broker):
     def get_market_details(self, instrument: str) -> BrokerMarketDetails:
         return self._load_market_details(instrument, use_cache=True)
 
+    def get_historical_candles(
+        self,
+        instrument: str,
+        *,
+        timeframe: str = "1m",
+        resolution: str | None = None,
+        num_points: int = 120,
+    ) -> list[dict[str, object]]:
+        self._ensure_authenticated()
+        safe_points = max(10, min(int(num_points), 500))
+        resolution = resolution or self._price_resolution(timeframe)
+        payload = self._request("GET", f"/prices/{instrument}/{resolution}/{safe_points}", version="3")
+        candles: list[dict[str, object]] = []
+        for item in payload.get("prices", []):
+            opened = self._mid_price(item.get("openPrice") or {})
+            high = self._mid_price(item.get("highPrice") or {})
+            low = self._mid_price(item.get("lowPrice") or {})
+            close = self._mid_price(item.get("closePrice") or {})
+            timestamp = item.get("snapshotTimeUTC") or item.get("snapshotTime")
+            if opened is None or high is None or low is None or close is None or not timestamp:
+                continue
+            parsed_at = self._parse_ig_timestamp(str(timestamp)) or now_utc()
+            candles.append(
+                {
+                    "time": int(parsed_at.timestamp()),
+                    "open": opened,
+                    "high": high,
+                    "low": low,
+                    "close": close,
+                    "volume": self._coerce_float(item.get("lastTradedVolume")) or 0.0,
+                    "source": "REST_CANDLES",
+                }
+            )
+        return candles
+
+    @staticmethod
+    def _price_resolution(timeframe: str) -> str:
+        return {
+            "1m": "MINUTE",
+            "5m": "MINUTE_5",
+            "15m": "MINUTE_15",
+            "1h": "HOUR",
+            "1d": "DAY",
+        }.get(timeframe, "MINUTE")
+
     def get_streaming_credentials(self) -> IGStreamingCredentials:
         self._ensure_authenticated()
         if self._session is None:
@@ -784,6 +829,7 @@ class IGBroker(Broker):
         min_normal_stop_or_limit_distance = self._extract_rule_value(
             dealing_rules.get("minNormalStopOrLimitDistance")
         )
+
         one_pip_means = instrument_data.get("onePipMeans")
         one_pip_size = self._extract_numeric_prefix(one_pip_means)
         scaling_factor = self._coerce_float(instrument_data.get("scalingFactor"))
@@ -833,6 +879,20 @@ class IGBroker(Broker):
                 },
             },
         )
+
+    def _mid_price(self, value: dict[str, Any]) -> float | None:
+        bid = self._coerce_float(value.get("bid"))
+        ask = self._coerce_float(value.get("ask"))
+        last = self._coerce_float(value.get("lastTraded"))
+        if bid is not None and ask is not None:
+            return round((bid + ask) / 2, 5)
+        if last is not None:
+            return last
+        if bid is not None:
+            return bid
+        if ask is not None:
+            return ask
+        return None
 
     @staticmethod
     def _effective_stop_distance(

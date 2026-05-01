@@ -219,6 +219,18 @@ export function StrategyLive({
             emphasis: "strong",
           },
           {
+            label: "Authorised",
+            value: errors.strategies ? "-" : strategies.filter((strategy) => strategy.authorized).length,
+            tone: errors.strategies ? "inactive" : "positive",
+            emphasis: "strong",
+          },
+          {
+            label: "Candidates Today",
+            value: errors.strategies ? "-" : strategies.reduce((sum, strategy) => sum + (strategy.candidates_generated_today ?? 0), 0),
+            tone: errors.strategies ? "inactive" : "neutral",
+            meta: "generated",
+          },
+          {
             label: "Warnings",
             value: errors.strategies ? "-" : strategies.filter((strategy) => strategy.warning_message).length,
             tone: errors.strategies ? "inactive" : strategies.some((strategy) => strategy.warning_message) ? "warning" : "positive",
@@ -265,7 +277,9 @@ export function StrategyLive({
                 header: "State",
                 render: (row) => <StatusPill label={row.status.toLowerCase()} tone={strategyTone(row)} />,
               },
-              { key: "instrument", header: "Default", render: (row) => formatInstrumentLabel(row.instrument) },
+              { key: "auth", header: "Authorised", render: (row) => <StatusPill label={row.authorized ? "yes" : "no"} tone={row.authorized ? "positive" : "inactive"} /> },
+              { key: "evaluating", header: "Evaluating", render: (row) => row.evaluating_instrument_count ?? row.active_runtime_count ?? 0 },
+              { key: "candidates", header: "Today", render: (row) => `${row.candidates_generated_today ?? 0} / ${row.candidates_promoted_today ?? 0} / ${row.candidates_blocked_today ?? 0}` },
               { key: "pnl", header: "PnL", render: (row) => formatSignedCurrency(row.current_pnl) },
             ]}
           />
@@ -333,6 +347,11 @@ export function StrategyLive({
                 <span>Open positions</span>
                 <strong>{selectedStrategy.open_position_count ?? 0}</strong>
                 <em>{selectedStrategy.win_rate}% win rate</em>
+              </div>
+              <div className="summary-bar__item">
+                <span>Candidates today</span>
+                <strong>{selectedStrategy.candidates_generated_today ?? 0}</strong>
+                <em>{selectedStrategy.candidates_promoted_today ?? 0} promoted / {selectedStrategy.candidates_blocked_today ?? 0} blocked</em>
               </div>
             </div>
 

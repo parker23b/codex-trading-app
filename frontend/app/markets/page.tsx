@@ -1,5 +1,5 @@
 import { MarketOverviewDashboard } from "@/components/markets/market-overview-dashboard";
-import { getMarketOverview, loadWithMeta } from "@/lib/api";
+import { EMPTY_MARKET_CATALOGUE, EMPTY_STRATEGY_WATCHLIST, getMarketCatalogue, getMarketOverview, getStrategyWatchlist, loadWithMeta } from "@/lib/api";
 import { MarketCategoryOverviewResponse } from "@/lib/types";
 
 const EMPTY_FOREX_OVERVIEW: MarketCategoryOverviewResponse = {
@@ -21,7 +21,20 @@ const EMPTY_FOREX_OVERVIEW: MarketCategoryOverviewResponse = {
 };
 
 export default async function MarketsPage() {
-  const overview = await loadWithMeta(() => getMarketOverview("forex"), EMPTY_FOREX_OVERVIEW);
+  const [overview, catalogue, strategyWatchlist] = await Promise.all([
+    loadWithMeta(() => getMarketOverview("forex"), EMPTY_FOREX_OVERVIEW),
+    loadWithMeta(() => getMarketCatalogue(), EMPTY_MARKET_CATALOGUE),
+    loadWithMeta(() => getStrategyWatchlist(), EMPTY_STRATEGY_WATCHLIST),
+  ]);
 
-  return <MarketOverviewDashboard initialOverview={overview.data} initialOverviewError={overview.error} />;
+  return (
+    <MarketOverviewDashboard
+      initialOverview={overview.data}
+      initialOverviewError={overview.error}
+      initialCatalogue={catalogue.data}
+      initialCatalogueError={catalogue.error}
+      initialStrategyWatchlist={strategyWatchlist.data}
+      initialStrategyWatchlistError={strategyWatchlist.error}
+    />
+  );
 }
