@@ -186,6 +186,8 @@ export const EMPTY_SYSTEM_OPERATING_LIMITS: SystemOperatingLimits = {
 };
 
 export const EMPTY_DASHBOARD_SNAPSHOT: DashboardSnapshot = {
+  accountValue: null,
+  accountValuePercent: null,
   dailyPnl: null,
   dailyPnlPercent: null,
   openRisk: 0,
@@ -242,6 +244,7 @@ export const EMPTY_STRATEGY_WATCHLIST: StrategyWatchlistResponse = {
   generated_at: new Date(0).toISOString(),
   limit: 0,
   active_count: 0,
+  normal_count: 0,
   streaming_count: 0,
   protective_count: 0,
   cap_exceeded_by_protective_coverage: false,

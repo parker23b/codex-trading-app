@@ -190,6 +190,7 @@ export type StrategyWatchlistResponse = {
   generated_at: string;
   limit: number;
   active_count: number;
+  normal_count?: number;
   streaming_count: number;
   protective_count?: number;
   cap_exceeded_by_protective_coverage?: boolean;
@@ -576,6 +577,8 @@ export type DomainEvent = {
 };
 
 export type DashboardSnapshot = {
+  accountValue?: number | null;
+  accountValuePercent?: number | null;
   dailyPnl?: number | null;
   dailyPnlPercent?: number | null;
   openRisk: number;

@@ -4,6 +4,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from math import isfinite
 from typing import Iterator
 
 from sqlmodel import Session, select
@@ -14,8 +15,14 @@ from app.core.logging import get_logger
 from app.core.runtime import runtime_manager
 from app.db.session import engine
 from app.models.trade import Position
-from app.models.watchlist import OperatorShortlistEntry, WatchlistEntry, WatchlistStatus, WatchlistTier
+from app.models.watchlist import (
+    OperatorShortlistEntry,
+    WatchlistEntry,
+    WatchlistStatus,
+    WatchlistTier,
+)
 from app.services.trade_service import TradeService
+
 logger = get_logger(__name__)
 
 
@@ -141,8 +148,7 @@ class WatchlistService:
             for instrument in list_market_instruments()
         }
         self._definition_by_instrument = {
-            instrument.epic: instrument
-            for instrument in list_market_instruments()
+            instrument.epic: instrument for instrument in list_market_instruments()
         }
 
     def list_catalogue(self) -> list[dict[str, object]]:
@@ -178,7 +184,9 @@ class WatchlistService:
             "summary": {
                 "total_count": len(rows),
                 "shortlisted_count": len([row for row in rows if row["shortlisted"]]),
-                "strategy_watchlist_count": len([row for row in rows if row["in_strategy_watchlist"]]),
+                "strategy_watchlist_count": len(
+                    [row for row in rows if row["in_strategy_watchlist"]]
+                ),
                 "streaming_count": len([row for row in rows if row["streaming_now"]]),
             },
         }
@@ -186,7 +194,11 @@ class WatchlistService:
     def list_shortlist(self) -> list[dict[str, object]]:
         with self._session_scope() as session:
             entries = list(
-                session.exec(select(OperatorShortlistEntry).order_by(OperatorShortlistEntry.created_at)).all()
+                session.exec(
+                    select(OperatorShortlistEntry).order_by(
+                        OperatorShortlistEntry.created_at
+                    )
+                ).all()
             )
             active = {
                 entry.instrument
@@ -216,17 +228,26 @@ class WatchlistService:
         rows = self.list_shortlist()
         return {"generated_at": self._now(), "instruments": rows, "count": len(rows)}
 
-    def set_shortlisted(self, instrument: str, *, actor_id: str = "operator") -> dict[str, object]:
+    def set_shortlisted(
+        self, instrument: str, *, actor_id: str = "operator"
+    ) -> dict[str, object]:
         definition = self._definition_by_instrument.get(instrument)
         if definition is None:
             raise ValueError(f"Unknown instrument '{instrument}'.")
         with self._session_scope() as session:
             now = self._now()
             entry = session.exec(
-                select(OperatorShortlistEntry).where(OperatorShortlistEntry.instrument == instrument)
+                select(OperatorShortlistEntry).where(
+                    OperatorShortlistEntry.instrument == instrument
+                )
             ).first()
             if entry is None:
-                entry = OperatorShortlistEntry(instrument=instrument, actor_id=actor_id, created_at=now, updated_at=now)
+                entry = OperatorShortlistEntry(
+                    instrument=instrument,
+                    actor_id=actor_id,
+                    created_at=now,
+                    updated_at=now,
+                )
             else:
                 entry.actor_id = actor_id
                 entry.updated_at = now
@@ -235,14 +256,18 @@ class WatchlistService:
             return self._serialize_catalogue_definition(
                 definition=definition,
                 shortlisted=True,
-                in_strategy_watchlist=self._is_active_tier1(session=session, instrument=instrument),
+                in_strategy_watchlist=self._is_active_tier1(
+                    session=session, instrument=instrument
+                ),
                 streaming_now=instrument in self.get_streaming_plan().instruments,
             )
 
     def remove_shortlisted(self, instrument: str) -> None:
         with self._session_scope() as session:
             entry = session.exec(
-                select(OperatorShortlistEntry).where(OperatorShortlistEntry.instrument == instrument)
+                select(OperatorShortlistEntry).where(
+                    OperatorShortlistEntry.instrument == instrument
+                )
             ).first()
             if entry is None:
                 return
@@ -261,21 +286,34 @@ class WatchlistService:
             )
             streamed = self._streaming_now_set()
             return [
-                self._serialize_strategy_watchlist_entry(entry, streamed=entry.instrument in streamed)
-                for entry in sorted(entries, key=lambda item: (0 if item.pinned else 1, -item.priority_score, item.instrument))
+                self._serialize_strategy_watchlist_entry(
+                    entry, streamed=entry.instrument in streamed
+                )
+                for entry in sorted(
+                    entries,
+                    key=lambda item: (
+                        0 if item.pinned else 1,
+                        -item.priority_score,
+                        item.instrument,
+                    ),
+                )
             ]
 
     def strategy_watchlist_response(self) -> dict[str, object]:
         rows = self.list_strategy_watchlist()
         protective_count = len([row for row in rows if row.get("protective")])
+        normal_count = len(rows) - protective_count
         limit = self.settings.ig_streaming_max_instruments
         return {
             "generated_at": self._now(),
             "limit": limit,
             "active_count": len(rows),
+            "normal_count": normal_count,
             "streaming_count": len([row for row in rows if row["streamed"]]),
             "protective_count": protective_count,
-            "cap_exceeded_by_protective_coverage": bool(limit > 0 and len(rows) > limit and protective_count),
+            "cap_exceeded_by_protective_coverage": bool(
+                limit > 0 and len(rows) > limit and protective_count
+            ),
             "instruments": rows,
         }
 
@@ -286,12 +324,17 @@ class WatchlistService:
         with self._session_scope() as session:
             now = self._now()
             self._sync_system_entries(session=session, now=now)
-            active_count = len(
-                session.exec(
-                    select(WatchlistEntry)
-                    .where(WatchlistEntry.tier == WatchlistTier.TIER1.value)
-                    .where(WatchlistEntry.status == WatchlistStatus.ACTIVE.value)
-                ).all()
+            active_entries = session.exec(
+                select(WatchlistEntry)
+                .where(WatchlistEntry.tier == WatchlistTier.TIER1.value)
+                .where(WatchlistEntry.status == WatchlistStatus.ACTIVE.value)
+            ).all()
+            normal_count = len(
+                [
+                    entry
+                    for entry in active_entries
+                    if not entry.pinned and not self._is_protective_reason(entry.reason)
+                ]
             )
             max_instruments = self.settings.ig_streaming_max_instruments
             existing_entries = {
@@ -315,11 +358,22 @@ class WatchlistService:
                     and existing.tier == WatchlistTier.TIER1.value
                     and existing.status == WatchlistStatus.ACTIVE.value
                 )
-                if not already_active and max_instruments > 0 and active_count >= max_instruments:
+                existing_is_normal = bool(
+                    existing is not None
+                    and not existing.pinned
+                    and not self._is_protective_reason(existing.reason)
+                )
+                if (
+                    not already_active
+                    and max_instruments > 0
+                    and normal_count >= max_instruments
+                ):
                     skipped.append(
                         {
                             "instrument": instrument,
-                            "reason": self.reason_detail("strategy_watchlist_limit_reached")["label"],
+                            "reason": self.reason_detail(
+                                "strategy_watchlist_limit_reached"
+                            )["label"],
                             "reason_detail": self.reason_detail(
                                 "strategy_watchlist_limit_reached",
                                 operator_action=(
@@ -340,21 +394,29 @@ class WatchlistService:
                     reason=self.OPERATOR_STRATEGY_WATCHLIST_REASON,
                 )
                 existing_entries[instrument] = entry
-                if not already_active:
-                    active_count += 1
+                if not already_active or not existing_is_normal:
+                    normal_count += 1
                 added.append(
                     {
                         "instrument": instrument,
                         "reason": self.reason_detail(
-                            "already_in_strategy_watchlist" if already_active else "added_to_strategy_watchlist"
+                            "already_in_strategy_watchlist"
+                            if already_active
+                            else "added_to_strategy_watchlist"
                         )["label"],
                         "reason_detail": self.reason_detail(
-                            "already_in_strategy_watchlist" if already_active else "added_to_strategy_watchlist"
+                            "already_in_strategy_watchlist"
+                            if already_active
+                            else "added_to_strategy_watchlist"
                         ),
                     }
                 )
             session.commit()
-        return {"added": added, "skipped": skipped, "limit": self.settings.ig_streaming_max_instruments}
+        return {
+            "added": added,
+            "skipped": skipped,
+            "limit": self.settings.ig_streaming_max_instruments,
+        }
 
     def feed_state_response(self) -> dict[str, object]:
         watchlist = self.list_strategy_watchlist()
@@ -385,7 +447,14 @@ class WatchlistService:
         desired = instrument in stream_health.desired_instruments
         capped = instrument in stream_health.capped_instruments
         stale_threshold_ms = self.settings.ig_streaming_stale_after_seconds * 1000
-        stale = bool(subscribed and (not stream_health.connected or last_tick_age_ms is None or last_tick_age_ms > stale_threshold_ms))
+        stale = bool(
+            subscribed
+            and (
+                not stream_health.connected
+                or last_tick_age_ms is None
+                or last_tick_age_ms > stale_threshold_ms
+            )
+        )
         stream_status = (
             "stale"
             if stale
@@ -400,27 +469,37 @@ class WatchlistService:
         market_status = None
         market_error = None
         try:
-            market_status = get_market_status_service().get_status(instrument).model_dump()
+            market_status = (
+                get_market_status_service().get_status(instrument).model_dump()
+            )
         except Exception as exc:  # pragma: no cover - defensive read model degradation
             market_error = str(exc)
 
         runtime_count = len(runtime_manager.get_engines_for_instrument(instrument))
         market_ok = bool(market_status and market_status.get("is_ok"))
         strategies_may_evaluate = bool(runtime_count and market_ok and not stale)
-        reason_code = "eligible" if strategies_may_evaluate else "market_readiness_blocked"
+        reason_code = (
+            "eligible" if strategies_may_evaluate else "market_readiness_blocked"
+        )
         if runtime_count == 0:
             reason_code = "no_active_strategy_runtime"
         elif stale:
             reason_code = "stale_stream"
         elif market_status and not market_status.get("is_ok"):
             reason_code = "market_readiness_blocked"
+        has_snapshot = bool(
+            instrument in self._definition_by_instrument
+            and market_status
+            and market_status.get("last_price_age_ms") is not None
+            and isfinite(float(market_status.get("last_price_age_ms") or 0.0))
+        )
         source = (
             "STALE"
             if stale
             else "STREAM"
             if subscribed and stream_health.connected
             else "SNAPSHOT"
-            if market_status and market_status.get("last_price_age_ms") is not None
+            if has_snapshot
             else "UNAVAILABLE"
         )
         stream_reason_code = "stale_stream" if stale else stream_status
@@ -442,7 +521,9 @@ class WatchlistService:
             "entry_eligibility": self.reason_detail(reason_code)["label"],
             "entry_eligibility_reason": self.reason_detail(
                 reason_code,
-                label=str(market_status.get("reason")) if reason_code == "market_readiness_blocked" and market_status else None,
+                label=str(market_status.get("reason"))
+                if reason_code == "market_readiness_blocked" and market_status
+                else None,
             ),
             "strategies_may_evaluate": strategies_may_evaluate,
             "active_strategy_runtime_count": runtime_count,
@@ -451,11 +532,15 @@ class WatchlistService:
 
     def remove_from_strategy_watchlist(self, instrument: str) -> None:
         with self._session_scope() as session:
-            entry = session.exec(select(WatchlistEntry).where(WatchlistEntry.instrument == instrument)).first()
+            entry = session.exec(
+                select(WatchlistEntry).where(WatchlistEntry.instrument == instrument)
+            ).first()
             if entry is None or entry.reason != self.OPERATOR_STRATEGY_WATCHLIST_REASON:
                 return
             entry.status = WatchlistStatus.COOLDOWN.value
-            entry.cooldown_until = self._now() + timedelta(seconds=self.settings.ig_streaming_demotion_cooldown_seconds)
+            entry.cooldown_until = self._now() + timedelta(
+                seconds=self.settings.ig_streaming_demotion_cooldown_seconds
+            )
             entry.updated_at = self._now()
             session.add(entry)
             session.commit()
@@ -489,6 +574,7 @@ class WatchlistService:
             selected: list[str] = []
             pinned: list[str] = []
             capped: list[str] = []
+            normal_selected_count = 0
 
             for entry in entries:
                 asset_class = (entry.asset_class or "UNCLASSIFIED").upper()
@@ -498,7 +584,7 @@ class WatchlistService:
                     asset_usage[asset_class] += 1
                     continue
 
-                if max_instruments > 0 and len(selected) >= max_instruments:
+                if max_instruments > 0 and normal_selected_count >= max_instruments:
                     capped.append(entry.instrument)
                     continue
 
@@ -508,10 +594,18 @@ class WatchlistService:
                     continue
 
                 selected.append(entry.instrument)
+                normal_selected_count += 1
                 asset_usage[asset_class] += 1
 
             for instrument in selected:
-                entry = next((candidate for candidate in entries if candidate.instrument == instrument), None)
+                entry = next(
+                    (
+                        candidate
+                        for candidate in entries
+                        if candidate.instrument == instrument
+                    ),
+                    None,
+                )
                 if entry is not None:
                     entry.last_streamed_at = now
                     entry.updated_at = now
@@ -540,7 +634,8 @@ class WatchlistService:
             )
             tier2_entries.sort(
                 key=lambda entry: (
-                    self._as_utc(entry.last_refreshed_at) or datetime(1970, 1, 1, tzinfo=UTC),
+                    self._as_utc(entry.last_refreshed_at)
+                    or datetime(1970, 1, 1, tzinfo=UTC),
                     -entry.priority_score,
                     entry.instrument,
                 )
@@ -551,7 +646,9 @@ class WatchlistService:
                 if instrument not in streamed and instrument not in candidates:
                     candidates.append(instrument)
 
-            stale_cutoff = now - timedelta(seconds=self.settings.tier2_refresh_stale_after_seconds)
+            stale_cutoff = now - timedelta(
+                seconds=self.settings.tier2_refresh_stale_after_seconds
+            )
             for entry in tier2_entries:
                 if entry.instrument in streamed or entry.instrument in candidates:
                     continue
@@ -579,7 +676,9 @@ class WatchlistService:
         reason: str = "promotion_accepted",
     ) -> None:
         with self._session_scope() as session:
-            existing = session.exec(select(WatchlistEntry).where(WatchlistEntry.instrument == instrument)).first()
+            existing = session.exec(
+                select(WatchlistEntry).where(WatchlistEntry.instrument == instrument)
+            ).first()
             priority_score = max(self.SEED_PRIORITY + 5.0, round(score * 100, 2))
             self._upsert_entry(
                 session=session,
@@ -590,7 +689,9 @@ class WatchlistService:
                 priority_score=priority_score,
                 reason=reason,
             )
-            entry = session.exec(select(WatchlistEntry).where(WatchlistEntry.instrument == instrument)).first()
+            entry = session.exec(
+                select(WatchlistEntry).where(WatchlistEntry.instrument == instrument)
+            ).first()
             if entry is None:
                 return
             entry.promotion_expires_at = expires_at
@@ -601,7 +702,9 @@ class WatchlistService:
 
     def record_tier2_refresh(self, *, instrument: str, refreshed_at: datetime) -> None:
         with self._session_scope() as session:
-            entry = session.exec(select(WatchlistEntry).where(WatchlistEntry.instrument == instrument)).first()
+            entry = session.exec(
+                select(WatchlistEntry).where(WatchlistEntry.instrument == instrument)
+            ).first()
             if entry is None:
                 entry = WatchlistEntry(
                     instrument=instrument,
@@ -642,7 +745,13 @@ class WatchlistService:
             and entry.status == WatchlistStatus.ACTIVE.value
         }
 
-        desired_active = set(pinned_instruments) | runtime_instruments | seed_instruments | promoted_instruments | operator_instruments
+        desired_active = (
+            set(pinned_instruments)
+            | runtime_instruments
+            | seed_instruments
+            | promoted_instruments
+            | operator_instruments
+        )
 
         for instrument, reason in pinned_instruments.items():
             self._upsert_entry(
@@ -682,7 +791,11 @@ class WatchlistService:
             )
 
         for instrument in operator_instruments:
-            if instrument in pinned_instruments or instrument in runtime_instruments or instrument in seed_instruments:
+            if (
+                instrument in pinned_instruments
+                or instrument in runtime_instruments
+                or instrument in seed_instruments
+            ):
                 continue
             self._upsert_entry(
                 session=session,
@@ -705,7 +818,9 @@ class WatchlistService:
             if min_residency_until is not None and min_residency_until > now:
                 continue
             entry.status = WatchlistStatus.COOLDOWN.value
-            entry.cooldown_until = now + timedelta(seconds=self.settings.ig_streaming_demotion_cooldown_seconds)
+            entry.cooldown_until = now + timedelta(
+                seconds=self.settings.ig_streaming_demotion_cooldown_seconds
+            )
             entry.updated_at = now
             session.add(entry)
 
@@ -733,16 +848,27 @@ class WatchlistService:
                 priority_score=priority_score,
                 requested_frequency=self.settings.ig_streaming_requested_frequency,
                 assigned_at=now,
-                min_residency_until=now + timedelta(seconds=self.settings.ig_streaming_min_tier1_residency_seconds),
+                min_residency_until=now
+                + timedelta(
+                    seconds=self.settings.ig_streaming_min_tier1_residency_seconds
+                ),
                 updated_at=now,
             )
         else:
             entry = existing
             cooldown_until = self._as_utc(entry.cooldown_until)
-            if entry.status == WatchlistStatus.COOLDOWN.value and cooldown_until and cooldown_until > now and pinned:
+            if (
+                entry.status == WatchlistStatus.COOLDOWN.value
+                and cooldown_until
+                and cooldown_until > now
+                and pinned
+            ):
                 logger.info(
                     "Pinned instrument bypassed watchlist cooldown",
-                    extra={"instrument": instrument, "cooldown_until": cooldown_until.isoformat()},
+                    extra={
+                        "instrument": instrument,
+                        "cooldown_until": cooldown_until.isoformat(),
+                    },
                 )
             entry.tier = WatchlistTier.TIER1.value
             entry.status = WatchlistStatus.ACTIVE.value
@@ -754,7 +880,9 @@ class WatchlistService:
             entry.cooldown_until = None
             min_residency_until = self._as_utc(entry.min_residency_until)
             if min_residency_until is None or min_residency_until < now:
-                entry.min_residency_until = now + timedelta(seconds=self.settings.ig_streaming_min_tier1_residency_seconds)
+                entry.min_residency_until = now + timedelta(
+                    seconds=self.settings.ig_streaming_min_tier1_residency_seconds
+                )
             if reason != "promotion_accepted":
                 entry.promotion_expires_at = None
             entry.updated_at = now
@@ -789,14 +917,18 @@ class WatchlistService:
                 entry.status = WatchlistStatus.ACTIVE.value
                 entry.asset_class = self._asset_class_by_instrument.get(instrument)
                 entry.reason = entry.reason or "tier2_seed"
-                entry.priority_score = max(entry.priority_score, self._tier2_priority(instrument))
+                entry.priority_score = max(
+                    entry.priority_score, self._tier2_priority(instrument)
+                )
                 entry.updated_at = now
             session.add(entry)
         session.commit()
 
     def _collect_pinned_instruments(self, *, session: Session) -> dict[str, str]:
         reasons: dict[str, set[str]] = defaultdict(set)
-        positions = session.exec(select(Position).where(Position.is_open.is_(True))).all()
+        positions = session.exec(
+            select(Position).where(Position.is_open.is_(True))
+        ).all()
         for position in positions:
             reasons[position.instrument].add("open_position")
 
@@ -840,7 +972,9 @@ class WatchlistService:
         return value.astimezone(UTC)
 
     def _tier2_priority(self, instrument: str) -> float:
-        activity_level = self._activity_level_by_instrument.get(instrument, "LOW").upper()
+        activity_level = self._activity_level_by_instrument.get(
+            instrument, "LOW"
+        ).upper()
         if activity_level == "HIGH":
             return self.TIER2_SEED_PRIORITY + 10.0
         if activity_level == "MEDIUM":
@@ -854,7 +988,9 @@ class WatchlistService:
         return promotion_expires_at >= now
 
     def _is_active_tier1(self, *, session: Session, instrument: str) -> bool:
-        entry = session.exec(select(WatchlistEntry).where(WatchlistEntry.instrument == instrument)).first()
+        entry = session.exec(
+            select(WatchlistEntry).where(WatchlistEntry.instrument == instrument)
+        ).first()
         return bool(
             entry is not None
             and entry.tier == WatchlistTier.TIER1.value
@@ -889,9 +1025,15 @@ class WatchlistService:
             "shortlisted": shortlisted,
             "in_strategy_watchlist": in_strategy_watchlist,
             "streaming_now": streaming_now,
-            "activity_level": definition.activity_level if definition is not None else "LOW",
-            "strategy_compatibility": list(definition.compatible_strategies) if definition is not None else [],
-            "reference_price": definition.reference_price if definition is not None else None,
+            "activity_level": definition.activity_level
+            if definition is not None
+            else "LOW",
+            "strategy_compatibility": list(definition.compatible_strategies)
+            if definition is not None
+            else [],
+            "reference_price": definition.reference_price
+            if definition is not None
+            else None,
         }
 
     @staticmethod
@@ -901,7 +1043,9 @@ class WatchlistService:
         parts = {part.strip() for part in reason.split(",")}
         return bool(parts & {"open_position", "pending_trade_intent"})
 
-    def _serialize_strategy_watchlist_entry(self, entry: WatchlistEntry, *, streamed: bool) -> dict[str, object]:
+    def _serialize_strategy_watchlist_entry(
+        self, entry: WatchlistEntry, *, streamed: bool
+    ) -> dict[str, object]:
         reason_code = entry.reason or "strategy_watchlist"
         protective = self._is_protective_reason(entry.reason)
         return {
@@ -937,7 +1081,8 @@ class WatchlistService:
                 return {
                     "code": code,
                     "label": label or "Protective coverage",
-                    "operator_action": operator_action or "Keep streaming until all protective conditions clear.",
+                    "operator_action": operator_action
+                    or "Keep streaming until all protective conditions clear.",
                     "components": details,
                 }
         default_label, default_action = self.REASON_DETAILS.get(

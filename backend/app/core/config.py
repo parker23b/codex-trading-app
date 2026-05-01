@@ -20,7 +20,10 @@ class Settings(BaseSettings):
     database_url: str = f"sqlite:///{DEFAULT_SQLITE_DB_PATH.as_posix()}"
     broker_provider: str = "IG"
     broker_mode: str = "DEMO"
-    cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    cors_origins: Annotated[list[str], NoDecode] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
     starting_account_value: float = 100_000.0
     dashboard_recent_trade_window: int = 30
     market_data_poll_interval_seconds: float = 2.0
@@ -83,7 +86,7 @@ class Settings(BaseSettings):
     ig_streaming_watch_interval_seconds: float = 1.0
     ig_streaming_stale_after_seconds: float = 20.0
     ig_streaming_transition_debounce_seconds: float = 10.0
-    ig_streaming_max_instruments: int = 6
+    ig_streaming_max_instruments: int = 8
     ig_streaming_max_promotions_per_minute: int = 4
     ig_streaming_requested_frequency: str = "2.0"
     ig_streaming_min_tier1_residency_seconds: int = 30
@@ -105,7 +108,9 @@ class Settings(BaseSettings):
     ig_verify_ssl: bool = True
     ig_ca_bundle_path: str | None = None
 
-    model_config = SettingsConfigDict(env_file=BACKEND_ENV_FILE, case_sensitive=False, extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=BACKEND_ENV_FILE, case_sensitive=False, extra="ignore"
+    )
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -118,28 +123,42 @@ class Settings(BaseSettings):
     @classmethod
     def parse_seed_instruments(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):
-            return [instrument.strip() for instrument in value.split(",") if instrument.strip()]
+            return [
+                instrument.strip()
+                for instrument in value.split(",")
+                if instrument.strip()
+            ]
         return value
 
     @field_validator("tier2_seed_instruments", mode="before")
     @classmethod
     def parse_tier2_seed_instruments(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):
-            return [instrument.strip() for instrument in value.split(",") if instrument.strip()]
+            return [
+                instrument.strip()
+                for instrument in value.split(",")
+                if instrument.strip()
+            ]
         return value
 
     @field_validator("ig_streaming_asset_class_slot_budgets", mode="before")
     @classmethod
-    def parse_ig_streaming_asset_class_slot_budgets(cls, value: str | dict[str, int]) -> dict[str, int]:
+    def parse_ig_streaming_asset_class_slot_budgets(
+        cls, value: str | dict[str, int]
+    ) -> dict[str, int]:
         if isinstance(value, dict):
-            return {str(key).upper(): int(raw_value) for key, raw_value in value.items()}
+            return {
+                str(key).upper(): int(raw_value) for key, raw_value in value.items()
+            }
         parsed: dict[str, int] = {}
         for segment in value.split(","):
             if not segment.strip():
                 continue
             key, separator, raw_amount = segment.partition("=")
             if not separator:
-                raise ValueError("IG_STREAMING_ASSET_CLASS_SLOT_BUDGETS must use ASSET=COUNT entries.")
+                raise ValueError(
+                    "IG_STREAMING_ASSET_CLASS_SLOT_BUDGETS must use ASSET=COUNT entries."
+                )
             parsed[key.strip().upper()] = int(raw_amount.strip())
         return parsed
 
@@ -150,7 +169,7 @@ class Settings(BaseSettings):
         if not value.startswith(sqlite_prefix):
             return value
 
-        raw_path = value[len(sqlite_prefix):]
+        raw_path = value[len(sqlite_prefix) :]
         if raw_path in {"", ":memory:"} or raw_path.startswith("/"):
             return value
 
@@ -285,7 +304,9 @@ class Settings(BaseSettings):
             return "unlimited"
         frequency = float(value)
         if frequency <= 0:
-            raise ValueError("IG_STREAMING_REQUESTED_FREQUENCY must be a positive number or 'unlimited'.")
+            raise ValueError(
+                "IG_STREAMING_REQUESTED_FREQUENCY must be a positive number or 'unlimited'."
+            )
         return value.strip()
 
 

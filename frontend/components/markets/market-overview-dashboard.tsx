@@ -183,7 +183,8 @@ export function MarketOverviewDashboard({
   };
 
   const selectedRows = catalogue.instruments.filter((row) => selectedIds.includes(row.instrument));
-  const addableShortlist = shortlistedRows.filter((row) => !canAdd(row, strategyWatchlist.limit, strategyWatchlist.active_count));
+  const normalWatchlistCount = strategyWatchlist.normal_count ?? Math.max(0, strategyWatchlist.active_count - (strategyWatchlist.protective_count ?? 0));
+  const addableShortlist = shortlistedRows.filter((row) => !canAdd(row, strategyWatchlist.limit, normalWatchlistCount));
 
   return (
     <main className="console-page console-page--dense">
@@ -193,9 +194,9 @@ export function MarketOverviewDashboard({
           { label: "Shortlist", value: catalogue.summary.shortlisted_count, tone: "neutral", meta: "operator interest" },
           {
             label: "Strategy Watchlist",
-            value: `${strategyWatchlist.active_count}/${strategyWatchlist.limit || "-"}`,
-            tone: watchlistError ? "inactive" : strategyWatchlist.cap_exceeded_by_protective_coverage ? "warning" : strategyWatchlist.active_count >= strategyWatchlist.limit ? "warning" : "positive",
-            meta: watchlistError ?? (strategyWatchlist.cap_exceeded_by_protective_coverage ? "protective coverage above cap" : "eligible for evaluation"),
+            value: `${normalWatchlistCount}/${strategyWatchlist.limit || "-"}`,
+            tone: watchlistError ? "inactive" : strategyWatchlist.cap_exceeded_by_protective_coverage ? "warning" : normalWatchlistCount >= strategyWatchlist.limit ? "warning" : "positive",
+            meta: watchlistError ?? (strategyWatchlist.cap_exceeded_by_protective_coverage ? `${strategyWatchlist.protective_count ?? 0} protective above normal capacity` : "normal eligible capacity"),
           },
           { label: "Live", value: strategyWatchlist.streaming_count, tone: strategyWatchlist.streaming_count ? "positive" : "inactive", meta: "streaming now" },
         ]}
@@ -271,13 +272,13 @@ export function MarketOverviewDashboard({
                 {
                   key: "reason",
                   header: "Add Readiness",
-                  render: (row) => canAdd(row, strategyWatchlist.limit, strategyWatchlist.active_count) ?? "Can be added",
+                  render: (row) => canAdd(row, strategyWatchlist.limit, normalWatchlistCount) ?? "Can be added",
                 },
                 {
                   key: "action",
                   header: "Action",
                   render: (row) => (
-                    <button type="button" className="console-button console-button--ghost" disabled={Boolean(canAdd(row, strategyWatchlist.limit, strategyWatchlist.active_count)) || isPending} onClick={() => addToStrategyWatchlist([row.instrument])}>
+                    <button type="button" className="console-button console-button--ghost" disabled={Boolean(canAdd(row, strategyWatchlist.limit, normalWatchlistCount)) || isPending} onClick={() => addToStrategyWatchlist([row.instrument])}>
                       Add
                     </button>
                   ),
@@ -315,7 +316,8 @@ export function MarketOverviewDashboard({
                 <div className="metric-stack__row"><span>Shortlist</span><strong>Operator interest</strong></div>
                 <div className="metric-stack__row"><span>Strategy watchlist</span><strong>Stream eligible</strong></div>
                 <div className="metric-stack__row"><span>Live</span><strong>Streaming/evaluating</strong></div>
-                <div className="metric-stack__row"><span>Protective coverage</span><strong>{strategyWatchlist.protective_count ?? 0} pinned</strong></div>
+                <div className="metric-stack__row"><span>Normal capacity</span><strong>{normalWatchlistCount}/{strategyWatchlist.limit || "-"}</strong></div>
+                <div className="metric-stack__row"><span>Protective coverage</span><strong>{strategyWatchlist.protective_count ?? 0} pinned separately</strong></div>
               </div>
               {overviewError || catalogueError || watchlistError ? <div className="console-alert console-alert--warning">{overviewError ?? catalogueError ?? watchlistError}<DataIndicator state="error" message={overviewError ?? catalogueError ?? watchlistError ?? "Market data unavailable."} /></div> : null}
               {statusMessage ? <div className="console-alert console-alert--neutral">{statusMessage}</div> : null}

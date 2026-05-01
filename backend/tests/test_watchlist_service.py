@@ -40,7 +40,10 @@ def test_streaming_plan_pins_open_positions_and_pending_trade_intents(session):
 
     assert "CS.D.EURUSD.CFD.IP" in plan.instruments
     assert "IX.D.NASDAQ.DAILY.IP" in plan.instruments
-    assert set(plan.pinned_instruments) == {"CS.D.EURUSD.CFD.IP", "IX.D.NASDAQ.DAILY.IP"}
+    assert set(plan.pinned_instruments) == {
+        "CS.D.EURUSD.CFD.IP",
+        "IX.D.NASDAQ.DAILY.IP",
+    }
 
 
 def test_streaming_plan_uses_runtime_instruments_with_budget_after_pins(session):
@@ -67,8 +70,19 @@ def test_streaming_plan_uses_runtime_instruments_with_budget_after_pins(session)
     plan = WatchlistService(session).get_streaming_plan()
 
     assert "CS.D.EURUSD.CFD.IP" in plan.instruments
-    assert len(plan.instruments) == 2
-    assert len(plan.capped_instruments) == 1
+    assert len(plan.instruments) == 3
+    assert len(plan.pinned_instruments) == 1
+    assert (
+        len(
+            [
+                instrument
+                for instrument in plan.instruments
+                if instrument not in plan.pinned_instruments
+            ]
+        )
+        == 2
+    )
+    assert len(plan.capped_instruments) == 0
 
 
 def test_non_pinned_entry_enters_cooldown_after_min_residency(session):
@@ -79,7 +93,9 @@ def test_non_pinned_entry_enters_cooldown_after_min_residency(session):
     runtime_manager.start("mean_reversion", "CS.D.GBPUSD.CFD.IP")
     service._sync_system_entries(session=session, now=now)
 
-    runtime_manager.stop(strategy_name="mean_reversion", instrument="CS.D.GBPUSD.CFD.IP")
+    runtime_manager.stop(
+        strategy_name="mean_reversion", instrument="CS.D.GBPUSD.CFD.IP"
+    )
     service._sync_system_entries(session=session, now=now + timedelta(seconds=31))
 
     entry = session.exec(

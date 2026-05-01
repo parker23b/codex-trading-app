@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
+from app.core.broker_factory import get_broker
 from app.core.config import get_settings
 from app.core.instrument_catalog import list_instruments
 from app.core.runtime import runtime_manager
@@ -22,15 +23,35 @@ class DashboardService:
         positions = self.trade_service.list_positions()
         recent_trades = trades[: self.settings.dashboard_recent_trade_window]
         system_daily_pnl = self._daily_pnl(trades, positions)
+        persisted_account_value = self._persisted_account_value(trades, positions)
+        broker_info = self._broker_info()
+        account_value = (
+            broker_info["equity"]
+            if broker_info is not None
+            else persisted_account_value
+        )
 
         return {
+            "accountValue": round(account_value, 2),
+            "accountValuePercent": round(
+                (
+                    (account_value - self.settings.starting_account_value)
+                    / self.settings.starting_account_value
+                )
+                * 100,
+                2,
+            )
+            if self.settings.starting_account_value
+            else None,
             "dailyPnl": round(system_daily_pnl, 2),
             "dailyPnlPercent": None,
-            "openRisk": round(sum(position.risk_percent or 0.0 for position in positions), 2),
+            "openRisk": round(
+                sum(position.risk_percent or 0.0 for position in positions), 2
+            ),
             "winRate": round(self._win_rate(recent_trades), 2),
             "riskReward": round(self._risk_reward(recent_trades), 2),
             "runningStrategies": self._running_strategies(),
-            "brokerInfo": None,
+            "brokerInfo": broker_info,
         }
 
     def build_equity_curve(self) -> list[dict[str, float | str]]:
@@ -53,7 +74,11 @@ class DashboardService:
 
     def build_drawdown_series(self) -> list[dict[str, float | str]]:
         return [
-            {"timestamp": point["timestamp"], "label": point["label"], "value": point["drawdown"]}
+            {
+                "timestamp": point["timestamp"],
+                "label": point["label"],
+                "value": point["drawdown"],
+            }
             for point in self.build_equity_curve()
         ]
 
@@ -78,7 +103,14 @@ class DashboardService:
                 {
                     "instrument": position.instrument,
                     "allocation": round(
-                        (((position.current_price or position.open_price) * position.size) / total_exposure) * 100,
+                        (
+                            (
+                                (position.current_price or position.open_price)
+                                * position.size
+                            )
+                            / total_exposure
+                        )
+                        * 100,
                         2,
                     ),
                     "direction": position.direction,
@@ -87,13 +119,43 @@ class DashboardService:
             ],
         }
 
-    def _daily_pnl(self, trades: Sequence[Trade], positions: Sequence[Position]) -> float:
+    def _daily_pnl(
+        self, trades: Sequence[Trade], positions: Sequence[Position]
+    ) -> float:
         today = datetime.now(UTC).date()
-        closed_today = sum(trade.pnl for trade in trades if trade.close_time.astimezone(UTC).date() == today)
+        closed_today = sum(
+            trade.pnl
+            for trade in trades
+            if trade.close_time.astimezone(UTC).date() == today
+        )
         open_today = sum(
-            position.unrealized_pnl or 0.0 for position in positions if position.open_time.astimezone(UTC).date() == today
+            position.unrealized_pnl or 0.0
+            for position in positions
+            if position.open_time.astimezone(UTC).date() == today
         )
         return closed_today + open_today
+
+    def _persisted_account_value(
+        self, trades: Sequence[Trade], positions: Sequence[Position]
+    ) -> float:
+        closed_pnl = sum(trade.pnl for trade in trades)
+        open_pnl = sum(position.unrealized_pnl or 0.0 for position in positions)
+        return self.settings.starting_account_value + closed_pnl + open_pnl
+
+    @staticmethod
+    def _broker_info() -> dict[str, object] | None:
+        try:
+            summary = get_broker().get_account_summary()
+        except Exception:
+            return None
+        return {
+            "accountId": summary.account_id,
+            "accountType": summary.account_type.value,
+            "balance": summary.balance,
+            "available": summary.available,
+            "equity": summary.equity,
+            "profitLoss": summary.profit_loss,
+        }
 
     @staticmethod
     def _win_rate(trades: Sequence[Trade]) -> float:
@@ -135,8 +197,12 @@ class DashboardService:
                     "name": engine.strategy.name,
                     "instrument": instrument,
                     "runtimeKey": f"{engine.strategy.name}:{instrument}",
-                    "brokerReference": engine.current_position.broker_reference if engine.current_position else None,
-                    "instrumentLabel": instruments.get(instrument, {}).get("label", instrument),
+                    "brokerReference": engine.current_position.broker_reference
+                    if engine.current_position
+                    else None,
+                    "instrumentLabel": instruments.get(instrument, {}).get(
+                        "label", instrument
+                    ),
                     "lastPrice": last_price,
                     "hasOpenPosition": engine.current_position is not None,
                 }

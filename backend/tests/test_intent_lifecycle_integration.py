@@ -1,11 +1,20 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlmodel import select
 
 from app.core.broker import OrderDirection
-from app.models.trade import Execution, ExecutionStatus, Position, ReconciliationEvent, Trade, TradeIntent, TradeIntentState
+from app.models.trade import (
+    Execution,
+    ExecutionStatus,
+    Position,
+    ReconciliationEvent,
+    Trade,
+    TradeIntent,
+    TradeIntentState,
+)
+from app.services.health_service import get_health_service
 from app.services.reconciliation_service import ReconciliationService
 from app.services.strategy_service import StrategyService
 from app.services.trade_service import TradeService
@@ -16,9 +25,39 @@ INSTRUMENT = "CS.D.EURUSD.MINI.IP"
 STRATEGY = "smoke_test_hold"
 
 
-def test_intent_first_happy_path_persists_coherent_trade_lifecycle(session, broker, fixed_now, monkeypatch):
+def _enable_live_operational_gate(monkeypatch) -> None:
+    now = datetime.now(UTC)
+    health_service = get_health_service()
+    health_service.update_broker_state(connected=True, latency_ms=5.0)
+    health_service.record_price_update(now, stream_connected=True)
+    stub = type(
+        "StreamService",
+        (),
+        {
+            "get_health": lambda self: type(
+                "Health",
+                (),
+                {
+                    "enabled": True,
+                    "connected": True,
+                    "subscribed_instruments": (INSTRUMENT,),
+                    "desired_instruments": (INSTRUMENT,),
+                    "last_tick_at": now,
+                },
+            )()
+        },
+    )()
+    monkeypatch.setattr(
+        "app.services.operational_state_service.get_operational_streaming_service",
+        lambda: stub,
+    )
+
+
+def test_intent_first_happy_path_persists_coherent_trade_lifecycle(
+    session, broker, fixed_now, monkeypatch
+):
+    _enable_live_operational_gate(monkeypatch)
     service = StrategyService(session)
-    trade_service = TradeService(session)
     service.start_strategy(STRATEGY, INSTRUMENT)
 
     intent_state_history: list[str] = []
@@ -33,7 +72,9 @@ def test_intent_first_happy_path_persists_coherent_trade_lifecycle(session, brok
         intent_state_history.append(created.state)
         return created
 
-    def recording_transition_trade_intent(self, intent: TradeIntent, **kwargs) -> TradeIntent:
+    def recording_transition_trade_intent(
+        self, intent: TradeIntent, **kwargs
+    ) -> TradeIntent:
         transitioned = original_transition_trade_intent(self, intent, **kwargs)
         intent_state_history.append(transitioned.state)
         return transitioned
@@ -42,8 +83,12 @@ def test_intent_first_happy_path_persists_coherent_trade_lifecycle(session, brok
         execution_creation_statuses.append(execution.status)
         return original_create_execution(self, execution)
 
-    monkeypatch.setattr(TradeService, "create_trade_intent", recording_create_trade_intent)
-    monkeypatch.setattr(TradeService, "transition_trade_intent", recording_transition_trade_intent)
+    monkeypatch.setattr(
+        TradeService, "create_trade_intent", recording_create_trade_intent
+    )
+    monkeypatch.setattr(
+        TradeService, "transition_trade_intent", recording_transition_trade_intent
+    )
     monkeypatch.setattr(TradeService, "create_execution", recording_create_execution)
 
     broker.place_order_outcomes.append(
@@ -150,7 +195,9 @@ def test_intent_first_happy_path_persists_coherent_trade_lifecycle(session, brok
     assert intent.closed_at == trade.close_time
 
 
-def test_forced_reconciliation_close_creates_explicit_out_of_band_lifecycle_records(session, fixed_now):
+def test_forced_reconciliation_close_creates_explicit_out_of_band_lifecycle_records(
+    session, fixed_now
+):
     trade_service = TradeService(session)
     open_time = fixed_now - timedelta(minutes=5)
     intent = trade_service.create_trade_intent(
