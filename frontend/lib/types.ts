@@ -122,6 +122,11 @@ export type StrategyDefinition = {
   position_size: number;
   risk_per_trade: number;
   active_instruments?: string[];
+  authorized?: boolean;
+  evaluating_instrument_count?: number;
+  candidates_generated_today?: number;
+  candidates_promoted_today?: number;
+  candidates_blocked_today?: number;
   active_runtime_count?: number;
   open_position_count?: number;
   warning_message?: string | null;
@@ -131,6 +136,119 @@ export type StrategyDefinition = {
   open_positions?: StrategyPositionSummary[];
   instrument_options?: { epic: string; label: string; category: string }[];
   parameters: StrategyParameter[];
+};
+
+export type MarketCatalogueInstrument = {
+  id: string;
+  instrument: string;
+  name: string;
+  symbol: string;
+  asset_class: string;
+  category: string;
+  currency?: string | null;
+  base_currency?: string | null;
+  quote_currency?: string | null;
+  forex_major: boolean;
+  tradable: boolean;
+  shortlisted: boolean;
+  in_strategy_watchlist: boolean;
+  streaming_now: boolean;
+  activity_level: ActivityLevel;
+  strategy_compatibility: string[];
+  reference_price?: number | null;
+  shortlisted_at?: string | null;
+  note?: string | null;
+};
+
+export type OperatorReason = {
+  code: string;
+  label: string;
+  operator_action: string;
+  components?: OperatorReason[];
+};
+
+export type MarketCatalogueResponse = {
+  generated_at: string;
+  instruments: MarketCatalogueInstrument[];
+  summary: {
+    total_count: number;
+    shortlisted_count: number;
+    strategy_watchlist_count: number;
+    streaming_count: number;
+  };
+};
+
+export type ShortlistResponse = {
+  generated_at: string;
+  instruments: MarketCatalogueInstrument[];
+  count: number;
+};
+
+export type StrategyWatchlistEntry = CoverageWatchlistEntry;
+
+export type StrategyWatchlistResponse = {
+  generated_at: string;
+  limit: number;
+  active_count: number;
+  streaming_count: number;
+  protective_count?: number;
+  cap_exceeded_by_protective_coverage?: boolean;
+  instruments: StrategyWatchlistEntry[];
+};
+
+export type StrategyWatchlistBulkResult = {
+  added: Array<{ instrument: string; reason: string; reason_detail?: OperatorReason }>;
+  skipped: Array<{ instrument: string; reason: string; reason_detail?: OperatorReason }>;
+  limit: number;
+};
+
+export type FeedState = {
+  instrument: string;
+  stream_status: string;
+  stream_connected: boolean;
+  stream_enabled: boolean;
+  streaming_now: boolean;
+  desired: boolean;
+  capped: boolean;
+  last_tick_at?: string | null;
+  last_tick_age_ms?: number | null;
+  spread?: number | null;
+  price_source: string;
+  stream_reason?: OperatorReason;
+  market_status?: CoverageSummary["streaming"]["execution_readiness"][number] | Record<string, unknown> | null;
+  market_error?: string | null;
+  entry_eligibility: string;
+  entry_eligibility_reason?: OperatorReason;
+  strategies_may_evaluate: boolean;
+  active_strategy_runtime_count: number;
+  watchlist_entry?: StrategyWatchlistEntry | null;
+};
+
+export type FeedStateResponse = {
+  generated_at: string;
+  instruments: FeedState[];
+};
+
+export type LiveChartResponse = {
+  instrument: string;
+  timeframe: string;
+  source: "STREAM" | "REST_CANDLES" | "SNAPSHOT" | "FALLBACK" | "STALE" | "UNAVAILABLE";
+  data_state: "READY" | "EMPTY" | "UNSUPPORTED";
+  reason_detail?: OperatorReason | null;
+  candles: Array<{
+    time: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume?: number;
+    source?: "STREAM" | "REST_CANDLES" | "SNAPSHOT" | "FALLBACK" | "STALE" | "UNAVAILABLE";
+  }>;
+  markers: Array<Record<string, unknown>>;
+  position_overlays: Array<Record<string, unknown>>;
+  intent_markers: Array<Record<string, unknown>>;
+  execution_markers: Array<Record<string, unknown>>;
+  feed_state: FeedState;
 };
 
 export type BrokerAuthStatus = {
@@ -157,6 +275,8 @@ export type CoverageWatchlistEntry = {
   asset_class?: string | null;
   pinned: boolean;
   reason?: string | null;
+  reason_detail?: OperatorReason | null;
+  protective?: boolean;
   priority_score: number;
   requested_frequency?: string | null;
   promotion_expires_at?: string | null;

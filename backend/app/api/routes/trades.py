@@ -6,7 +6,6 @@ from sqlmodel import Session
 
 from app.db.session import get_session
 from app.models.trade import Trade
-from app.services.broker_service import BrokerService
 from app.services.trade_service import TradeService
 
 router = APIRouter()
@@ -69,7 +68,6 @@ def list_trades(
 
 @router.get("/positions")
 def list_positions_compat(session: Session = Depends(get_session)) -> list[dict[str, object]]:
-    BrokerService().reconcile_positions(session)
     positions = TradeService(session).list_positions()
     now = datetime.now(UTC)
     return [

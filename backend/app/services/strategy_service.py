@@ -8,7 +8,6 @@ from sqlmodel import Session, select
 
 from app.core.broker import BrokerOrderStatus, OrderDirection, OrderRequest
 from app.core.config import get_settings
-from app.core.ig_broker import IGBrokerError
 from app.core.logging import get_logger
 from app.core.signals import EntrySignal, ExitSignal, SignalCandidate, SignalStatus
 from app.core.instrument_catalog import list_instruments
@@ -80,6 +79,11 @@ class StrategyService:
         positions = trade_service.list_positions()
         executions = trade_service.list_executions(limit=250)
         intents = trade_service.list_trade_intents(limit=250)
+        today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        today_intents = trade_service.list_trade_intents(limit=1000, date_from=today_start)
+        today_intents_by_strategy: dict[str, list[TradeIntent]] = defaultdict(list)
+        for intent in today_intents:
+            today_intents_by_strategy[intent.strategy_name].append(intent)
         open_positions_by_strategy: dict[str, list] = defaultdict(list)
         for position in positions:
             open_positions_by_strategy[position.strategy_name].append(position)
@@ -141,6 +145,24 @@ class StrategyService:
             governance = governance_by_name.get(metadata.name)
             deployment = deployment_by_name.get(metadata.name)
             primary_runtime = runtimes_by_key.get((metadata.name, primary_instrument))
+            strategy_today_intents = today_intents_by_strategy.get(metadata.name, [])
+            promoted_today_count = len(
+                [
+                    intent
+                    for intent in strategy_today_intents
+                    if intent.state
+                    in {
+                        TradeIntentState.APPROVED.value,
+                        TradeIntentState.SUBMITTED.value,
+                        TradeIntentState.ACKNOWLEDGED.value,
+                        TradeIntentState.FILLED.value,
+                        TradeIntentState.POSITION_OPENED.value,
+                    }
+                ]
+            )
+            blocked_today_count = len(
+                [intent for intent in strategy_today_intents if intent.state == TradeIntentState.REJECTED.value]
+            )
             active_parameter_values = (
                 primary_runtime.parameters
                 if primary_runtime is not None and primary_runtime.parameters
@@ -179,6 +201,13 @@ class StrategyService:
                     "autonomous_operation_allowed": (
                         governance.autonomous_operation_allowed if governance is not None else False
                     ),
+                    "authorized": (
+                        governance.approval_state == "APPROVED"
+                        and governance.autonomous_operation_allowed
+                        and not governance.emergency_stop
+                        if governance is not None
+                        else False
+                    ),
                     "emergency_stop": governance.emergency_stop if governance is not None else False,
                     "deployment_state": deployment.state if deployment is not None else "UNASSIGNED",
                     "deployment_profile": deployment.selected_profile if deployment is not None else None,
@@ -192,6 +221,10 @@ class StrategyService:
                         else None
                     ),
                     "active_instruments": [engine.instrument for _, engine in active_engines],
+                    "evaluating_instrument_count": len({engine.instrument for _, engine in active_engines}),
+                    "candidates_generated_today": len(strategy_today_intents),
+                    "candidates_promoted_today": promoted_today_count,
+                    "candidates_blocked_today": blocked_today_count,
                     "active_runtime_count": len(active_engines),
                     "open_position_count": len(strategy_positions),
                     "warning_message": primary_warning_message,
@@ -2320,11 +2353,11 @@ class StrategyService:
             }
 
         instrument_engines = runtime_manager.get_engines_for_instrument(instrument)
-        engine = instrument_engines[0][1] if instrument_engines else None
-        if engine is None:
+        if not instrument_engines:
             return {"price": None, "status": "STOPPED", "error": None, "updated_at": None}
-        try:
-            price = engine.broker.get_latest_price(instrument)
-            return {"price": price, "status": "REST", "error": None, "updated_at": None}
-        except IGBrokerError as exc:
-            return {"price": None, "status": "ERROR", "error": str(exc), "updated_at": None}
+        return {
+            "price": None,
+            "status": "ERROR",
+            "error": "No passive live price source is available for this runtime.",
+            "updated_at": None,
+        }

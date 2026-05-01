@@ -42,3 +42,14 @@ class WatchlistEntry(SQLModel, table=True):
     last_streamed_at: datetime | None = None
     last_refreshed_at: datetime | None = None
     updated_at: datetime = Field(default_factory=utc_now, nullable=False)
+
+
+class OperatorShortlistEntry(SQLModel, table=True):
+    __tablename__ = "operator_shortlist_entry"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    instrument: str = Field(index=True, nullable=False, unique=True)
+    actor_id: str = Field(default="operator", index=True)
+    note: str | None = None
+    created_at: datetime = Field(default_factory=utc_now, nullable=False)
+    updated_at: datetime = Field(default_factory=utc_now, nullable=False)

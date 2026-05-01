@@ -11,6 +11,10 @@ import {
   DashboardSnapshot,
   DomainEvent,
   Execution,
+  FeedState,
+  FeedStateResponse,
+  LiveChartResponse,
+  MarketCatalogueResponse,
   MarketCategory,
   MarketCategoryOverviewResponse,
   OperatorControlState,
@@ -21,6 +25,8 @@ import {
   ReviewHistoryItem,
   SystemOperatingLimits,
   StrategyDefinition,
+  StrategyWatchlistBulkResult,
+  StrategyWatchlistResponse,
   StreamHealthStatus,
   Trade,
 } from "@/lib/types";
@@ -221,6 +227,32 @@ export const EMPTY_ALLOCATION_EXPOSURE_SUMMARY: AllocationExposureSummary = {
   notes: {},
 };
 
+export const EMPTY_MARKET_CATALOGUE: MarketCatalogueResponse = {
+  generated_at: new Date(0).toISOString(),
+  instruments: [],
+  summary: {
+    total_count: 0,
+    shortlisted_count: 0,
+    strategy_watchlist_count: 0,
+    streaming_count: 0,
+  },
+};
+
+export const EMPTY_STRATEGY_WATCHLIST: StrategyWatchlistResponse = {
+  generated_at: new Date(0).toISOString(),
+  limit: 0,
+  active_count: 0,
+  streaming_count: 0,
+  protective_count: 0,
+  cap_exceeded_by_protective_coverage: false,
+  instruments: [],
+};
+
+export const EMPTY_FEED_STATE_RESPONSE: FeedStateResponse = {
+  generated_at: new Date(0).toISOString(),
+  instruments: [],
+};
+
 type BackendMode = "live";
 
 export type LoadResult<T> = {
@@ -292,14 +324,18 @@ export async function getOpenPositions(): Promise<Position[]> {
 
 export async function getBrokerAuthStatus(): Promise<BrokerAuthStatus> {
   try {
-    const positions = await request<
-      Array<{ instrument: string; direction: "BUY" | "SELL"; size: number; open_price: number; opened_at: string }>
-    >("/broker/positions");
+    const telemetry = await getOperationalTelemetry();
     return {
-      state: "connected",
-      label: "IG Connected",
-      detail: positions.length ? `${positions.length} broker position${positions.length === 1 ? "" : "s"} synced` : "Authenticated with no open broker positions",
-      position_count: positions.length,
+      state: telemetry.broker_connected ? "connected" : "disconnected",
+      label: telemetry.broker_connected ? "IG Connected" : "IG Disconnected",
+      detail: telemetry.broker_connected
+        ? telemetry.broker_latency_ms != null
+          ? `Connectivity derived from system telemetry · ${telemetry.broker_latency_ms.toFixed(0)}ms`
+          : "Connectivity derived from system telemetry"
+        : telemetry.broker_connectivity_state === "DISCONNECTED"
+          ? "Broker connectivity is currently unavailable according to system telemetry."
+          : "Broker state could not be confirmed.",
+      position_count: 0,
     };
   } catch (error) {
     const detail = error instanceof HttpError ? error.detail : error instanceof Error ? error.message : undefined;
@@ -545,6 +581,55 @@ export async function getStrategies(): Promise<StrategyDefinition[]> {
 
 export async function getMarketOverview(category: MarketCategory = "forex"): Promise<MarketCategoryOverviewResponse> {
   return request<MarketCategoryOverviewResponse>(`/markets/overview?category=${category}`, {
+    timeoutMs: MARKET_REQUEST_TIMEOUT_MS,
+  });
+}
+
+export async function getMarketCatalogue(): Promise<MarketCatalogueResponse> {
+  return request<MarketCatalogueResponse>("/markets/catalogue", {
+    timeoutMs: MARKET_REQUEST_TIMEOUT_MS,
+  });
+}
+
+export async function addShortlistInstrument(instrumentId: string): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(`/watchlist/shortlist/${encodeURIComponent(instrumentId)}`, {
+    method: "POST",
+  });
+}
+
+export async function removeShortlistInstrument(instrumentId: string): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(`/watchlist/shortlist/${encodeURIComponent(instrumentId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function addStrategyWatchlistInstruments(instrumentIds: string[]): Promise<StrategyWatchlistBulkResult> {
+  return request<StrategyWatchlistBulkResult>("/strategy-watchlist/bulk", {
+    method: "POST",
+    body: JSON.stringify({ instrument_ids: instrumentIds }),
+  });
+}
+
+export async function getStrategyWatchlist(): Promise<StrategyWatchlistResponse> {
+  return request<StrategyWatchlistResponse>("/strategy-watchlist");
+}
+
+export async function removeStrategyWatchlistInstrument(instrumentId: string): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(`/strategy-watchlist/${encodeURIComponent(instrumentId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function getFeedState(): Promise<FeedStateResponse> {
+  return request<FeedStateResponse>("/market-data/feed-state");
+}
+
+export async function getInstrumentFeedState(instrumentId: string): Promise<FeedState> {
+  return request<FeedState>(`/market-data/feed-state/${encodeURIComponent(instrumentId)}`);
+}
+
+export async function getLiveInstrumentChart(instrumentId: string, timeframe = "1m"): Promise<LiveChartResponse> {
+  return request<LiveChartResponse>(`/live/instruments/${encodeURIComponent(instrumentId)}/chart?timeframe=${encodeURIComponent(timeframe)}`, {
     timeoutMs: MARKET_REQUEST_TIMEOUT_MS,
   });
 }

@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     ig_streaming_watch_interval_seconds: float = 1.0
     ig_streaming_stale_after_seconds: float = 20.0
     ig_streaming_transition_debounce_seconds: float = 10.0
-    ig_streaming_max_instruments: int = 8
+    ig_streaming_max_instruments: int = 6
     ig_streaming_max_promotions_per_minute: int = 4
     ig_streaming_requested_frequency: str = "2.0"
     ig_streaming_min_tier1_residency_seconds: int = 30

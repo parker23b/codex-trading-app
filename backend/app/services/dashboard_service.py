@@ -5,15 +5,13 @@ from datetime import UTC, datetime
 
 from app.core.config import get_settings
 from app.core.instrument_catalog import list_instruments
-from app.core.ig_broker import IGBrokerError
-from app.core.broker_factory import get_broker
 from app.core.runtime import runtime_manager
 from app.models.trade import Position, Trade
 from app.services.trade_service import TradeService
 
 
 class DashboardService:
-    """Aggregates dashboard KPIs, keeping account metrics broker-sourced only."""
+    """Aggregates dashboard KPIs from persisted and runtime-local truth."""
 
     def __init__(self, trade_service: TradeService):
         self.trade_service = trade_service
@@ -24,20 +22,6 @@ class DashboardService:
         positions = self.trade_service.list_positions()
         recent_trades = trades[: self.settings.dashboard_recent_trade_window]
         system_daily_pnl = self._daily_pnl(trades, positions)
-        broker_info: dict[str, object] | None = None
-
-        try:
-            account_summary = get_broker().get_account_summary()
-            broker_info = {
-                "accountId": account_summary.account_id,
-                "accountType": account_summary.account_type.value,
-                "balance": round(account_summary.balance, 2),
-                "available": round(account_summary.available, 2),
-                "equity": round(account_summary.equity, 2),
-                "profitLoss": round(account_summary.profit_loss, 2),
-            }
-        except IGBrokerError:
-            pass
 
         return {
             "dailyPnl": round(system_daily_pnl, 2),
@@ -46,7 +30,7 @@ class DashboardService:
             "winRate": round(self._win_rate(recent_trades), 2),
             "riskReward": round(self._risk_reward(recent_trades), 2),
             "runningStrategies": self._running_strategies(),
-            "brokerInfo": broker_info,
+            "brokerInfo": None,
         }
 
     def build_equity_curve(self) -> list[dict[str, float | str]]:
@@ -146,11 +130,6 @@ class DashboardService:
                 last_price = runtime_manager.get_last_price(instrument)
             if last_price is None and engine.current_position is not None:
                 last_price = engine.current_position.current_price
-            if last_price is None:
-                try:
-                    last_price = engine.broker.get_latest_price(instrument)
-                except IGBrokerError:
-                    last_price = None
             rows.append(
                 {
                     "name": engine.strategy.name,

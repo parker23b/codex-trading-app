@@ -6,7 +6,6 @@ from sqlmodel import Session
 
 from app.db.session import get_session
 from app.models.trade import Position
-from app.services.broker_service import BrokerService
 from app.services.trade_service import TradeService
 
 router = APIRouter()
@@ -61,5 +60,4 @@ def _serialize_position(position: Position) -> PositionResponse:
 
 @router.get("/positions", response_model=list[PositionResponse])
 def list_positions(session: Session = Depends(get_session)) -> list[PositionResponse]:
-    BrokerService().reconcile_positions(session)
     return [_serialize_position(position) for position in TradeService(session).list_positions()]

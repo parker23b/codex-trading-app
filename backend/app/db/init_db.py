@@ -11,7 +11,7 @@ from app.models.strategy_deployment import StrategyDeployment
 from app.models.strategy_governance import StrategyFamilyGovernance
 from app.models.runtime import StrategyRuntimeState
 from app.models.trade import AllocationCycle, Execution, Position, ReconciliationEvent, Trade, TradeIntent
-from app.models.watchlist import WatchlistEntry
+from app.models.watchlist import OperatorShortlistEntry, WatchlistEntry
 
 
 def initialize_database() -> None:
@@ -28,6 +28,7 @@ def initialize_database() -> None:
         DomainEvent,
         OperatorControlState,
         WatchlistEntry,
+        OperatorShortlistEntry,
         PromotionRequest,
         StrategyFamilyGovernance,
         StrategyDeployment,
@@ -166,6 +167,11 @@ def initialize_database() -> None:
         "tier, status, pinned DESC, priority_score DESC, assigned_at ASC",
     )
     _ensure_sqlite_column("watchlist_entry", "promotion_expires_at", "TIMESTAMP")
+    _ensure_index(
+        "ix_operator_shortlist_entry_instrument",
+        "operator_shortlist_entry",
+        "instrument",
+    )
     _ensure_index(
         "ix_promotion_request_status_requested_at",
         "promotion_request",
