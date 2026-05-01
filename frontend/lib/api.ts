@@ -292,14 +292,18 @@ export async function getOpenPositions(): Promise<Position[]> {
 
 export async function getBrokerAuthStatus(): Promise<BrokerAuthStatus> {
   try {
-    const positions = await request<
-      Array<{ instrument: string; direction: "BUY" | "SELL"; size: number; open_price: number; opened_at: string }>
-    >("/broker/positions");
+    const telemetry = await getOperationalTelemetry();
     return {
-      state: "connected",
-      label: "IG Connected",
-      detail: positions.length ? `${positions.length} broker position${positions.length === 1 ? "" : "s"} synced` : "Authenticated with no open broker positions",
-      position_count: positions.length,
+      state: telemetry.broker_connected ? "connected" : "disconnected",
+      label: telemetry.broker_connected ? "IG Connected" : "IG Disconnected",
+      detail: telemetry.broker_connected
+        ? telemetry.broker_latency_ms != null
+          ? `Connectivity derived from system telemetry · ${telemetry.broker_latency_ms.toFixed(0)}ms`
+          : "Connectivity derived from system telemetry"
+        : telemetry.broker_connectivity_state === "DISCONNECTED"
+          ? "Broker connectivity is currently unavailable according to system telemetry."
+          : "Broker state could not be confirmed.",
+      position_count: 0,
     };
   } catch (error) {
     const detail = error instanceof HttpError ? error.detail : error instanceof Error ? error.message : undefined;

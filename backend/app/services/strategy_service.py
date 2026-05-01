@@ -8,7 +8,6 @@ from sqlmodel import Session, select
 
 from app.core.broker import BrokerOrderStatus, OrderDirection, OrderRequest
 from app.core.config import get_settings
-from app.core.ig_broker import IGBrokerError
 from app.core.logging import get_logger
 from app.core.signals import EntrySignal, ExitSignal, SignalCandidate, SignalStatus
 from app.core.instrument_catalog import list_instruments
@@ -2320,11 +2319,11 @@ class StrategyService:
             }
 
         instrument_engines = runtime_manager.get_engines_for_instrument(instrument)
-        engine = instrument_engines[0][1] if instrument_engines else None
-        if engine is None:
+        if not instrument_engines:
             return {"price": None, "status": "STOPPED", "error": None, "updated_at": None}
-        try:
-            price = engine.broker.get_latest_price(instrument)
-            return {"price": price, "status": "REST", "error": None, "updated_at": None}
-        except IGBrokerError as exc:
-            return {"price": None, "status": "ERROR", "error": str(exc), "updated_at": None}
+        return {
+            "price": None,
+            "status": "ERROR",
+            "error": "No passive live price source is available for this runtime.",
+            "updated_at": None,
+        }

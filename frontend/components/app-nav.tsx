@@ -15,7 +15,8 @@ import {
 import { ThemeToggle } from "@/components/theme-toggle";
 
 const links = [
-  { href: "/", label: "Operate" },
+  { href: "/", label: "Overview" },
+  { href: "/live", label: "Live View" },
   { href: "/risk", label: "Risk" },
   { href: "/control-plane", label: "Control Plane" },
   { href: "/coverage", label: "Coverage" },

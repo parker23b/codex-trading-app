@@ -5,7 +5,6 @@ from sqlmodel import Session
 from app.core.runtime import runtime_manager
 from app.db.session import get_session
 from app.services.domain_event_service import domain_event_service
-from app.services.broker_service import BrokerService
 from app.services.strategy_service import StrategyService
 
 router = APIRouter()
@@ -29,12 +28,7 @@ class StrategyControlResponse(BaseModel):
 
 @router.get("/strategies")
 def list_strategies(session: Session = Depends(get_session)) -> list[dict[str, object]]:
-    """Return operator strategy state.
-
-    This endpoint performs broker reconciliation before responding, so it is
-    not safe for passive assistant refresh paths such as AIMEE.
-    """
-    BrokerService().reconcile_positions(session)
+    """Return operator strategy state from persisted/runtime truth only."""
     return StrategyService(session).list_strategies()
 
 
