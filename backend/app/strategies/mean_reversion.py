@@ -58,7 +58,8 @@ class MeanReversionStrategy(Strategy):
 
     def _deviation_from_mean(self) -> float:
         mean_price = sum(self.prices) / len(self.prices)
-        assert self.last_price is not None
+        if self.last_price is None:
+            raise ValueError("Last price is not set.")
         return (self.last_price - mean_price) / mean_price
 
     def export_state_snapshot(self) -> dict[str, Any]:

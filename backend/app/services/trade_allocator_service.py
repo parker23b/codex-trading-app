@@ -11,6 +11,13 @@ from app.models.trade import Position
 from app.services.trade_service import TradeService
 
 
+def _require_entry_signal(candidate: SignalCandidate) -> EntrySignal:
+    signal = candidate.signal
+    if not isinstance(signal, EntrySignal):
+        raise TypeError("Expected an EntrySignal candidate.")
+    return signal
+
+
 class TradeAllocatorService:
     """Deprecated legacy allocator retained only for backward compatibility tests."""
 
@@ -139,8 +146,7 @@ class TradeAllocatorService:
                 item[0].strategy_name,
             ),
         ):
-            signal = candidate.signal
-            assert isinstance(signal, EntrySignal)
+            signal = _require_entry_signal(candidate)
             key = (candidate.instrument, signal.direction.value)
             existing = best_by_key.get(key)
             if existing is None:
@@ -232,8 +238,7 @@ class TradeAllocatorService:
         strategy_selected_counts: dict[str, int] = defaultdict(int)
 
         for candidate, score in ranked:
-            signal = candidate.signal
-            assert isinstance(signal, EntrySignal)
+            _require_entry_signal(candidate)
             strategy_name = candidate.strategy_name
             risk_percent = self._candidate_risk_percent(candidate)
 
@@ -302,8 +307,7 @@ class TradeAllocatorService:
         candidate: SignalCandidate,
         now: datetime,
     ) -> float:
-        signal = candidate.signal
-        assert isinstance(signal, EntrySignal)
+        signal = _require_entry_signal(candidate)
         confidence = max(
             0.0,
             min(candidate.confidence if candidate.confidence is not None else 0.5, 1.0),

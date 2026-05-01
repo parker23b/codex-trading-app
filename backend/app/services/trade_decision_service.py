@@ -17,6 +17,20 @@ from app.services.portfolio_risk_service import PortfolioRiskService
 from app.services.trade_service import ActiveTradeIntentConflictError, TradeService
 
 
+def _require_entry_signal(candidate: SignalCandidate) -> EntrySignal:
+    signal = candidate.signal
+    if not isinstance(signal, EntrySignal):
+        raise TypeError("Expected an EntrySignal candidate.")
+    return signal
+
+
+def _require_exit_signal(candidate: SignalCandidate) -> ExitSignal:
+    signal = candidate.signal
+    if not isinstance(signal, ExitSignal):
+        raise TypeError("Expected an ExitSignal candidate.")
+    return signal
+
+
 @dataclass(slots=True)
 class TradeDecisionResult:
     """
@@ -116,8 +130,7 @@ class TradeDecisionService:
         )
         for allocation in allocation_decisions:
             candidate = allocation.candidate
-            signal = candidate.signal
-            assert isinstance(signal, EntrySignal)
+            signal = _require_entry_signal(candidate)
             mapped_reason = self.ALLOCATOR_REASON_MAP.get(
                 allocation.reason_code, allocation.reason_code
             )
@@ -441,8 +454,7 @@ class TradeDecisionService:
         return results
 
     def _link_exit_candidate(self, candidate: SignalCandidate) -> TradeDecisionResult:
-        signal = candidate.signal
-        assert isinstance(signal, ExitSignal)
+        signal = _require_exit_signal(candidate)
         if signal.position is None:
             return TradeDecisionResult(
                 candidate=candidate,

@@ -14,7 +14,7 @@ DEFAULT_SQLITE_DB_PATH = BACKEND_ROOT / "trading_platform.db"
 class Settings(BaseSettings):
     app_name: str = "Algo Trading Platform API"
     app_env: str = "development"
-    app_host: str = "0.0.0.0"
+    app_host: str = "127.0.0.1"
     app_port: int = 8000
     log_level: str = "INFO"
     database_url: str = f"sqlite:///{DEFAULT_SQLITE_DB_PATH.as_posix()}"

@@ -79,6 +79,13 @@ class CandidatePlan:
     currencies: tuple[str, ...]
 
 
+def _require_entry_signal(candidate: SignalCandidate) -> EntrySignal:
+    signal = candidate.signal
+    if not isinstance(signal, EntrySignal):
+        raise TypeError("Expected an EntrySignal candidate.")
+    return signal
+
+
 class CapitalAllocatorService:
     """Constructs portfolio allocations before hard risk admission checks."""
 
@@ -146,7 +153,16 @@ class CapitalAllocatorService:
             if rejection is not None:
                 decisions.append(rejection)
                 continue
-            assert plan is not None
+            if plan is None:
+                decisions.append(
+                    self._reject_candidate(
+                        candidate,
+                        "allocation_plan_unavailable",
+                        "Capital allocation failed because no allocation plan was produced.",
+                        requested_risk_percent=self._requested_risk_percent(candidate),
+                    )
+                )
+                continue
             candidate_plans.append(plan)
 
         candidate_plans = self._suppress_weaker_duplicates(candidate_plans, decisions)
@@ -189,8 +205,7 @@ class CapitalAllocatorService:
         current_time: datetime,
         open_state: dict[str, object],
     ) -> tuple[CandidatePlan | None, AllocationDecision | None]:
-        signal = candidate.signal
-        assert isinstance(signal, EntrySignal)
+        signal = _require_entry_signal(candidate)
         broker = candidate.engine.broker
         requested_risk_percent = self._requested_risk_percent(candidate)
 
@@ -478,8 +493,7 @@ class CapitalAllocatorService:
         *,
         sizing_quote: BrokerRiskSizingQuote,
     ) -> dict[str, object]:
-        signal = candidate.signal
-        assert isinstance(signal, EntrySignal)
+        signal = _require_entry_signal(candidate)
         details = {
             "entry_price": round(float(sizing_quote.entry_price), 8),
             "requested_risk_percent": round(self._requested_risk_percent(candidate), 6),
@@ -603,8 +617,7 @@ class CapitalAllocatorService:
         }
 
     def _requested_risk_percent(self, candidate: SignalCandidate) -> float:
-        signal = candidate.signal
-        assert isinstance(signal, EntrySignal)
+        signal = _require_entry_signal(candidate)
         raw = signal.risk_percent
         if raw in (None, 0):
             raw = self.settings.allocation_default_risk_per_trade_percent
@@ -697,8 +710,7 @@ class CapitalAllocatorService:
         open_state: dict[str, object],
         broker_details: BrokerMarketDetails,
     ) -> dict[str, float]:
-        signal = candidate.signal
-        assert isinstance(signal, EntrySignal)
+        signal = _require_entry_signal(candidate)
         confidence = max(
             0.0,
             min(candidate.confidence if candidate.confidence is not None else 0.5, 1.0),
@@ -864,8 +876,7 @@ class CapitalAllocatorService:
                 item.candidate.instrument,
             ),
         ):
-            signal = plan.candidate.signal
-            assert isinstance(signal, EntrySignal)
+            signal = _require_entry_signal(plan.candidate)
             key = (plan.candidate.instrument, signal.direction.value)
             existing = best_by_key.get(key)
             if existing is None:
@@ -909,8 +920,7 @@ class CapitalAllocatorService:
     def _reject_if_stale(
         self, candidate: SignalCandidate, *, current_time: datetime
     ) -> AllocationDecision | None:
-        signal = candidate.signal
-        assert isinstance(signal, EntrySignal)
+        signal = _require_entry_signal(candidate)
         age_seconds = (current_time - signal.signal_at.astimezone(UTC)).total_seconds()
         if age_seconds <= self.settings.trade_allocator_signal_stale_after_seconds:
             return None

@@ -70,7 +70,8 @@ class FxMicroPullbackStrategy(Strategy):
         slow_ema = self._ema(self.slow_window)
         trend_strength = (fast_ema - slow_ema) / slow_ema
 
-        assert self.last_price is not None
+        if self.last_price is None:
+            return False
         pullback_from_fast = (self.last_price - fast_ema) / fast_ema
         momentum = self._recent_momentum()
 
@@ -182,7 +183,8 @@ class FxMicroPullbackStrategy(Strategy):
         return (end_price - start_price) / start_price
 
     def _move_from_entry(self) -> float:
-        assert self._entry_price is not None
+        if self._entry_price is None:
+            raise ValueError("Entry price is not set.")
         current_exit_price = self._current_exit_price()
         raw_move = (current_exit_price - self._entry_price) / self._entry_price
 
@@ -207,7 +209,8 @@ class FxMicroPullbackStrategy(Strategy):
             return self.last_bid
         if self._entry_direction == OrderDirection.SELL and self.last_ask is not None:
             return self.last_ask
-        assert self.last_price is not None
+        if self.last_price is None:
+            raise ValueError("Last price is not set.")
         return self.last_price
 
     def export_state_snapshot(self) -> dict[str, Any]:

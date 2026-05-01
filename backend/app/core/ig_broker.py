@@ -5,11 +5,10 @@ import ssl
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from http.client import HTTPSConnection
 from math import floor
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.parse import urlencode, urlsplit
 from uuid import uuid4
 
 from app.core.broker import (
@@ -528,6 +527,7 @@ class IGBroker(Broker):
 
     def get_account_summary(self) -> BrokerAccountSummary:
         self._ensure_authenticated()
+        session = self._require_session()
         payload = self._request("GET", "/accounts", version="1")
         accounts = payload.get("accounts", [])
         selected_account = None
@@ -536,7 +536,7 @@ class IGBroker(Broker):
             if self._account_id and account_id == self._account_id:
                 selected_account = account
                 break
-            if not self._account_id and account_id == self._session.current_account_id:
+            if not self._account_id and account_id == session.current_account_id:
                 selected_account = account
                 break
         if selected_account is None and accounts:
@@ -568,7 +568,7 @@ class IGBroker(Broker):
 
         return BrokerAccountSummary(
             account_id=selected_account.get("accountId")
-            or self._session.current_account_id
+            or session.current_account_id
             or "UNKNOWN",
             balance=balance,
             available=available,
@@ -818,6 +818,11 @@ class IGBroker(Broker):
         if self._session is not None:
             return
         self._login()
+
+    def _require_session(self) -> IGSession:
+        if self._session is None:
+            raise IGBrokerError("IG session is not authenticated.")
+        return self._session
 
     def _login(self) -> None:
         self._validate_auth_config()
@@ -1113,42 +1118,68 @@ class IGBroker(Broker):
             request_headers.setdefault("X-SECURITY-TOKEN", self._session.security_token)
 
         raw_body = json.dumps(body).encode("utf-8") if body is not None else None
-        request = Request(
-            url=f"{self._base_url}{path}",
-            data=raw_body,
-            headers=request_headers,
-            method=request_method,
+        request_path = self._validated_request_path(path)
+        try:
+            status_code, response_text, response_headers = self._send_https_request(
+                method=request_method,
+                path=request_path,
+                body=raw_body,
+                headers=request_headers,
+            )
+            if status_code >= 400:
+                logger.error(
+                    "IG request failed",
+                    extra={
+                        "status_code": status_code,
+                        "path": path,
+                        "body": response_text[:500],
+                    },
+                )
+                raise IGBrokerError(
+                    f"IG request failed with status {status_code}: {response_text}"
+                )
+            response_body = json.loads(response_text) if response_text else {}
+            return response_body, response_headers
+        except IGBrokerError:
+            raise
+        except OSError as exc:
+            logger.error("IG network error", extra={"path": path, "reason": str(exc)})
+            raise IGBrokerError(f"Unable to reach IG API: {exc}") from exc
+
+    def _send_https_request(
+        self,
+        *,
+        method: str,
+        path: str,
+        body: bytes | None,
+        headers: dict[str, str],
+    ) -> tuple[int, str, dict[str, str]]:
+        parsed_base_url = urlsplit(self._base_url)
+        hostname = parsed_base_url.hostname
+        if hostname is None:
+            raise IGBrokerError("IG base URL must include a hostname.")
+        connection = HTTPSConnection(
+            hostname,
+            parsed_base_url.port,
+            timeout=self._request_timeout_seconds,
+            context=self._build_ssl_context(),
         )
         try:
-            with urlopen(
-                request,
-                timeout=self._request_timeout_seconds,
-                context=self._build_ssl_context(),
-            ) as response:
-                response_text = response.read().decode("utf-8")
-                response_body = json.loads(response_text) if response_text else {}
-                response_headers = {
-                    key: value for key, value in response.headers.items()
-                }
-                return response_body, response_headers
-        except HTTPError as exc:
-            response_text = exc.read().decode("utf-8", errors="replace")
-            logger.error(
-                "IG request failed",
-                extra={
-                    "status_code": exc.code,
-                    "path": path,
-                    "body": response_text[:500],
-                },
-            )
-            raise IGBrokerError(
-                f"IG request failed with status {exc.code}: {response_text}"
-            ) from exc
-        except URLError as exc:
-            logger.error(
-                "IG network error", extra={"path": path, "reason": str(exc.reason)}
-            )
-            raise IGBrokerError(f"Unable to reach IG API: {exc.reason}") from exc
+            connection.request(method, path, body=body, headers=headers)
+            response = connection.getresponse()
+            response_text = response.read().decode("utf-8")
+            response_headers = {key: value for key, value in response.getheaders()}
+            return response.status, response_text, response_headers
+        finally:
+            connection.close()
+
+    def _validated_request_path(self, path: str) -> str:
+        parsed_base_url = urlsplit(self._base_url)
+        if parsed_base_url.scheme != "https" or not parsed_base_url.hostname:
+            raise IGBrokerError("IG base URL must be an HTTPS URL.")
+        if not path.startswith("/"):
+            raise IGBrokerError("IG request paths must be absolute API paths.")
+        return f"{parsed_base_url.path.rstrip('/')}{path}"
 
     def _validate_auth_config(self) -> None:
         missing = [
@@ -1172,7 +1203,7 @@ class IGBroker(Broker):
             account_id = account.get("accountId")
             if self._account_id and account_id != self._account_id:
                 continue
-            self._account_currency = (
+            self._account_currency = str(
                 account.get("currency")
                 or account.get("currencyIsoCode")
                 or account.get("preferredCurrency")
@@ -1194,10 +1225,10 @@ class IGBroker(Broker):
 
     def _build_ssl_context(self) -> ssl.SSLContext:
         if not self._verify_ssl:
-            logger.warning(
-                "IG SSL verification disabled", extra={"base_url": self._base_url}
+            raise IGBrokerError(
+                "IG SSL verification cannot be disabled. Configure IG_CA_BUNDLE_PATH "
+                "when a custom certificate bundle is required."
             )
-            return ssl._create_unverified_context()
         if self._ca_bundle_path:
             return ssl.create_default_context(cafile=self._ca_bundle_path)
         return ssl.create_default_context()

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from hashlib import sha1
+from hashlib import sha256
 
 from sqlmodel import Session
 
@@ -158,7 +158,7 @@ class AllocationAlertService:
             "detail_name": details.get("name"),
             "bucket_type": details.get("bucket_type"),
         }
-        alert_key = f"{item['alert_type']}:{sha1(str(key_material).encode('utf-8')).hexdigest()[:16]}"
+        alert_key = f"{item['alert_type']}:{sha256(str(key_material).encode('utf-8')).hexdigest()[:16]}"
         severity = str(item["severity"])
         escalation_level = (
             "critical"
