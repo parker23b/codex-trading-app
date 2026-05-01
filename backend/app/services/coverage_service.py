@@ -21,11 +21,17 @@ class CoverageService:
         tier2_plan = self.watchlist_service.get_tier2_refresh_plan()
         watchlist_entries = list(
             self.session.exec(
-                select(WatchlistEntry).where(WatchlistEntry.status == WatchlistStatus.ACTIVE.value)
+                select(WatchlistEntry).where(
+                    WatchlistEntry.status == WatchlistStatus.ACTIVE.value
+                )
             ).all()
         )
         promotion_requests = list(
-            self.session.exec(select(PromotionRequest).order_by(desc(PromotionRequest.updated_at)).limit(12)).all()
+            self.session.exec(
+                select(PromotionRequest)
+                .order_by(desc(PromotionRequest.updated_at))
+                .limit(12)
+            ).all()
         )
         promotion_counts = Counter(request.status for request in promotion_requests)
         allocator_events = list(
@@ -33,7 +39,10 @@ class CoverageService:
                 select(DomainEvent)
                 .where(
                     DomainEvent.event_type.in_(
-                        ["strategy.trade_allocator_selected", "strategy.trade_allocator_rejected"]
+                        [
+                            "strategy.trade_allocator_selected",
+                            "strategy.trade_allocator_rejected",
+                        ]
                     )
                 )
                 .order_by(desc(DomainEvent.created_at), desc(DomainEvent.id))
@@ -47,23 +56,45 @@ class CoverageService:
         )
 
         tier1_entries = [
-            entry for entry in watchlist_entries
-            if entry.tier == WatchlistTier.TIER1.value and entry.status == WatchlistStatus.ACTIVE.value
+            entry
+            for entry in watchlist_entries
+            if entry.tier == WatchlistTier.TIER1.value
+            and entry.status == WatchlistStatus.ACTIVE.value
         ]
         tier2_entries = [
-            entry for entry in watchlist_entries
-            if entry.tier == WatchlistTier.TIER2.value and entry.status == WatchlistStatus.ACTIVE.value
+            entry
+            for entry in watchlist_entries
+            if entry.tier == WatchlistTier.TIER2.value
+            and entry.status == WatchlistStatus.ACTIVE.value
         ]
 
         return {
             "streaming": {
                 "active_instruments": [
-                    self._serialize_watchlist_entry(entry, streamed=entry.instrument in streaming_plan.instruments)
-                    for entry in sorted(tier1_entries, key=lambda item: (0 if item.pinned else 1, -item.priority_score, item.instrument))
+                    self._serialize_watchlist_entry(
+                        entry, streamed=entry.instrument in streaming_plan.instruments
+                    )
+                    for entry in sorted(
+                        tier1_entries,
+                        key=lambda item: (
+                            0 if item.pinned else 1,
+                            -item.priority_score,
+                            item.instrument,
+                        ),
+                    )
                 ],
                 "execution_readiness": [
-                    get_market_status_service().get_status(entry.instrument).model_dump()
-                    for entry in sorted(tier1_entries, key=lambda item: (0 if item.pinned else 1, -item.priority_score, item.instrument))
+                    get_market_status_service()
+                    .get_status(entry.instrument)
+                    .model_dump()
+                    for entry in sorted(
+                        tier1_entries,
+                        key=lambda item: (
+                            0 if item.pinned else 1,
+                            -item.priority_score,
+                            item.instrument,
+                        ),
+                    )
                 ],
                 "desired_instruments": list(streaming_plan.instruments),
                 "pinned_instruments": list(streaming_plan.pinned_instruments),
@@ -74,7 +105,10 @@ class CoverageService:
                 "refresh_queue": list(tier2_plan.instruments),
                 "active_candidates": [
                     self._serialize_watchlist_entry(entry, streamed=False)
-                    for entry in sorted(tier2_entries, key=lambda item: (-item.priority_score, item.instrument))
+                    for entry in sorted(
+                        tier2_entries,
+                        key=lambda item: (-item.priority_score, item.instrument),
+                    )
                 ],
             },
             "promotions": {
@@ -82,18 +116,29 @@ class CoverageService:
                 "accepted_count": promotion_counts.get("ACCEPTED", 0),
                 "rejected_count": promotion_counts.get("REJECTED", 0),
                 "expired_count": promotion_counts.get("EXPIRED", 0),
-                "recent_requests": [self._serialize_promotion_request(request) for request in promotion_requests],
+                "recent_requests": [
+                    self._serialize_promotion_request(request)
+                    for request in promotion_requests
+                ],
             },
             "trade_allocator": {
-                "selected_count": allocator_counts.get("strategy.trade_allocator_selected", 0),
-                "rejected_count": allocator_counts.get("strategy.trade_allocator_rejected", 0),
+                "selected_count": allocator_counts.get(
+                    "strategy.trade_allocator_selected", 0
+                ),
+                "rejected_count": allocator_counts.get(
+                    "strategy.trade_allocator_rejected", 0
+                ),
                 "reason_counts": dict(allocator_reason_counts),
-                "recent_decisions": [self._serialize_allocator_event(event) for event in allocator_events],
+                "recent_decisions": [
+                    self._serialize_allocator_event(event) for event in allocator_events
+                ],
             },
         }
 
     @staticmethod
-    def _serialize_watchlist_entry(entry: WatchlistEntry, *, streamed: bool) -> dict[str, object]:
+    def _serialize_watchlist_entry(
+        entry: WatchlistEntry, *, streamed: bool
+    ) -> dict[str, object]:
         return {
             "instrument": entry.instrument,
             "tier": entry.tier,

@@ -33,6 +33,8 @@ class StrategyRuntimeState(SQLModel, table=True):
     deployment_id: int | None = Field(default=None, index=True)
     active_profile_name: str | None = Field(default=None, index=True)
     auto_resume: bool = True
-    strategy_state_snapshot: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    strategy_state_snapshot: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON)
+    )
     created_at: datetime = Field(default_factory=utc_now, nullable=False)
     updated_at: datetime = Field(default_factory=utc_now, nullable=False)

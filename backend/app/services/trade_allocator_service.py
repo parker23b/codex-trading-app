@@ -28,7 +28,9 @@ class TradeAllocatorService:
         received_at: datetime | None = None,
     ) -> list[TradeAllocationDecision]:
         if self.session is None:
-            raise ValueError("A database session is required to allocate trade candidates.")
+            raise ValueError(
+                "A database session is required to allocate trade candidates."
+            )
 
         if not candidates:
             return []
@@ -53,12 +55,19 @@ class TradeAllocatorService:
                 )
                 continue
 
-            stale_decision = self._reject_if_stale(candidate=candidate, now=current_time)
+            stale_decision = self._reject_if_stale(
+                candidate=candidate, now=current_time
+            )
             if stale_decision is not None:
                 decisions.append(stale_decision)
                 continue
 
-            if self._instrument_open_position_count(open_positions, candidate.instrument) >= self.settings.trade_allocator_max_open_positions_per_instrument:
+            if (
+                self._instrument_open_position_count(
+                    open_positions, candidate.instrument
+                )
+                >= self.settings.trade_allocator_max_open_positions_per_instrument
+            ):
                 decisions.append(
                     TradeAllocationDecision(
                         candidate=candidate,
@@ -75,7 +84,9 @@ class TradeAllocatorService:
 
         scored_by_direction = self._suppress_weaker_duplicates(entry_scored, decisions)
         shortlisted = self._resolve_direction_conflicts(scored_by_direction, decisions)
-        decisions.extend(self._apply_capacity_limits(shortlisted, open_positions=open_positions))
+        decisions.extend(
+            self._apply_capacity_limits(shortlisted, open_positions=open_positions)
+        )
         decisions.extend(passthrough)
         return decisions
 
@@ -103,8 +114,16 @@ class TradeAllocatorService:
         )
 
     @staticmethod
-    def _instrument_open_position_count(open_positions: list[Position], instrument: str) -> int:
-        return len([position for position in open_positions if position.instrument == instrument and position.is_open])
+    def _instrument_open_position_count(
+        open_positions: list[Position], instrument: str
+    ) -> int:
+        return len(
+            [
+                position
+                for position in open_positions
+                if position.instrument == instrument and position.is_open
+            ]
+        )
 
     def _suppress_weaker_duplicates(
         self,
@@ -154,7 +173,11 @@ class TradeAllocatorService:
                 continue
             ranked = sorted(
                 entries,
-                key=lambda item: (-item[1], self._signal_time(item[0]), item[0].strategy_name),
+                key=lambda item: (
+                    -item[1],
+                    self._signal_time(item[0]),
+                    item[0].strategy_name,
+                ),
             )
             winner = ranked[0]
             selected.append(winner)
@@ -186,12 +209,24 @@ class TradeAllocatorService:
             ),
         )
         selected_count = 0
-        open_risk_percent = sum(position.risk_percent or 0.0 for position in open_positions if position.is_open)
+        open_risk_percent = sum(
+            position.risk_percent or 0.0
+            for position in open_positions
+            if position.is_open
+        )
         strategy_open_counts = defaultdict(
             int,
             {
-                strategy_name: len([position for position in open_positions if position.strategy_name == strategy_name and position.is_open])
-                for strategy_name in {position.strategy_name for position in open_positions}
+                strategy_name: len(
+                    [
+                        position
+                        for position in open_positions
+                        if position.strategy_name == strategy_name and position.is_open
+                    ]
+                )
+                for strategy_name in {
+                    position.strategy_name for position in open_positions
+                }
             },
         )
         strategy_selected_counts: dict[str, int] = defaultdict(int)
@@ -214,8 +249,14 @@ class TradeAllocatorService:
                 )
                 continue
 
-            current_strategy_count = strategy_open_counts[strategy_name] + strategy_selected_counts[strategy_name]
-            if current_strategy_count >= self.settings.runtime_max_positions_per_strategy:
+            current_strategy_count = (
+                strategy_open_counts[strategy_name]
+                + strategy_selected_counts[strategy_name]
+            )
+            if (
+                current_strategy_count
+                >= self.settings.runtime_max_positions_per_strategy
+            ):
                 decisions.append(
                     TradeAllocationDecision(
                         candidate=candidate,
@@ -263,19 +304,36 @@ class TradeAllocatorService:
     ) -> float:
         signal = candidate.signal
         assert isinstance(signal, EntrySignal)
-        confidence = max(0.0, min(candidate.confidence if candidate.confidence is not None else 0.5, 1.0))
-        last_price_age_ms = max((now - self._as_utc(signal.signal_at)).total_seconds() * 1000, 0.0)
+        confidence = max(
+            0.0,
+            min(candidate.confidence if candidate.confidence is not None else 0.5, 1.0),
+        )
+        last_price_age_ms = max(
+            (now - self._as_utc(signal.signal_at)).total_seconds() * 1000, 0.0
+        )
         freshness = 0.0
         if self.settings.max_price_age_ms > 0:
-            freshness = max(0.0, 1.0 - min(last_price_age_ms, self.settings.max_price_age_ms) / self.settings.max_price_age_ms)
+            freshness = max(
+                0.0,
+                1.0
+                - min(last_price_age_ms, self.settings.max_price_age_ms)
+                / self.settings.max_price_age_ms,
+            )
         spread = None
         if signal.bid is not None and signal.ask is not None:
             spread = signal.ask - signal.bid
         spread_score = 0.5
         if spread is not None and self.settings.max_spread_pips > 0:
-            spread_score = max(0.0, 1.0 - min(spread, self.settings.max_spread_pips) / self.settings.max_spread_pips)
+            spread_score = max(
+                0.0,
+                1.0
+                - min(spread, self.settings.max_spread_pips)
+                / self.settings.max_spread_pips,
+            )
         source_tier_bonus = 1.0 if candidate.source_tier == "TIER1" else 0.9
-        score = ((confidence * 0.45) + (freshness * 0.35) + (spread_score * 0.2)) * source_tier_bonus
+        score = (
+            (confidence * 0.45) + (freshness * 0.35) + (spread_score * 0.2)
+        ) * source_tier_bonus
         return round(score, 6)
 
     @staticmethod

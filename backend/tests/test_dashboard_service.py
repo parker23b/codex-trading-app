@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 from app.core.ig_broker import IGBrokerError
 from app.models.trade import Position, Trade
@@ -70,11 +70,20 @@ def test_dashboard_uses_persisted_trades_and_positions_when_broker_summary_unava
         lambda: type(
             "FailingBroker",
             (),
-            {"get_account_summary": lambda self: (_ for _ in ()).throw(IGBrokerError("unavailable"))},
+            {
+                "get_account_summary": lambda self: (_ for _ in ()).throw(
+                    IGBrokerError("unavailable")
+                )
+            },
         )(),
     )
-    monkeypatch.setattr(DashboardService, "_running_strategies", staticmethod(lambda: []))
-    monkeypatch.setattr("app.services.dashboard_service.datetime", type("FixedDatetime", (), {"now": staticmethod(lambda tz=None: fixed_now)}))
+    monkeypatch.setattr(
+        DashboardService, "_running_strategies", staticmethod(lambda: [])
+    )
+    monkeypatch.setattr(
+        "app.services.dashboard_service.datetime",
+        type("FixedDatetime", (), {"now": staticmethod(lambda tz=None: fixed_now)}),
+    )
 
     dashboard = DashboardService(trade_service).get_dashboard()
 

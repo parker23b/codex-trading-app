@@ -32,7 +32,9 @@ def test_allocator_accepts_high_scoring_request_into_tier1(session):
     result = allocator.allocate_pending_promotions(now=requested_at)
 
     request = session.exec(select(PromotionRequest)).one()
-    entry = session.exec(select(WatchlistEntry).where(WatchlistEntry.instrument == "CS.D.GBPJPY.CFD.IP")).one()
+    entry = session.exec(
+        select(WatchlistEntry).where(WatchlistEntry.instrument == "CS.D.GBPJPY.CFD.IP")
+    ).one()
     assert result.accepted == 1
     assert request.status == PromotionRequestStatus.ACCEPTED.value
     assert entry.tier == WatchlistTier.TIER1.value
@@ -74,7 +76,9 @@ def test_allocator_respects_promotion_budget(session):
     result = allocator.allocate_pending_promotions(now=requested_at)
 
     pending = session.exec(
-        select(PromotionRequest).where(PromotionRequest.instrument == "IX.D.SP500.DAILY.IP")
+        select(PromotionRequest).where(
+            PromotionRequest.instrument == "IX.D.SP500.DAILY.IP"
+        )
     ).one()
     assert result.rejected == 1
     assert pending.status == PromotionRequestStatus.REJECTED.value

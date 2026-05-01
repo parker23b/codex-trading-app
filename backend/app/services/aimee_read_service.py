@@ -37,7 +37,9 @@ class AimeeReadService:
         reviewer = AIReviewerService(self.session)
         return {
             "review": reviewer.get_operator_summary(persist=False),
-            "history": reviewer.list_review_history(review_type="operator_summary", limit=6),
+            "history": reviewer.list_review_history(
+                review_type="operator_summary", limit=6
+            ),
             "controlPlane": self._control_plane_summary(),
             "coverage": self._coverage_summary(),
             "telemetry": OperationalTelemetryService(self.session).get_summary(),
@@ -50,7 +52,8 @@ class AimeeReadService:
         control_state = self.session.get(OperatorControlState, 1)
         effective_autonomy = (
             self.settings.autonomous_control_enabled
-            if control_state is None or control_state.autonomous_control_override is None
+            if control_state is None
+            or control_state.autonomous_control_override is None
             else control_state.autonomous_control_override
         )
         governance_by_name = {
@@ -62,7 +65,11 @@ class AimeeReadService:
             for deployment in self.session.exec(select(StrategyDeployment)).all()
         }
         runtimes_by_strategy: dict[str, list[StrategyRuntimeState]] = defaultdict(list)
-        for runtime in self.session.exec(select(StrategyRuntimeState).order_by(StrategyRuntimeState.updated_at.desc())).all():
+        for runtime in self.session.exec(
+            select(StrategyRuntimeState).order_by(
+                StrategyRuntimeState.updated_at.desc()
+            )
+        ).all():
             runtimes_by_strategy[runtime.strategy_name].append(runtime)
 
         families: list[dict[str, object]] = []
@@ -73,7 +80,9 @@ class AimeeReadService:
             deployment = deployment_by_name.get(strategy_name)
             runtimes = runtimes_by_strategy.get(strategy_name, [])
             active_runtime = self._select_active_runtime(runtimes)
-            alignment = self._alignment(deployment=deployment, active_runtime=active_runtime)
+            alignment = self._alignment(
+                deployment=deployment, active_runtime=active_runtime
+            )
             if alignment["is_aligned"] is False:
                 misaligned_count += 1
             families.append(
@@ -83,9 +92,15 @@ class AimeeReadService:
                     "runtime": self._serialize_runtime(active_runtime, runtimes),
                     "alignment": alignment,
                     "governance": {
-                        "approval_state": governance.approval_state if governance is not None else "UNKNOWN",
-                        "autonomous_operation_allowed": governance.autonomous_operation_allowed if governance is not None else False,
-                        "emergency_stop": governance.emergency_stop if governance is not None else False,
+                        "approval_state": governance.approval_state
+                        if governance is not None
+                        else "UNKNOWN",
+                        "autonomous_operation_allowed": governance.autonomous_operation_allowed
+                        if governance is not None
+                        else False,
+                        "emergency_stop": governance.emergency_stop
+                        if governance is not None
+                        else False,
                     },
                 }
             )
@@ -93,13 +108,17 @@ class AimeeReadService:
         counts = Counter(
             family["deployment"]["state"]
             for family in families
-            if isinstance(family.get("deployment"), dict) and family["deployment"].get("state") is not None
+            if isinstance(family.get("deployment"), dict)
+            and family["deployment"].get("state") is not None
         )
         return {
             "effective_autonomous_control_enabled": effective_autonomy,
             "configured_autonomous_control_enabled": self.settings.autonomous_control_enabled,
-            "autonomy_override_active": control_state is not None and control_state.autonomous_control_override is not None,
-            "autonomy_override_reason": control_state.override_reason if control_state is not None else None,
+            "autonomy_override_active": control_state is not None
+            and control_state.autonomous_control_override is not None,
+            "autonomy_override_reason": control_state.override_reason
+            if control_state is not None
+            else None,
             "misaligned_count": misaligned_count,
             "counts": dict(counts),
             "families": families,
@@ -121,15 +140,28 @@ class AimeeReadService:
                 entry.instrument,
             )
         )
-        selected, pinned, capped, asset_usage = self._compute_streaming_plan(tier1_entries)
+        selected, pinned, capped, asset_usage = self._compute_streaming_plan(
+            tier1_entries
+        )
         promotion_requests = list(
-            self.session.exec(select(PromotionRequest).order_by(desc(PromotionRequest.updated_at)).limit(12)).all()
+            self.session.exec(
+                select(PromotionRequest)
+                .order_by(desc(PromotionRequest.updated_at))
+                .limit(12)
+            ).all()
         )
         promotion_counts = Counter(request.status for request in promotion_requests)
         allocator_events = list(
             self.session.exec(
                 select(DomainEvent)
-                .where(DomainEvent.event_type.in_(["strategy.trade_allocator_selected", "strategy.trade_allocator_rejected"]))
+                .where(
+                    DomainEvent.event_type.in_(
+                        [
+                            "strategy.trade_allocator_selected",
+                            "strategy.trade_allocator_rejected",
+                        ]
+                    )
+                )
                 .order_by(desc(DomainEvent.created_at), desc(DomainEvent.id))
                 .limit(20)
             ).all()
@@ -141,7 +173,11 @@ class AimeeReadService:
         )
         return {
             "streaming": {
-                "active_instruments": [entry.instrument for entry in tier1_entries if entry.instrument in selected],
+                "active_instruments": [
+                    entry.instrument
+                    for entry in tier1_entries
+                    if entry.instrument in selected
+                ],
                 "desired_instruments": list(selected),
                 "pinned_instruments": list(pinned),
                 "capped_instruments": list(capped),
@@ -154,24 +190,37 @@ class AimeeReadService:
                 "expired_count": promotion_counts.get("EXPIRED", 0),
             },
             "trade_allocator": {
-                "selected_count": allocator_counts.get("strategy.trade_allocator_selected", 0),
-                "rejected_count": allocator_counts.get("strategy.trade_allocator_rejected", 0),
+                "selected_count": allocator_counts.get(
+                    "strategy.trade_allocator_selected", 0
+                ),
+                "rejected_count": allocator_counts.get(
+                    "strategy.trade_allocator_rejected", 0
+                ),
                 "reason_counts": dict(allocator_reason_counts),
             },
         }
 
     def _strategies(self) -> list[dict[str, object]]:
         executions = self.session.exec(
-            select(Execution).order_by(desc(Execution.last_transition_at), desc(Execution.id)).limit(250)
+            select(Execution)
+            .order_by(desc(Execution.last_transition_at), desc(Execution.id))
+            .limit(250)
         ).all()
         intents = self.session.exec(
-            select(TradeIntent).order_by(desc(TradeIntent.updated_at), desc(TradeIntent.id)).limit(250)
+            select(TradeIntent)
+            .order_by(desc(TradeIntent.updated_at), desc(TradeIntent.id))
+            .limit(250)
         ).all()
         latest_execution_warning_by_strategy: dict[str, Execution] = {}
         for execution in executions:
-            if execution.status not in {ExecutionStatus.FAILED.value, ExecutionStatus.NEEDS_MANUAL_REVIEW.value}:
+            if execution.status not in {
+                ExecutionStatus.FAILED.value,
+                ExecutionStatus.NEEDS_MANUAL_REVIEW.value,
+            }:
                 continue
-            latest_execution_warning_by_strategy.setdefault(execution.strategy_name, execution)
+            latest_execution_warning_by_strategy.setdefault(
+                execution.strategy_name, execution
+            )
         latest_intent_warning_by_strategy: dict[str, TradeIntent] = {}
         for intent in intents:
             if intent.state != TradeIntentState.REJECTED.value:
@@ -180,9 +229,7 @@ class AimeeReadService:
 
         runtimes = self.session.exec(select(StrategyRuntimeState)).all()
         running_by_strategy = {
-            runtime.strategy_name
-            for runtime in runtimes
-            if runtime.status == "RUNNING"
+            runtime.strategy_name for runtime in runtimes if runtime.status == "RUNNING"
         }
         summaries: list[dict[str, object]] = []
         for metadata in strategy_registry.list_metadata():
@@ -190,13 +237,17 @@ class AimeeReadService:
             intent_warning = latest_intent_warning_by_strategy.get(metadata.name)
             warning_message = None
             if execution_warning is not None:
-                warning_message = execution_warning.error_message or execution_warning.reason
+                warning_message = (
+                    execution_warning.error_message or execution_warning.reason
+                )
             elif intent_warning is not None:
                 warning_message = intent_warning.decision_reason
             summaries.append(
                 {
                     "name": metadata.name,
-                    "status": "RUNNING" if metadata.name in running_by_strategy else "STOPPED",
+                    "status": "RUNNING"
+                    if metadata.name in running_by_strategy
+                    else "STOPPED",
                     "warning_message": warning_message,
                 }
             )
@@ -204,7 +255,9 @@ class AimeeReadService:
 
     def _events(self, *, limit: int) -> list[dict[str, object]]:
         events = self.session.exec(
-            select(DomainEvent).order_by(desc(DomainEvent.created_at), desc(DomainEvent.id)).limit(limit)
+            select(DomainEvent)
+            .order_by(desc(DomainEvent.created_at), desc(DomainEvent.id))
+            .limit(limit)
         ).all()
         return [
             {
@@ -232,7 +285,9 @@ class AimeeReadService:
         ]
 
     @staticmethod
-    def _select_active_runtime(runtimes: list[StrategyRuntimeState]) -> StrategyRuntimeState | None:
+    def _select_active_runtime(
+        runtimes: list[StrategyRuntimeState],
+    ) -> StrategyRuntimeState | None:
         running = [runtime for runtime in runtimes if runtime.status == "RUNNING"]
         if not running:
             return None
@@ -246,7 +301,9 @@ class AimeeReadService:
         )[0]
 
     @staticmethod
-    def _serialize_deployment(deployment: StrategyDeployment | None) -> dict[str, object] | None:
+    def _serialize_deployment(
+        deployment: StrategyDeployment | None,
+    ) -> dict[str, object] | None:
         if deployment is None:
             return None
         return {
@@ -259,7 +316,10 @@ class AimeeReadService:
         }
 
     @staticmethod
-    def _serialize_runtime(active_runtime: StrategyRuntimeState | None, runtimes: list[StrategyRuntimeState]) -> dict[str, object]:
+    def _serialize_runtime(
+        active_runtime: StrategyRuntimeState | None,
+        runtimes: list[StrategyRuntimeState],
+    ) -> dict[str, object]:
         if active_runtime is None:
             return {
                 "is_running": False,
@@ -307,7 +367,11 @@ class AimeeReadService:
                 "is_aligned": True,
                 "reason": "Deployment and runtime are aligned.",
             }
-        if active_runtime is not None and deployment.state in {"BLOCKED", "AUTO_PAUSED", "EMERGENCY_STOPPED"}:
+        if active_runtime is not None and deployment.state in {
+            "BLOCKED",
+            "AUTO_PAUSED",
+            "EMERGENCY_STOPPED",
+        }:
             return {
                 "is_aligned": False,
                 "reason": "Runtime is still active despite the deployment state requiring it to be stopped.",
@@ -336,7 +400,10 @@ class AimeeReadService:
                 pinned.append(entry.instrument)
                 asset_usage[asset_class] += 1
                 continue
-            if self.settings.ig_streaming_max_instruments > 0 and len(selected) >= self.settings.ig_streaming_max_instruments:
+            if (
+                self.settings.ig_streaming_max_instruments > 0
+                and len(selected) >= self.settings.ig_streaming_max_instruments
+            ):
                 capped.append(entry.instrument)
                 continue
             budget = asset_budgets.get(asset_class)

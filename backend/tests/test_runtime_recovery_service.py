@@ -13,7 +13,9 @@ from tests.fakes import make_broker_position
 from app.core.runtime import runtime_manager
 
 
-def test_runtime_recovery_creates_trade_intent_before_recreating_position(session, broker, fixed_now):
+def test_runtime_recovery_creates_trade_intent_before_recreating_position(
+    session, broker, fixed_now
+):
     session.add(
         StrategyRuntimeState(
             runtime_id="runtime-recover-1",
@@ -51,7 +53,9 @@ def test_runtime_recovery_creates_trade_intent_before_recreating_position(sessio
     assert intents[0].position_id == positions[0].id
 
 
-def test_runtime_recovery_restores_exits_only_mode_to_engine(session, broker, fixed_now):
+def test_runtime_recovery_restores_exits_only_mode_to_engine(
+    session, broker, fixed_now
+):
     session.add(
         StrategyRuntimeState(
             runtime_id="runtime-recover-exits-only",
@@ -70,14 +74,18 @@ def test_runtime_recovery_restores_exits_only_mode_to_engine(session, broker, fi
 
     engine = runtime_manager.get_engine("smoke_test_hold", "CS.D.EURUSD.MINI.IP")
     runtime = session.exec(
-        select(StrategyRuntimeState).where(StrategyRuntimeState.runtime_id == "runtime-recover-exits-only")
+        select(StrategyRuntimeState).where(
+            StrategyRuntimeState.runtime_id == "runtime-recover-exits-only"
+        )
     ).one()
     assert engine is not None
     assert engine.runtime_mode == "EXITS_ONLY"
     assert runtime.runtime_mode == "EXITS_ONLY"
 
 
-def test_runtime_recovery_does_not_start_runtime_marked_stopped_mode(session, broker, fixed_now):
+def test_runtime_recovery_does_not_start_runtime_marked_stopped_mode(
+    session, broker, fixed_now
+):
     session.add(
         StrategyRuntimeState(
             runtime_id="runtime-recover-stopped-mode",
@@ -96,7 +104,9 @@ def test_runtime_recovery_does_not_start_runtime_marked_stopped_mode(session, br
 
     engine = runtime_manager.get_engine("smoke_test_hold", "CS.D.EURUSD.MINI.IP")
     runtime = session.exec(
-        select(StrategyRuntimeState).where(StrategyRuntimeState.runtime_id == "runtime-recover-stopped-mode")
+        select(StrategyRuntimeState).where(
+            StrategyRuntimeState.runtime_id == "runtime-recover-stopped-mode"
+        )
     ).one()
     assert engine is None
     assert runtime.status == "STOPPED"

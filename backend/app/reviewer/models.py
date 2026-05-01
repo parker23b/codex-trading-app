@@ -39,7 +39,9 @@ class ReviewMetadata(BaseModel):
     requested_date: date | None = None
     scope: dict[str, Any] = Field(default_factory=dict)
     source_coverage: ReviewSourceCoverage
-    generation_mode: Literal["deterministic_only", "deterministic_plus_llm"] = "deterministic_only"
+    generation_mode: Literal["deterministic_only", "deterministic_plus_llm"] = (
+        "deterministic_only"
+    )
 
 
 class SupportingMetric(BaseModel):
@@ -248,7 +250,9 @@ class ReviewRecordSummary(BaseModel):
     review_type: ReviewType
     generated_at: datetime
     scope: dict[str, Any] = Field(default_factory=dict)
-    generation_mode: Literal["deterministic_only", "deterministic_plus_llm"] = "deterministic_only"
+    generation_mode: Literal["deterministic_only", "deterministic_plus_llm"] = (
+        "deterministic_only"
+    )
     provider: str | None = None
     model: str | None = None
 
@@ -303,4 +307,6 @@ class PersistedReviewRecord(BaseModel):
     provider: str | None = None
     model: str | None = None
     raw_model_response: str | None = None
-    generation_mode: Literal["deterministic_only", "deterministic_plus_llm"] = "deterministic_only"
+    generation_mode: Literal["deterministic_only", "deterministic_plus_llm"] = (
+        "deterministic_only"
+    )

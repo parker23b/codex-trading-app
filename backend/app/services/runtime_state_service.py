@@ -16,14 +16,20 @@ class RuntimeStateService:
         self.session = session
 
     def list_runtimes(self) -> list[StrategyRuntimeState]:
-        statement = select(StrategyRuntimeState).order_by(StrategyRuntimeState.strategy_name, StrategyRuntimeState.instrument)
+        statement = select(StrategyRuntimeState).order_by(
+            StrategyRuntimeState.strategy_name, StrategyRuntimeState.instrument
+        )
         return list(self.session.exec(statement))
 
     def list_active_runtimes(self) -> list[StrategyRuntimeState]:
-        statement = select(StrategyRuntimeState).where(StrategyRuntimeState.status == "RUNNING")
+        statement = select(StrategyRuntimeState).where(
+            StrategyRuntimeState.status == "RUNNING"
+        )
         return list(self.session.exec(statement))
 
-    def get_runtime(self, strategy_name: str, instrument: str) -> StrategyRuntimeState | None:
+    def get_runtime(
+        self, strategy_name: str, instrument: str
+    ) -> StrategyRuntimeState | None:
         statement = select(StrategyRuntimeState).where(
             StrategyRuntimeState.strategy_name == strategy_name,
             StrategyRuntimeState.instrument == instrument,
@@ -31,7 +37,9 @@ class RuntimeStateService:
         return self.session.exec(statement).first()
 
     def get_runtime_by_id(self, runtime_id: str) -> StrategyRuntimeState | None:
-        statement = select(StrategyRuntimeState).where(StrategyRuntimeState.runtime_id == runtime_id)
+        statement = select(StrategyRuntimeState).where(
+            StrategyRuntimeState.runtime_id == runtime_id
+        )
         return self.session.exec(statement).first()
 
     def sync_engine_state(
@@ -57,7 +65,9 @@ class RuntimeStateService:
     ) -> StrategyRuntimeState:
         engine = runtime_manager.get_engine(strategy_name, instrument)
         if engine is None:
-            raise ValueError(f"No active engine for strategy '{strategy_name}' on '{instrument}'.")
+            raise ValueError(
+                f"No active engine for strategy '{strategy_name}' on '{instrument}'."
+            )
 
         runtime = self.get_runtime(strategy_name, instrument)
         metadata = strategy_registry.get_metadata(strategy_name)
@@ -68,7 +78,10 @@ class RuntimeStateService:
                 strategy_name=strategy_name,
                 strategy_version="1",
                 instrument=instrument,
-                parameters=parameters or {parameter.key: parameter.value for parameter in metadata.parameters},
+                parameters=parameters
+                or {
+                    parameter.key: parameter.value for parameter in metadata.parameters
+                },
                 started_at=started_at or now,
                 control_mode=control_mode or "MANUAL",
                 runtime_mode=runtime_mode or "NORMAL",
@@ -80,14 +93,24 @@ class RuntimeStateService:
         runtime.strategy_name = strategy_name
         runtime.strategy_version = "1"
         runtime.instrument = instrument
-        runtime.parameters = parameters or engine.strategy_parameters or {parameter.key: parameter.value for parameter in metadata.parameters}
+        runtime.parameters = (
+            parameters
+            or engine.strategy_parameters
+            or {parameter.key: parameter.value for parameter in metadata.parameters}
+        )
         runtime.status = status
         runtime.recovery_state = recovery_state
         runtime.recovery_reason = recovery_reason
         runtime.control_mode = control_mode or runtime.control_mode or "MANUAL"
         runtime.runtime_mode = runtime_mode or runtime.runtime_mode or "NORMAL"
-        runtime.deployment_id = deployment_id if deployment_id is not None else runtime.deployment_id
-        runtime.active_profile_name = active_profile_name or engine.active_profile_name or runtime.active_profile_name
+        runtime.deployment_id = (
+            deployment_id if deployment_id is not None else runtime.deployment_id
+        )
+        runtime.active_profile_name = (
+            active_profile_name
+            or engine.active_profile_name
+            or runtime.active_profile_name
+        )
         runtime.auto_resume = auto_resume
         runtime.started_at = started_at or runtime.started_at
         runtime.stopped_at = stopped_at
@@ -100,7 +123,11 @@ class RuntimeStateService:
             else (
                 current_position.broker_reference
                 if current_position is not None
-                else (engine.current_position.broker_reference if engine.current_position is not None else None)
+                else (
+                    engine.current_position.broker_reference
+                    if engine.current_position is not None
+                    else None
+                )
             )
         )
         runtime.strategy_state_snapshot = engine.strategy.export_state_snapshot()
@@ -110,7 +137,9 @@ class RuntimeStateService:
         self.session.refresh(runtime)
         return runtime
 
-    def mark_stopped(self, engine_runtime_id: str, *, stopped_at: datetime | None = None) -> StrategyRuntimeState | None:
+    def mark_stopped(
+        self, engine_runtime_id: str, *, stopped_at: datetime | None = None
+    ) -> StrategyRuntimeState | None:
         runtime = self.get_runtime_by_id(engine_runtime_id)
         if runtime is None:
             return None

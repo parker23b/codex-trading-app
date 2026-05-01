@@ -10,7 +10,9 @@ from app.strategies.base import PriceUpdate, Strategy
 class BreakoutGuardStrategy(Strategy):
     name = "breakout_guard"
 
-    def __init__(self, breakout_window: int = 15, volatility_floor: float = 0.003) -> None:
+    def __init__(
+        self, breakout_window: int = 15, volatility_floor: float = 0.003
+    ) -> None:
         self.breakout_window = breakout_window
         self.volatility_floor = volatility_floor
         self.prices: deque[float] = deque(maxlen=breakout_window)
@@ -56,11 +58,15 @@ class BreakoutGuardStrategy(Strategy):
     def export_state_snapshot(self) -> dict[str, Any]:
         return {
             "prices": list(self.prices),
-            "entry_direction": self._entry_direction.value if self._entry_direction else None,
+            "entry_direction": self._entry_direction.value
+            if self._entry_direction
+            else None,
         }
 
     def restore_state_snapshot(self, snapshot: dict[str, Any]) -> None:
         prices = snapshot.get("prices") or []
-        self.prices = deque((float(price) for price in prices), maxlen=self.breakout_window)
+        self.prices = deque(
+            (float(price) for price in prices), maxlen=self.breakout_window
+        )
         direction = snapshot.get("entry_direction")
         self._entry_direction = OrderDirection(direction) if direction else None

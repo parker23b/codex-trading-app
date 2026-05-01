@@ -73,12 +73,12 @@ class MarketOverviewService:
             details = self.broker.get_market_details(definition.epic)
             rows.append(
                 self._build_instrument_row(
-                definition=definition,
-                details=details,
-                now=now,
-                positions=positions_by_instrument.get(definition.epic, []),
-                trades=trades,
-            )
+                    definition=definition,
+                    details=details,
+                    now=now,
+                    positions=positions_by_instrument.get(definition.epic, []),
+                    trades=trades,
+                )
             )
 
         return {
@@ -99,9 +99,21 @@ class MarketOverviewService:
         primary_position = positions[0] if positions else None
         has_open_position = any(position.is_open for position in positions)
         price = self._select_price(details, primary_position, definition)
-        active = self._is_active(definition=definition, details=details, now=now, positions=positions, trades=trades)
-        status = self._map_status(details.market_status, tradable=details.tradable, has_open_position=has_open_position)
-        session_note = self._session_note(details=details, status=status, has_open_position=has_open_position)
+        active = self._is_active(
+            definition=definition,
+            details=details,
+            now=now,
+            positions=positions,
+            trades=trades,
+        )
+        status = self._map_status(
+            details.market_status,
+            tradable=details.tradable,
+            has_open_position=has_open_position,
+        )
+        session_note = self._session_note(
+            details=details, status=status, has_open_position=has_open_position
+        )
 
         return {
             "id": definition.epic,
@@ -118,7 +130,9 @@ class MarketOverviewService:
             "sessionNote": session_note,
         }
 
-    def _build_summary(self, *, category: str, rows: list[dict[str, object]], now: datetime) -> dict[str, object]:
+    def _build_summary(
+        self, *, category: str, rows: list[dict[str, object]], now: datetime
+    ) -> dict[str, object]:
         meta = CATEGORY_META[category]
         tradable_rows = [row for row in rows if row["tradable"]]
         active_rows = [row for row in rows if row["active"]]
@@ -142,7 +156,11 @@ class MarketOverviewService:
         }
 
     @staticmethod
-    def _select_price(details: BrokerMarketDetails, position: Position | None, definition: InstrumentDefinition) -> float:
+    def _select_price(
+        details: BrokerMarketDetails,
+        position: Position | None,
+        definition: InstrumentDefinition,
+    ) -> float:
         if details.bid is not None and details.offer is not None:
             return (details.bid + details.offer) / 2
         if details.bid is not None:
@@ -156,16 +174,25 @@ class MarketOverviewService:
         return definition.reference_price
 
     @staticmethod
-    def _map_status(market_status: str | None, *, tradable: bool, has_open_position: bool) -> str:
+    def _map_status(
+        market_status: str | None, *, tradable: bool, has_open_position: bool
+    ) -> str:
         normalized = (market_status or "").upper()
         if tradable:
             return "OPEN"
-        if has_open_position or normalized in {"EDITS_ONLY", "ON_AUCTION", "ON_AUCTION_NO_EDITS", "SUSPENDED"}:
+        if has_open_position or normalized in {
+            "EDITS_ONLY",
+            "ON_AUCTION",
+            "ON_AUCTION_NO_EDITS",
+            "SUSPENDED",
+        }:
             return "LIMITED"
         return "CLOSED"
 
     @staticmethod
-    def _session_note(*, details: BrokerMarketDetails, status: str, has_open_position: bool) -> str | None:
+    def _session_note(
+        *, details: BrokerMarketDetails, status: str, has_open_position: bool
+    ) -> str | None:
         normalized = (details.market_status or "").upper()
         if has_open_position and status == "LIMITED":
             return "Market is not open for fresh entries, but open positions can still require management."
@@ -194,11 +221,18 @@ class MarketOverviewService:
         )
         has_open_position = any(position.is_open for position in positions)
         has_recent_trade = any(
-            trade.instrument == definition.epic and (now - trade.close_time.astimezone(UTC)) <= timedelta(days=2)
+            trade.instrument == definition.epic
+            and (now - trade.close_time.astimezone(UTC)) <= timedelta(days=2)
             for trade in trades[:30]
         )
-        has_live_market = (details.market_status or "").upper() in {"TRADEABLE", "TRADEABLE_ONLINE", "EDITS_ONLY"}
-        return active_runtime or has_open_position or has_recent_trade or has_live_market
+        has_live_market = (details.market_status or "").upper() in {
+            "TRADEABLE",
+            "TRADEABLE_ONLINE",
+            "EDITS_ONLY",
+        }
+        return (
+            active_runtime or has_open_position or has_recent_trade or has_live_market
+        )
 
     @staticmethod
     def _activity_level(*, details: BrokerMarketDetails, active: bool) -> str:
@@ -228,7 +262,11 @@ class MarketOverviewService:
         return sorted(
             rows,
             key=lambda row: (
-                0 if row["status"] == "OPEN" else 1 if row["status"] == "LIMITED" else 2,
+                0
+                if row["status"] == "OPEN"
+                else 1
+                if row["status"] == "LIMITED"
+                else 2,
                 -float(row["changePercent"]),
             ),
         )[0]
@@ -238,7 +276,9 @@ class MarketOverviewService:
         return "Closes" if primary_row["status"] == "OPEN" else "Opens"
 
     @staticmethod
-    def _next_transition_at(*, now: datetime, primary_row: dict[str, object]) -> datetime:
+    def _next_transition_at(
+        *, now: datetime, primary_row: dict[str, object]
+    ) -> datetime:
         if primary_row["status"] == "OPEN":
             return now + timedelta(hours=6)
         if primary_row["status"] == "LIMITED":

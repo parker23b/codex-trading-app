@@ -11,7 +11,9 @@ from app.services.trade_service import TradeService
 from tests.fakes import make_broker_position
 
 
-def test_reconciliation_corrects_local_position_from_broker_truth(session, broker, fixed_now):
+def test_reconciliation_corrects_local_position_from_broker_truth(
+    session, broker, fixed_now
+):
     trade_service = TradeService(session)
     engine = runtime_manager.start(
         strategy_name="smoke_test_hold",
@@ -55,15 +57,25 @@ def test_reconciliation_corrects_local_position_from_broker_truth(session, broke
         )
     ]
 
-    reconciled_positions = ReconciliationService(trade_service).reconcile_open_positions()
+    reconciled_positions = ReconciliationService(
+        trade_service
+    ).reconcile_open_positions()
 
     assert len(reconciled_positions) == 1
     reconciled = reconciled_positions[0]
     assert reconciled.size == 0.5
     assert reconciled.open_price == 101.5
     assert reconciled.broker_sync_status == "CONFIRMED"
-    assert runtime_manager.get_engine("smoke_test_hold", "CS.D.EURUSD.MINI.IP").current_position.open_price == 101.5
-    assert trade_service.list_reconciliation_events(limit=10)[0].event_type == "POSITION_SYNCED_FROM_BROKER"
+    assert (
+        runtime_manager.get_engine(
+            "smoke_test_hold", "CS.D.EURUSD.MINI.IP"
+        ).current_position.open_price
+        == 101.5
+    )
+    assert (
+        trade_service.list_reconciliation_events(limit=10)[0].event_type
+        == "POSITION_SYNCED_FROM_BROKER"
+    )
 
 
 def test_reconciliation_adopts_unmatched_broker_position(session, broker, fixed_now):
@@ -90,8 +102,12 @@ def test_reconciliation_adopts_unmatched_broker_position(session, broker, fixed_
         )
     ]
 
-    reconciled_positions = ReconciliationService(trade_service).reconcile_open_positions()
-    runtime = RuntimeStateService(session).get_runtime("smoke_test_hold", "CS.D.EURUSD.MINI.IP")
+    reconciled_positions = ReconciliationService(
+        trade_service
+    ).reconcile_open_positions()
+    runtime = RuntimeStateService(session).get_runtime(
+        "smoke_test_hold", "CS.D.EURUSD.MINI.IP"
+    )
 
     assert len(reconciled_positions) == 1
     adopted = reconciled_positions[0]
@@ -101,7 +117,10 @@ def test_reconciliation_adopts_unmatched_broker_position(session, broker, fixed_
     assert adopted.reason == "Reconciled from broker"
     assert adopted.broker_sync_status == "CONFIRMED"
     assert runtime.current_position_broker_reference is None
-    assert trade_service.list_reconciliation_events(limit=10)[0].event_type == "POSITION_ADOPTED_FROM_BROKER"
+    assert (
+        trade_service.list_reconciliation_events(limit=10)[0].event_type
+        == "POSITION_ADOPTED_FROM_BROKER"
+    )
 
 
 def test_reconciliation_closes_local_position_missing_at_broker(session, fixed_now):
@@ -134,19 +153,33 @@ def test_reconciliation_closes_local_position_missing_at_broker(session, fixed_n
         current_position=persisted,
     )
 
-    reconciled_positions = ReconciliationService(trade_service).reconcile_open_positions()
-    runtime_state = RuntimeStateService(session).get_runtime("smoke_test_hold", "CS.D.EURUSD.MINI.IP")
+    reconciled_positions = ReconciliationService(
+        trade_service
+    ).reconcile_open_positions()
+    runtime_state = RuntimeStateService(session).get_runtime(
+        "smoke_test_hold", "CS.D.EURUSD.MINI.IP"
+    )
     closed_position = session.get(Position, persisted.id)
 
     assert reconciled_positions == []
     assert closed_position.is_open is False
     assert closed_position.broker_sync_status == "MISSING_AT_BROKER"
-    assert runtime_manager.get_engine("smoke_test_hold", "CS.D.EURUSD.MINI.IP").current_position is None
+    assert (
+        runtime_manager.get_engine(
+            "smoke_test_hold", "CS.D.EURUSD.MINI.IP"
+        ).current_position
+        is None
+    )
     assert runtime_state.current_position_broker_reference is None
-    assert trade_service.list_reconciliation_events(limit=10)[0].event_type == "LOCAL_POSITION_CLOSED_AFTER_BROKER_MISS"
+    assert (
+        trade_service.list_reconciliation_events(limit=10)[0].event_type
+        == "LOCAL_POSITION_CLOSED_AFTER_BROKER_MISS"
+    )
 
 
-def test_reconciliation_creates_explicit_adopted_trade_intent(session, broker, fixed_now):
+def test_reconciliation_creates_explicit_adopted_trade_intent(
+    session, broker, fixed_now
+):
     trade_service = TradeService(session)
     broker.remote_positions = [
         make_broker_position(
@@ -167,7 +200,9 @@ def test_reconciliation_creates_explicit_adopted_trade_intent(session, broker, f
     assert intents[0].decision_reason_code == "UNPLANNED_POSITION_DETECTED"
 
 
-def test_reconciliation_forced_close_creates_trade_and_intent_record(session, fixed_now):
+def test_reconciliation_forced_close_creates_trade_and_intent_record(
+    session, fixed_now
+):
     trade_service = TradeService(session)
     current_position = Position(
         strategy_name="smoke_test_hold",

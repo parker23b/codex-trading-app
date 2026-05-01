@@ -157,12 +157,16 @@ class DomainEventService:
             if instrument:
                 statement = statement.where(DomainEvent.instrument == instrument)
             if correlation_id:
-                statement = statement.where(DomainEvent.correlation_id == correlation_id)
+                statement = statement.where(
+                    DomainEvent.correlation_id == correlation_id
+                )
             if since:
                 statement = statement.where(DomainEvent.created_at >= since)
             if until:
                 statement = statement.where(DomainEvent.created_at <= until)
-            statement = statement.order_by(desc(DomainEvent.created_at), desc(DomainEvent.id)).limit(limit)
+            statement = statement.order_by(
+                desc(DomainEvent.created_at), desc(DomainEvent.id)
+            ).limit(limit)
             return list(session.exec(statement))
 
     def get_event(self, event_id: int) -> DomainEvent | None:

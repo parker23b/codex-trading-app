@@ -98,9 +98,13 @@ class VolatilityAdjustedPullbackContinuationStrategy(Strategy):
             return
 
         if self._entry_direction is OrderDirection.BUY:
-            self._highest_price_since_entry = max(self._highest_price_since_entry or data.price, high)
+            self._highest_price_since_entry = max(
+                self._highest_price_since_entry or data.price, high
+            )
         elif self._entry_direction is OrderDirection.SELL:
-            self._lowest_price_since_entry = min(self._lowest_price_since_entry or data.price, low)
+            self._lowest_price_since_entry = min(
+                self._lowest_price_since_entry or data.price, low
+            )
 
     def should_enter_trade(self) -> bool:
         self._signal_stop_loss = None
@@ -129,17 +133,26 @@ class VolatilityAdjustedPullbackContinuationStrategy(Strategy):
         if fast_sma_prev is None or slow_sma_prev is None:
             return False
 
-        trend_up = fast_sma > slow_sma and (fast_sma - fast_sma_prev) >= self.slope_threshold
-        trend_down = fast_sma < slow_sma and (fast_sma - fast_sma_prev) <= -self.slope_threshold
+        trend_up = (
+            fast_sma > slow_sma and (fast_sma - fast_sma_prev) >= self.slope_threshold
+        )
+        trend_down = (
+            fast_sma < slow_sma and (fast_sma - fast_sma_prev) <= -self.slope_threshold
+        )
         volatility_ok = atr > atr_mean
 
-        prior_highs = list(self.highs)[-(self.pullback_window + 1):-1]
-        prior_lows = list(self.lows)[-(self.pullback_window + 1):-1]
-        if len(prior_highs) < self.pullback_window or len(prior_lows) < self.pullback_window:
+        prior_highs = list(self.highs)[-(self.pullback_window + 1) : -1]
+        prior_lows = list(self.lows)[-(self.pullback_window + 1) : -1]
+        if (
+            len(prior_highs) < self.pullback_window
+            or len(prior_lows) < self.pullback_window
+        ):
             return False
 
-        recent_structure_highs = list(self.highs)[-(self.local_structure_window + 1):-1]
-        recent_structure_lows = list(self.lows)[-(self.local_structure_window + 1):-1]
+        recent_structure_highs = list(self.highs)[
+            -(self.local_structure_window + 1) : -1
+        ]
+        recent_structure_lows = list(self.lows)[-(self.local_structure_window + 1) : -1]
         recent_high = max(prior_highs)
         recent_low = min(prior_lows)
         recent_local_high = max(recent_structure_highs)
@@ -147,8 +160,12 @@ class VolatilityAdjustedPullbackContinuationStrategy(Strategy):
 
         pullback_low = min(recent_structure_lows)
         pullback_high = max(recent_structure_highs)
-        long_pullback_depth = (recent_high - pullback_low) / recent_high if recent_high else 0.0
-        short_pullback_depth = (pullback_high - recent_low) / recent_low if recent_low else 0.0
+        long_pullback_depth = (
+            (recent_high - pullback_low) / recent_high if recent_high else 0.0
+        )
+        short_pullback_depth = (
+            (pullback_high - recent_low) / recent_low if recent_low else 0.0
+        )
 
         long_signal = (
             trend_up
@@ -157,7 +174,7 @@ class VolatilityAdjustedPullbackContinuationStrategy(Strategy):
             and current_price > recent_local_high
         )
         if long_signal:
-            swing_low = min(list(self.lows)[-(self.local_structure_window + 1):-1])
+            swing_low = min(list(self.lows)[-(self.local_structure_window + 1) : -1])
             stop_loss = swing_low - (self.stop_atr_multiple * atr)
             if stop_loss < current_price:
                 self._entry_direction = OrderDirection.BUY
@@ -171,7 +188,7 @@ class VolatilityAdjustedPullbackContinuationStrategy(Strategy):
             and current_price < recent_local_low
         )
         if short_signal:
-            swing_high = max(list(self.highs)[-(self.local_structure_window + 1):-1])
+            swing_high = max(list(self.highs)[-(self.local_structure_window + 1) : -1])
             stop_loss = swing_high + (self.stop_atr_multiple * atr)
             if stop_loss > current_price:
                 self._entry_direction = OrderDirection.SELL
@@ -193,25 +210,41 @@ class VolatilityAdjustedPullbackContinuationStrategy(Strategy):
             self._update_dynamic_risk(exit_price=exit_price, atr=current_atr)
 
         if self._stop_loss is not None:
-            if self._entry_direction is OrderDirection.BUY and exit_price <= self._stop_loss:
+            if (
+                self._entry_direction is OrderDirection.BUY
+                and exit_price <= self._stop_loss
+            ):
                 return True
-            if self._entry_direction is OrderDirection.SELL and exit_price >= self._stop_loss:
+            if (
+                self._entry_direction is OrderDirection.SELL
+                and exit_price >= self._stop_loss
+            ):
                 return True
 
         if self._take_profit is not None:
-            if self._entry_direction is OrderDirection.BUY and exit_price >= self._take_profit:
+            if (
+                self._entry_direction is OrderDirection.BUY
+                and exit_price >= self._take_profit
+            ):
                 return True
-            if self._entry_direction is OrderDirection.SELL and exit_price <= self._take_profit:
+            if (
+                self._entry_direction is OrderDirection.SELL
+                and exit_price <= self._take_profit
+            ):
                 return True
 
         return False
 
     def entry_direction(self) -> OrderDirection:
         if self._entry_direction is None:
-            raise ValueError("No entry direction available. Evaluate entry signal first.")
+            raise ValueError(
+                "No entry direction available. Evaluate entry signal first."
+            )
         return self._entry_direction
 
-    def on_position_opened(self, *, direction: OrderDirection, entry_price: float) -> None:
+    def on_position_opened(
+        self, *, direction: OrderDirection, entry_price: float
+    ) -> None:
         self._entry_direction = direction
         self._entry_price = entry_price
         self._highest_price_since_entry = entry_price
@@ -221,17 +254,25 @@ class VolatilityAdjustedPullbackContinuationStrategy(Strategy):
         configured_stop = self._signal_stop_loss
         if configured_stop is None:
             if direction is OrderDirection.BUY:
-                configured_stop = entry_price - max(current_atr * self.stop_atr_multiple, entry_price * 0.001)
+                configured_stop = entry_price - max(
+                    current_atr * self.stop_atr_multiple, entry_price * 0.001
+                )
             else:
-                configured_stop = entry_price + max(current_atr * self.stop_atr_multiple, entry_price * 0.001)
+                configured_stop = entry_price + max(
+                    current_atr * self.stop_atr_multiple, entry_price * 0.001
+                )
 
         self._stop_loss = configured_stop
         if direction is OrderDirection.BUY:
             self._risk_per_unit = max(entry_price - configured_stop, 1e-9)
-            self._take_profit = entry_price + (self._risk_per_unit * self.risk_reward_multiple)
+            self._take_profit = entry_price + (
+                self._risk_per_unit * self.risk_reward_multiple
+            )
         else:
             self._risk_per_unit = max(configured_stop - entry_price, 1e-9)
-            self._take_profit = entry_price - (self._risk_per_unit * self.risk_reward_multiple)
+            self._take_profit = entry_price - (
+                self._risk_per_unit * self.risk_reward_multiple
+            )
         self._signal_stop_loss = None
 
     def on_position_closed(self) -> None:
@@ -255,17 +296,23 @@ class VolatilityAdjustedPullbackContinuationStrategy(Strategy):
         if risk_per_unit <= 0:
             return {}
         if self._entry_direction is OrderDirection.BUY:
-            take_profit_price = current_price + (risk_per_unit * self.risk_reward_multiple)
+            take_profit_price = current_price + (
+                risk_per_unit * self.risk_reward_multiple
+            )
             thesis = "higher_timeframe_trend_pullback_continuation_long"
         else:
-            take_profit_price = current_price - (risk_per_unit * self.risk_reward_multiple)
+            take_profit_price = current_price - (
+                risk_per_unit * self.risk_reward_multiple
+            )
             thesis = "higher_timeframe_trend_pullback_continuation_short"
         current_atr = self._current_atr()
         return {
             "stop_loss_price": round(stop_loss_price, 8),
             "take_profit_price": round(take_profit_price, 8),
             "expected_reward_risk": round(self.risk_reward_multiple, 4),
-            "volatility_estimate": round(current_atr, 8) if current_atr is not None else None,
+            "volatility_estimate": round(current_atr, 8)
+            if current_atr is not None
+            else None,
             "thesis": thesis,
         }
 
@@ -279,7 +326,9 @@ class VolatilityAdjustedPullbackContinuationStrategy(Strategy):
             "last_price": self.last_price,
             "last_market_status": self.last_market_status,
             "last_tradable": self.last_tradable,
-            "entry_direction": self._entry_direction.value if self._entry_direction else None,
+            "entry_direction": self._entry_direction.value
+            if self._entry_direction
+            else None,
             "entry_price": self._entry_price,
             "stop_loss": self._stop_loss,
             "take_profit": self._take_profit,
@@ -290,9 +339,17 @@ class VolatilityAdjustedPullbackContinuationStrategy(Strategy):
         }
 
     def restore_state_snapshot(self, snapshot: dict[str, Any]) -> None:
-        self.prices = deque((float(price) for price in snapshot.get("prices") or []), maxlen=self.prices.maxlen)
-        self.highs = deque((float(high) for high in snapshot.get("highs") or []), maxlen=self.highs.maxlen)
-        self.lows = deque((float(low) for low in snapshot.get("lows") or []), maxlen=self.lows.maxlen)
+        self.prices = deque(
+            (float(price) for price in snapshot.get("prices") or []),
+            maxlen=self.prices.maxlen,
+        )
+        self.highs = deque(
+            (float(high) for high in snapshot.get("highs") or []),
+            maxlen=self.highs.maxlen,
+        )
+        self.lows = deque(
+            (float(low) for low in snapshot.get("lows") or []), maxlen=self.lows.maxlen
+        )
         self.last_bid = snapshot.get("last_bid")
         self.last_ask = snapshot.get("last_ask")
         self.last_price = snapshot.get("last_price")
@@ -341,13 +398,15 @@ class VolatilityAdjustedPullbackContinuationStrategy(Strategy):
             return []
         true_ranges = [
             tr
-            for tr in (self._true_range_at(index) for index in range(1, len(self.prices)))
+            for tr in (
+                self._true_range_at(index) for index in range(1, len(self.prices))
+            )
             if tr is not None
         ]
         if len(true_ranges) < self.atr_window:
             return []
         return [
-            fmean(true_ranges[start:start + self.atr_window])
+            fmean(true_ranges[start : start + self.atr_window])
             for start in range(0, len(true_ranges) - self.atr_window + 1)
         ]
 
@@ -359,7 +418,7 @@ class VolatilityAdjustedPullbackContinuationStrategy(Strategy):
         atr_series = self._atr_series()
         if len(atr_series) < self.volatility_window:
             return None
-        historical = atr_series[-self.volatility_window:-1]
+        historical = atr_series[-self.volatility_window : -1]
         if not historical:
             return None
         return fmean(historical)
@@ -380,21 +439,33 @@ class VolatilityAdjustedPullbackContinuationStrategy(Strategy):
         return self.last_price
 
     def _update_dynamic_risk(self, *, exit_price: float, atr: float) -> None:
-        if self._entry_direction is None or self._entry_price is None or self._risk_per_unit is None:
+        if (
+            self._entry_direction is None
+            or self._entry_price is None
+            or self._risk_per_unit is None
+        ):
             return
 
         if self._entry_direction is OrderDirection.BUY:
             move_in_r = (exit_price - self._entry_price) / self._risk_per_unit
             if move_in_r >= self.breakeven_r_multiple:
-                self._stop_loss = max(self._stop_loss or self._entry_price, self._entry_price)
+                self._stop_loss = max(
+                    self._stop_loss or self._entry_price, self._entry_price
+                )
             if self._highest_price_since_entry is not None:
-                trailing_stop = self._highest_price_since_entry - (atr * self.trailing_atr_multiple)
+                trailing_stop = self._highest_price_since_entry - (
+                    atr * self.trailing_atr_multiple
+                )
                 self._stop_loss = max(self._stop_loss or trailing_stop, trailing_stop)
             return
 
         move_in_r = (self._entry_price - exit_price) / self._risk_per_unit
         if move_in_r >= self.breakeven_r_multiple:
-            self._stop_loss = min(self._stop_loss or self._entry_price, self._entry_price)
+            self._stop_loss = min(
+                self._stop_loss or self._entry_price, self._entry_price
+            )
         if self._lowest_price_since_entry is not None:
-            trailing_stop = self._lowest_price_since_entry + (atr * self.trailing_atr_multiple)
+            trailing_stop = self._lowest_price_since_entry + (
+                atr * self.trailing_atr_multiple
+            )
             self._stop_loss = min(self._stop_loss or trailing_stop, trailing_stop)

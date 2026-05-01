@@ -101,7 +101,9 @@ ACTIVE_INSTRUMENT_OWNERSHIP_STATES = (
     TradeIntentState.RECOVERED_POSITION_ATTACHED.value,
 )
 
-_ACTIVE_INSTRUMENT_OWNERSHIP_SQL = ", ".join(f"'{state}'" for state in ACTIVE_INSTRUMENT_OWNERSHIP_STATES)
+_ACTIVE_INSTRUMENT_OWNERSHIP_SQL = ", ".join(
+    f"'{state}'" for state in ACTIVE_INSTRUMENT_OWNERSHIP_STATES
+)
 
 
 class Position(SQLModel, table=True):
@@ -157,7 +159,9 @@ class Execution(SQLModel, table=True):
     submitted_at: datetime | None = None
     acknowledged_at: datetime | None = None
     completed_at: datetime | None = None
-    last_transition_at: datetime = Field(default_factory=utc_now, nullable=False, index=True)
+    last_transition_at: datetime = Field(
+        default_factory=utc_now, nullable=False, index=True
+    )
     requested_size: float | None = None
     filled_size: float | None = None
     requested_price: float | None = None
@@ -267,8 +271,12 @@ class AllocationCycle(SQLModel, table=True):
     blocked_under_minimum_size_count: int = 0
     blocked_budget_count: int = 0
     blocked_conflict_count: int = 0
-    binding_budget_counts: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    rejection_reason_counts: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    binding_budget_counts: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON)
+    )
+    rejection_reason_counts: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON)
+    )
     details: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utc_now, nullable=False)
 

@@ -33,7 +33,9 @@ class AllocationAlert(SQLModel, table=True):
     escalated_at: datetime | None = None
     related_intent_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON))
     related_cycle_ids: list[str] = Field(default_factory=list, sa_column=Column(JSON))
-    related_execution_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON))
+    related_execution_ids: list[int] = Field(
+        default_factory=list, sa_column=Column(JSON)
+    )
     details: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utc_now, nullable=False)
     updated_at: datetime = Field(default_factory=utc_now, nullable=False, index=True)

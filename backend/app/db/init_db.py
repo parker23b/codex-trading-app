@@ -10,7 +10,14 @@ from app.db.session import engine
 from app.models.strategy_deployment import StrategyDeployment
 from app.models.strategy_governance import StrategyFamilyGovernance
 from app.models.runtime import StrategyRuntimeState
-from app.models.trade import AllocationCycle, Execution, Position, ReconciliationEvent, Trade, TradeIntent
+from app.models.trade import (
+    AllocationCycle,
+    Execution,
+    Position,
+    ReconciliationEvent,
+    Trade,
+    TradeIntent,
+)
 from app.models.watchlist import OperatorShortlistEntry, WatchlistEntry
 
 
@@ -80,10 +87,22 @@ def initialize_database() -> None:
     _ensure_sqlite_column("tradeintent", "fill_derived_risk_amount", "FLOAT")
     _ensure_sqlite_column("tradeintent", "risk_truth_confidence", "VARCHAR")
     _ensure_sqlite_column("tradeintent", "risk_currency", "VARCHAR")
-    _ensure_index("ix_allocationalert_updated_at_desc", "allocationalert", "updated_at DESC")
-    _ensure_index("ix_allocationalert_state_updated_at", "allocationalert", "state, updated_at DESC")
-    _ensure_index("ix_allocationalert_severity_updated_at", "allocationalert", "severity, updated_at DESC")
-    _ensure_index("ix_tradeintent_allocation_cycle_id", "tradeintent", "allocation_cycle_id")
+    _ensure_index(
+        "ix_allocationalert_updated_at_desc", "allocationalert", "updated_at DESC"
+    )
+    _ensure_index(
+        "ix_allocationalert_state_updated_at",
+        "allocationalert",
+        "state, updated_at DESC",
+    )
+    _ensure_index(
+        "ix_allocationalert_severity_updated_at",
+        "allocationalert",
+        "severity, updated_at DESC",
+    )
+    _ensure_index(
+        "ix_tradeintent_allocation_cycle_id", "tradeintent", "allocation_cycle_id"
+    )
     _ensure_sqlite_partial_unique_index(
         "uq_trade_intent_active_instrument",
         "tradeintent",
@@ -96,23 +115,39 @@ def initialize_database() -> None:
             ")"
         ),
     )
-    _ensure_sqlite_column("strategyruntimestate", "strategy_version", "VARCHAR DEFAULT '1'")
-    _ensure_sqlite_column("strategyruntimestate", "recovery_state", "VARCHAR DEFAULT 'PENDING'")
+    _ensure_sqlite_column(
+        "strategyruntimestate", "strategy_version", "VARCHAR DEFAULT '1'"
+    )
+    _ensure_sqlite_column(
+        "strategyruntimestate", "recovery_state", "VARCHAR DEFAULT 'PENDING'"
+    )
     _ensure_sqlite_column("strategyruntimestate", "recovery_reason", "VARCHAR")
     _ensure_sqlite_column("strategyruntimestate", "stopped_at", "TIMESTAMP")
     _ensure_sqlite_column("strategyruntimestate", "last_heartbeat_at", "TIMESTAMP")
     _ensure_sqlite_column("strategyruntimestate", "last_price_seen", "FLOAT")
     _ensure_sqlite_column("strategyruntimestate", "last_price_seen_at", "TIMESTAMP")
-    _ensure_sqlite_column("strategyruntimestate", "current_position_broker_reference", "VARCHAR")
-    _ensure_sqlite_column("strategyruntimestate", "control_mode", "VARCHAR DEFAULT 'MANUAL'")
-    _ensure_sqlite_column("strategyruntimestate", "runtime_mode", "VARCHAR DEFAULT 'NORMAL'")
+    _ensure_sqlite_column(
+        "strategyruntimestate", "current_position_broker_reference", "VARCHAR"
+    )
+    _ensure_sqlite_column(
+        "strategyruntimestate", "control_mode", "VARCHAR DEFAULT 'MANUAL'"
+    )
+    _ensure_sqlite_column(
+        "strategyruntimestate", "runtime_mode", "VARCHAR DEFAULT 'NORMAL'"
+    )
     _ensure_sqlite_column("strategyruntimestate", "deployment_id", "INTEGER")
     _ensure_sqlite_column("strategyruntimestate", "active_profile_name", "VARCHAR")
     _ensure_sqlite_column("strategyruntimestate", "auto_resume", "BOOLEAN DEFAULT 1")
     _ensure_sqlite_column("strategyruntimestate", "strategy_state_snapshot", "JSON")
     _ensure_sqlite_column("strategyruntimestate", "updated_at", "TIMESTAMP")
-    _ensure_sqlite_column("strategydeployment", "open_risk_management_state", "VARCHAR DEFAULT 'NO_OPEN_RISK'")
-    _ensure_sqlite_column("strategydeployment", "open_risk_management_reason", "VARCHAR")
+    _ensure_sqlite_column(
+        "strategydeployment",
+        "open_risk_management_state",
+        "VARCHAR DEFAULT 'NO_OPEN_RISK'",
+    )
+    _ensure_sqlite_column(
+        "strategydeployment", "open_risk_management_reason", "VARCHAR"
+    )
     _ensure_sqlite_column("generatedreviewrecord", "scope", "JSON")
     _ensure_sqlite_column("generatedreviewrecord", "facts_payload", "JSON")
     _ensure_sqlite_column("generatedreviewrecord", "derived_observations", "JSON")
@@ -120,11 +155,17 @@ def initialize_database() -> None:
     _ensure_sqlite_column("generatedreviewrecord", "warnings", "JSON")
     _ensure_sqlite_column("generatedreviewrecord", "supporting_metrics", "JSON")
     _ensure_sqlite_column("generatedreviewrecord", "ai_summary", "JSON")
-    _ensure_sqlite_column("generatedreviewrecord", "prompt_version", "VARCHAR DEFAULT 'ai-reviewer-v1'")
+    _ensure_sqlite_column(
+        "generatedreviewrecord", "prompt_version", "VARCHAR DEFAULT 'ai-reviewer-v1'"
+    )
     _ensure_sqlite_column("generatedreviewrecord", "provider", "VARCHAR")
     _ensure_sqlite_column("generatedreviewrecord", "model", "VARCHAR")
     _ensure_sqlite_column("generatedreviewrecord", "raw_model_response", "TEXT")
-    _ensure_sqlite_column("generatedreviewrecord", "generation_mode", "VARCHAR DEFAULT 'deterministic_only'")
+    _ensure_sqlite_column(
+        "generatedreviewrecord",
+        "generation_mode",
+        "VARCHAR DEFAULT 'deterministic_only'",
+    )
     _ensure_index(
         "ix_domain_events_created_at_desc",
         "domain_events",
@@ -206,15 +247,23 @@ def _ensure_sqlite_column(table_name: str, column_name: str, column_sql: str) ->
         existing_columns = {str(row[1]) for row in rows}
         if column_name in existing_columns:
             return
-        connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"))
+        connection.execute(
+            text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
+        )
 
 
 def _ensure_index(index_name: str, table_name: str, columns_sql: str) -> None:
     with engine.begin() as connection:
-        connection.execute(text(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({columns_sql})"))
+        connection.execute(
+            text(
+                f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({columns_sql})"
+            )
+        )
 
 
-def _ensure_sqlite_partial_unique_index(index_name: str, table_name: str, columns_sql: str, where_sql: str) -> None:
+def _ensure_sqlite_partial_unique_index(
+    index_name: str, table_name: str, columns_sql: str, where_sql: str
+) -> None:
     if engine.dialect.name != "sqlite":
         return
     with engine.begin() as connection:

@@ -35,14 +35,16 @@ class RegimeSuitabilityService:
         approved_instruments: list[str],
     ) -> list[InstrumentDefinition]:
         explicit = {instrument for instrument in approved_instruments}
-        allowed_asset_classes = {asset_class.upper() for asset_class in approved_asset_classes}
-        family_asset_classes = {asset_class.upper() for asset_class in metadata.supported_asset_classes}
+        allowed_asset_classes = {
+            asset_class.upper() for asset_class in approved_asset_classes
+        }
+        family_asset_classes = {
+            asset_class.upper() for asset_class in metadata.supported_asset_classes
+        }
         definitions = list_market_instruments()
         if explicit:
             candidates = [
-                definition
-                for definition in definitions
-                if definition.epic in explicit
+                definition for definition in definitions if definition.epic in explicit
             ]
         else:
             candidates = [
@@ -53,9 +55,15 @@ class RegimeSuitabilityService:
                     and definition.category.upper() in family_asset_classes
                 )
             ]
-        if not explicit and metadata.default_instrument not in {candidate.epic for candidate in candidates}:
+        if not explicit and metadata.default_instrument not in {
+            candidate.epic for candidate in candidates
+        }:
             default_candidate = next(
-                (definition for definition in definitions if definition.epic == metadata.default_instrument),
+                (
+                    definition
+                    for definition in definitions
+                    if definition.epic == metadata.default_instrument
+                ),
                 None,
             )
             if default_candidate is not None:
@@ -110,4 +118,10 @@ class RegimeSuitabilityService:
             )
         if not scored:
             return None
-        return max(scored, key=lambda candidate: (candidate.score, candidate.instrument == metadata.default_instrument))
+        return max(
+            scored,
+            key=lambda candidate: (
+                candidate.score,
+                candidate.instrument == metadata.default_instrument,
+            ),
+        )

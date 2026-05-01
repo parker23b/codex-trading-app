@@ -11,7 +11,10 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.runtime import runtime_manager
 from app.db.session import engine
-from app.models.strategy_governance import GovernanceApprovalState, StrategyFamilyGovernance
+from app.models.strategy_governance import (
+    GovernanceApprovalState,
+    StrategyFamilyGovernance,
+)
 from app.models.trade import Position
 from app.services.operator_control_service import OperatorControlService
 from app.services.trade_service import TradeService
@@ -61,7 +64,9 @@ class HealthService:
             self._last_heartbeat = self._normalize_time(when)
         self._emit_status_transition_if_needed()
 
-    def record_price_update(self, when: datetime | None = None, *, stream_connected: bool | None = None) -> None:
+    def record_price_update(
+        self, when: datetime | None = None, *, stream_connected: bool | None = None
+    ) -> None:
         with self._lock:
             self._last_price_update = self._normalize_time(when)
             if stream_connected is not None:
@@ -100,7 +105,9 @@ class HealthService:
             self._trim_windows(timestamp)
         self._emit_status_transition_if_needed()
 
-    def record_reconciliation(self, *, mismatches: int, when: datetime | None = None) -> None:
+    def record_reconciliation(
+        self, *, mismatches: int, when: datetime | None = None
+    ) -> None:
         with self._lock:
             self._last_reconciliation = self._normalize_time(when)
             self._reconciliation_mismatches = mismatches
@@ -154,14 +161,20 @@ class HealthService:
         if self._is_armed():
             return "armed"
         price_is_fresh = self._is_price_fresh(details.last_price_update)
-        if details.last_price_update is None or not details.broker_connected or not details.stream_connected:
+        if (
+            details.last_price_update is None
+            or not details.broker_connected
+            or not details.stream_connected
+        ):
             return "critical"
         if not price_is_fresh or details.order_failures_last_5m >= 3:
             return "degraded"
         return "ok"
 
     def _is_idle(self) -> bool:
-        return not self._has_live_operational_demand() and not self._has_autonomy_armed()
+        return (
+            not self._has_live_operational_demand() and not self._has_autonomy_armed()
+        )
 
     def _is_armed(self) -> bool:
         return not self._has_live_operational_demand() and self._has_autonomy_armed()
@@ -170,7 +183,9 @@ class HealthService:
         if runtime_manager.list_active_instruments():
             return True
         with Session(engine) as session:
-            has_open_positions = session.exec(select(Position.id).where(Position.is_open.is_(True)).limit(1)).first()
+            has_open_positions = session.exec(
+                select(Position.id).where(Position.is_open.is_(True)).limit(1)
+            ).first()
             if has_open_positions is not None:
                 return True
             return TradeService(session).has_pending_trade_intents()
@@ -181,18 +196,24 @@ class HealthService:
             if not operator_control.get_effective_autonomous_control_enabled():
                 return False
             record = session.exec(
-                select(StrategyFamilyGovernance.id).where(
-                    StrategyFamilyGovernance.approval_state == GovernanceApprovalState.APPROVED.value,
+                select(StrategyFamilyGovernance.id)
+                .where(
+                    StrategyFamilyGovernance.approval_state
+                    == GovernanceApprovalState.APPROVED.value,
                     StrategyFamilyGovernance.autonomous_operation_allowed.is_(True),
                     StrategyFamilyGovernance.emergency_stop.is_(False),
-                ).limit(1)
+                )
+                .limit(1)
             ).first()
             return record is not None
 
     def _is_price_fresh(self, last_price_update: datetime | None) -> bool:
         if last_price_update is None:
             return False
-        return datetime.now(UTC) - last_price_update.astimezone(UTC) <= self.STALE_PRICE_THRESHOLD
+        return (
+            datetime.now(UTC) - last_price_update.astimezone(UTC)
+            <= self.STALE_PRICE_THRESHOLD
+        )
 
     def _trim_windows(self, now: datetime) -> None:
         cutoff = now - self.WINDOW

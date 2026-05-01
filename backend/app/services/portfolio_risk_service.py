@@ -4,7 +4,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.core.config import get_settings
 from app.core.runtime import runtime_manager
@@ -23,7 +23,9 @@ class PortfolioRiskService:
     def __init__(self, session: Session | None = None) -> None:
         self.settings = get_settings()
         self.session = session
-        self.runtime_state_service = RuntimeStateService(session) if session is not None else None
+        self.runtime_state_service = (
+            RuntimeStateService(session) if session is not None else None
+        )
         self.trade_service = TradeService(session) if session is not None else None
 
     def assess_entry(
@@ -34,7 +36,11 @@ class PortfolioRiskService:
         trades: list[Trade],
     ) -> EntrySignal:
         recent_intents = self._load_recent_entry_trade_intents(signal)
-        runtimes = self.runtime_state_service.list_active_runtimes() if self.runtime_state_service is not None else []
+        runtimes = (
+            self.runtime_state_service.list_active_runtimes()
+            if self.runtime_state_service is not None
+            else []
+        )
 
         layers = [
             self._evaluate_pre_trade(signal, open_positions, trades, recent_intents),
@@ -118,7 +124,8 @@ class PortfolioRiskService:
             if position.instrument == signal.instrument and position.is_open
         ]
         one_position_ok = (
-            not self.settings.runtime_one_position_per_instrument or not open_same_instrument
+            not self.settings.runtime_one_position_per_instrument
+            or not open_same_instrument
         )
         checks.append(
             self._check(
@@ -150,12 +157,15 @@ class PortfolioRiskService:
         )
 
         open_for_strategy = [
-            position for position in open_positions if position.strategy_name == signal.strategy_name and position.is_open
+            position
+            for position in open_positions
+            if position.strategy_name == signal.strategy_name and position.is_open
         ]
         checks.append(
             self._check(
                 "strategy_position_limit",
-                len(open_for_strategy) < self.settings.runtime_max_positions_per_strategy,
+                len(open_for_strategy)
+                < self.settings.runtime_max_positions_per_strategy,
                 "Strategy concurrency is within limits.",
                 "Strategy concurrency limit reached.",
                 actual=len(open_for_strategy),
@@ -164,7 +174,9 @@ class PortfolioRiskService:
         )
 
         last_trade = self._latest_closed_trade(trades, signal)
-        loss_cutoff = signal.signal_at - timedelta(seconds=self.settings.runtime_cooldown_after_loss_seconds)
+        loss_cutoff = signal.signal_at - timedelta(
+            seconds=self.settings.runtime_cooldown_after_loss_seconds
+        )
         recent_loss = (
             last_trade is not None
             and last_trade.pnl < 0
@@ -176,25 +188,35 @@ class PortfolioRiskService:
                 not recent_loss,
                 "Loss cooldown is clear.",
                 "Cooldown after recent losing trade is active.",
-                actual=last_trade.close_time.isoformat() if recent_loss and last_trade is not None else None,
+                actual=last_trade.close_time.isoformat()
+                if recent_loss and last_trade is not None
+                else None,
                 limit=self.settings.runtime_cooldown_after_loss_seconds,
             )
         )
 
-        exit_cutoff = signal.signal_at - timedelta(seconds=self.settings.runtime_cooldown_after_exit_seconds)
-        recent_exit = last_trade is not None and last_trade.close_time.astimezone(UTC) >= exit_cutoff.astimezone(UTC)
+        exit_cutoff = signal.signal_at - timedelta(
+            seconds=self.settings.runtime_cooldown_after_exit_seconds
+        )
+        recent_exit = last_trade is not None and last_trade.close_time.astimezone(
+            UTC
+        ) >= exit_cutoff.astimezone(UTC)
         checks.append(
             self._check(
                 "cooldown_after_exit",
                 not recent_exit,
                 "Exit cooldown is clear.",
                 "Cooldown after recent exit is active.",
-                actual=last_trade.close_time.isoformat() if recent_exit and last_trade is not None else None,
+                actual=last_trade.close_time.isoformat()
+                if recent_exit and last_trade is not None
+                else None,
                 limit=self.settings.runtime_cooldown_after_exit_seconds,
             )
         )
 
-        duplicate_cutoff = signal.signal_at - timedelta(seconds=self.settings.runtime_duplicate_signal_window_seconds)
+        duplicate_cutoff = signal.signal_at - timedelta(
+            seconds=self.settings.runtime_duplicate_signal_window_seconds
+        )
         duplicate_signals = [
             intent
             for intent in recent_intents
@@ -206,7 +228,9 @@ class PortfolioRiskService:
             and intent.state != TradeIntentState.PROPOSED.value
             and intent.state != TradeIntentState.REJECTED.value
         ]
-        duplicate_suppression_enabled = signal.strategy_name not in self.SMOKE_TEST_STRATEGIES
+        duplicate_suppression_enabled = (
+            signal.strategy_name not in self.SMOKE_TEST_STRATEGIES
+        )
         checks.append(
             self._check(
                 "duplicate_signal_suppression",
@@ -217,12 +241,16 @@ class PortfolioRiskService:
                     else "Duplicate signal suppression skipped for smoke-test strategy."
                 ),
                 "Duplicate entry signal detected in suppression window.",
-                actual=len(duplicate_signals) if duplicate_suppression_enabled else "skipped",
+                actual=len(duplicate_signals)
+                if duplicate_suppression_enabled
+                else "skipped",
                 limit=0 if duplicate_suppression_enabled else None,
             )
         )
 
-        burst_cutoff = signal.signal_at - timedelta(seconds=self.settings.runtime_entry_burst_window_seconds)
+        burst_cutoff = signal.signal_at - timedelta(
+            seconds=self.settings.runtime_entry_burst_window_seconds
+        )
         concurrent_entries = [
             intent
             for intent in recent_intents
@@ -247,11 +275,15 @@ class PortfolioRiskService:
                 ),
                 "Too many recent entry attempts in the configured burst window.",
                 actual=len(concurrent_entries) if burst_limit_enabled else "skipped",
-                limit=self.settings.runtime_entry_burst_limit if burst_limit_enabled else None,
+                limit=self.settings.runtime_entry_burst_limit
+                if burst_limit_enabled
+                else None,
             )
         )
 
-        failed_entry_cutoff = signal.signal_at - timedelta(seconds=self.settings.runtime_failed_entry_retry_cooldown_seconds)
+        failed_entry_cutoff = signal.signal_at - timedelta(
+            seconds=self.settings.runtime_failed_entry_retry_cooldown_seconds
+        )
         recent_failed_entries = [
             intent
             for intent in recent_intents
@@ -267,7 +299,9 @@ class PortfolioRiskService:
                 not recent_failed_entries,
                 "No recent broker-side entry failures are blocking retries.",
                 "Recent broker-side entry failure is in cooldown; retry paused to avoid repeated broker requests.",
-                actual=recent_failed_entries[0].created_at.isoformat() if recent_failed_entries else None,
+                actual=recent_failed_entries[0].created_at.isoformat()
+                if recent_failed_entries
+                else None,
                 limit=self.settings.runtime_failed_entry_retry_cooldown_seconds,
             )
         )
@@ -291,7 +325,10 @@ class PortfolioRiskService:
             )
         )
 
-        projected_risk = sum(position.risk_percent or 0.0 for position in open_positions) + signal.risk_percent
+        projected_risk = (
+            sum(position.risk_percent or 0.0 for position in open_positions)
+            + signal.risk_percent
+        )
         checks.append(
             self._check(
                 "portfolio_open_risk",
@@ -332,7 +369,9 @@ class PortfolioRiskService:
         checks: list[dict[str, object]] = []
 
         spread = self._spread(signal)
-        spread_limit = round(signal.observed_price * self.settings.runtime_max_spread_percent_of_price, 8)
+        spread_limit = round(
+            signal.observed_price * self.settings.runtime_max_spread_percent_of_price, 8
+        )
         spread_ok = spread is None or spread <= spread_limit
         checks.append(
             self._check(
@@ -345,22 +384,31 @@ class PortfolioRiskService:
             )
         )
 
-        last_price_seen_at = runtime_manager.get_last_price_updated_at(signal.instrument)
+        last_price_seen_at = runtime_manager.get_last_price_updated_at(
+            signal.instrument
+        )
         price_age_seconds = None
         stale_price = last_price_seen_at is None
         if last_price_seen_at is not None:
             price_age_seconds = max(
                 0.0,
-                (signal.signal_at.astimezone(UTC) - last_price_seen_at.astimezone(UTC)).total_seconds(),
+                (
+                    signal.signal_at.astimezone(UTC)
+                    - last_price_seen_at.astimezone(UTC)
+                ).total_seconds(),
             )
-            stale_price = price_age_seconds > self.settings.runtime_price_stale_after_seconds
+            stale_price = (
+                price_age_seconds > self.settings.runtime_price_stale_after_seconds
+            )
         checks.append(
             self._check(
                 "stale_price_gate",
                 not stale_price,
                 "Latest price update is fresh enough for execution.",
                 "Latest price update is stale.",
-                actual=round(price_age_seconds, 3) if price_age_seconds is not None else None,
+                actual=round(price_age_seconds, 3)
+                if price_age_seconds is not None
+                else None,
                 limit=self.settings.runtime_price_stale_after_seconds,
             )
         )
@@ -368,7 +416,9 @@ class PortfolioRiskService:
         checks.append(
             self._check(
                 "market_status_gate",
-                signal.market_status is None or signal.market_status.upper() not in {"CLOSED", "OFFLINE", "SUSPENDED"},
+                signal.market_status is None
+                or signal.market_status.upper()
+                not in {"CLOSED", "OFFLINE", "SUSPENDED"},
                 "Market status permits fresh entries.",
                 "Market status does not permit fresh entries.",
                 actual=signal.market_status,
@@ -397,7 +447,8 @@ class PortfolioRiskService:
             runtime
             for runtime in runtimes
             if runtime.recovery_state in {"RECOVERY_REQUIRED", "ERROR"}
-            and runtime_manager.get_engine(runtime.strategy_name, runtime.instrument) is not None
+            and runtime_manager.get_engine(runtime.strategy_name, runtime.instrument)
+            is not None
         ]
         checks.append(
             self._check(
@@ -433,7 +484,10 @@ class PortfolioRiskService:
                 runtime
                 for runtime in runtimes
                 if runtime.recovery_state in {"RECOVERY_REQUIRED", "ERROR"}
-                and runtime_manager.get_engine(runtime.strategy_name, runtime.instrument) is not None
+                and runtime_manager.get_engine(
+                    runtime.strategy_name, runtime.instrument
+                )
+                is not None
             ]
         )
         checks.append(
@@ -478,7 +532,10 @@ class PortfolioRiskService:
                 runtime
                 for runtime in runtimes
                 if runtime.recovery_state in {"RECOVERY_REQUIRED", "ERROR"}
-                and runtime_manager.get_engine(runtime.strategy_name, runtime.instrument) is not None
+                and runtime_manager.get_engine(
+                    runtime.strategy_name, runtime.instrument
+                )
+                is not None
             ]
         )
         return {
@@ -489,7 +546,9 @@ class PortfolioRiskService:
             "direction": signal.direction.value,
             "observed_price": signal.observed_price,
             "projected_notional": round(abs(signal.size * signal.observed_price), 4),
-            "spread": round(self._spread(signal), 8) if self._spread(signal) is not None else None,
+            "spread": round(self._spread(signal), 8)
+            if self._spread(signal) is not None
+            else None,
             "open_positions": len(open_positions),
             "open_risk_percent": round(open_risk, 4),
             "daily_closed_pnl": round(daily_pnl, 2),
@@ -499,7 +558,9 @@ class PortfolioRiskService:
             "tradable": signal.tradable,
         }
 
-    def _load_recent_entry_trade_intents(self, signal: EntrySignal) -> list[TradeIntent]:
+    def _load_recent_entry_trade_intents(
+        self, signal: EntrySignal
+    ) -> list[TradeIntent]:
         if self.session is None:
             return []
         lookback_seconds = max(
@@ -523,7 +584,8 @@ class PortfolioRiskService:
         relevant = [
             trade
             for trade in trades
-            if trade.strategy_name == signal.strategy_name and trade.instrument == signal.instrument
+            if trade.strategy_name == signal.strategy_name
+            and trade.instrument == signal.instrument
         ]
         if not relevant:
             return None
@@ -552,7 +614,9 @@ class PortfolioRiskService:
 
     @staticmethod
     def _layer_result(layer: str, checks: list[dict[str, object]]) -> dict[str, object]:
-        failed_check = next((check for check in checks if check["passed"] is False), None)
+        failed_check = next(
+            (check for check in checks if check["passed"] is False), None
+        )
         return {
             "layer": layer,
             "status": "PASSED" if failed_check is None else "REJECTED",

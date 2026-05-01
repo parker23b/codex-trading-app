@@ -61,12 +61,17 @@ def test_polling_fallback_reason_uses_per_instrument_tick(monkeypatch):
             other_instrument: now - timedelta(seconds=1),
         },
     )
-    monkeypatch.setattr("app.services.market_data_service.get_ig_streaming_service", lambda: stream_service)
+    monkeypatch.setattr(
+        "app.services.market_data_service.get_ig_streaming_service",
+        lambda: stream_service,
+    )
 
     assert service._polling_fallback_reason(instrument) is None
 
 
-def test_polling_fallback_reason_marks_instrument_stale_only_after_relaxed_threshold(monkeypatch):
+def test_polling_fallback_reason_marks_instrument_stale_only_after_relaxed_threshold(
+    monkeypatch,
+):
     now = datetime(2026, 4, 8, 18, 0, tzinfo=UTC)
     service = MarketDataService(poll_prices=False)
     service._now = lambda: now  # type: ignore[method-assign]
@@ -77,7 +82,10 @@ def test_polling_fallback_reason_marks_instrument_stale_only_after_relaxed_thres
         global_last_tick_at=now - timedelta(seconds=1),
         instrument_ticks={instrument: now - timedelta(seconds=21)},
     )
-    monkeypatch.setattr("app.services.market_data_service.get_ig_streaming_service", lambda: stream_service)
+    monkeypatch.setattr(
+        "app.services.market_data_service.get_ig_streaming_service",
+        lambda: stream_service,
+    )
 
     assert service._polling_fallback_reason(instrument) == "stale_stream"
 
@@ -91,7 +99,10 @@ def test_polling_fallback_events_are_debounced(monkeypatch):
     def record_event(*, event_type: str, **_: object) -> None:
         recorded_events.append(event_type)
 
-    monkeypatch.setattr("app.services.market_data_service.domain_event_service.record_event", record_event)
+    monkeypatch.setattr(
+        "app.services.market_data_service.domain_event_service.record_event",
+        record_event,
+    )
 
     state = {
         "connected": True,
@@ -106,7 +117,9 @@ def test_polling_fallback_events_are_debounced(monkeypatch):
             instrument_ticks={instrument: state["instrument_tick"]},
         )
 
-    monkeypatch.setattr("app.services.market_data_service.get_ig_streaming_service", get_service)
+    monkeypatch.setattr(
+        "app.services.market_data_service.get_ig_streaming_service", get_service
+    )
 
     service._now = lambda: now  # type: ignore[method-assign]
     service._update_polling_health_transition(instrument)
@@ -154,23 +167,46 @@ def test_successful_polling_fallback_does_not_mark_stream_as_connected(monkeypat
             )
         },
     )()
-    fake_engine = type("Engine", (), {"broker": type("Broker", (), {"get_market_details": lambda self, _: type(
-        "Details",
+    fake_engine = type(
+        "Engine",
         (),
         {
-            "bid": 1.1,
-            "offer": 1.2,
-            "high": 1.3,
-            "low": 1.0,
-            "market_status": "TRADEABLE",
-            "tradable": True,
+            "broker": type(
+                "Broker",
+                (),
+                {
+                    "get_market_details": lambda self, _: type(
+                        "Details",
+                        (),
+                        {
+                            "bid": 1.1,
+                            "offer": 1.2,
+                            "high": 1.3,
+                            "low": 1.0,
+                            "market_status": "TRADEABLE",
+                            "tradable": True,
+                        },
+                    )()
+                },
+            )()
         },
-    )()})()})()
+    )()
 
-    monkeypatch.setattr("app.services.market_data_service.get_watchlist_service", lambda: watchlist)
-    monkeypatch.setattr("app.services.market_data_service.get_ig_streaming_service", lambda: stream_service)
-    monkeypatch.setattr("app.services.market_data_service.runtime_manager.get_engines_for_instrument", lambda _: [("test", fake_engine)])
-    monkeypatch.setattr("app.services.market_data_service.BrokerService.reconcile_positions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "app.services.market_data_service.get_watchlist_service", lambda: watchlist
+    )
+    monkeypatch.setattr(
+        "app.services.market_data_service.get_ig_streaming_service",
+        lambda: stream_service,
+    )
+    monkeypatch.setattr(
+        "app.services.market_data_service.runtime_manager.get_engines_for_instrument",
+        lambda _: [("test", fake_engine)],
+    )
+    monkeypatch.setattr(
+        "app.services.market_data_service.BrokerService.reconcile_positions",
+        lambda *args, **kwargs: None,
+    )
     processed: list[str] = []
     monkeypatch.setattr(
         "app.services.market_data_service.StrategyService.process_price_update",
@@ -185,7 +221,9 @@ def test_successful_polling_fallback_does_not_mark_stream_as_connected(monkeypat
     assert get_health_service().get_system_health().stream_connected is False
 
 
-def test_tier2_refresh_creates_promotion_request_for_high_scoring_candidate(session, monkeypatch):
+def test_tier2_refresh_creates_promotion_request_for_high_scoring_candidate(
+    session, monkeypatch
+):
     service = MarketDataService(poll_prices=False)
     service.settings.tier2_refresh_interval_seconds = 1
     service.settings.tier2_promotion_score_threshold = 0.7
@@ -223,20 +261,28 @@ def test_tier2_refresh_creates_promotion_request_for_high_scoring_candidate(sess
                 streamed_instruments=(),
                 capped_instruments=("CS.D.GBPJPY.CFD.IP",),
             ),
-            "record_tier2_refresh": lambda self, *, instrument, refreshed_at: session.add(
-                WatchlistEntry(
-                    instrument=instrument,
-                    tier=WatchlistTier.TIER2.value,
-                    status="ACTIVE",
-                    assigned_at=refreshed_at,
-                    last_refreshed_at=refreshed_at,
-                    updated_at=refreshed_at,
+            "record_tier2_refresh": lambda self, *, instrument, refreshed_at: (
+                session.add(
+                    WatchlistEntry(
+                        instrument=instrument,
+                        tier=WatchlistTier.TIER2.value,
+                        status="ACTIVE",
+                        assigned_at=refreshed_at,
+                        last_refreshed_at=refreshed_at,
+                        updated_at=refreshed_at,
+                    )
                 )
-            ) or session.commit(),
+                or session.commit()
+            ),
         },
     )()
-    monkeypatch.setattr("app.services.market_data_service.get_watchlist_service", lambda: watchlist)
-    monkeypatch.setattr("app.services.market_data_service.domain_event_service.record_event", lambda **_: None)
+    monkeypatch.setattr(
+        "app.services.market_data_service.get_watchlist_service", lambda: watchlist
+    )
+    monkeypatch.setattr(
+        "app.services.market_data_service.domain_event_service.record_event",
+        lambda **_: None,
+    )
     monkeypatch.setattr("app.services.market_data_service.engine", session.get_bind())
 
     import asyncio
@@ -248,5 +294,7 @@ def test_tier2_refresh_creates_promotion_request_for_high_scoring_candidate(sess
     assert request.status == "ACCEPTED"
     assert request.source == "activity_surveillance_scanner"
     assert request.score >= 0.7
-    entry = session.exec(select(WatchlistEntry).where(WatchlistEntry.instrument == "CS.D.GBPJPY.CFD.IP")).all()[-1]
+    entry = session.exec(
+        select(WatchlistEntry).where(WatchlistEntry.instrument == "CS.D.GBPJPY.CFD.IP")
+    ).all()[-1]
     assert entry.tier == WatchlistTier.TIER1.value

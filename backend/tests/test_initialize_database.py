@@ -8,7 +8,9 @@ from sqlmodel import create_engine
 from app.db import init_db
 
 
-def test_initialize_database_adds_trade_intent_columns_to_legacy_sqlite_schema(tmp_path, monkeypatch):
+def test_initialize_database_adds_trade_intent_columns_to_legacy_sqlite_schema(
+    tmp_path, monkeypatch
+):
     db_path = Path(tmp_path) / "legacy.sqlite"
     engine = create_engine(
         f"sqlite:///{db_path}",
@@ -87,16 +89,45 @@ def test_initialize_database_adds_trade_intent_columns_to_legacy_sqlite_schema(t
     init_db.initialize_database()
 
     with engine.begin() as connection:
-        position_columns = {row[1] for row in connection.execute(text("PRAGMA table_info('position')")).fetchall()}
-        trade_columns = {row[1] for row in connection.execute(text("PRAGMA table_info('trade')")).fetchall()}
-        execution_columns = {row[1] for row in connection.execute(text("PRAGMA table_info('execution')")).fetchall()}
-        reconciliation_columns = {
-            row[1] for row in connection.execute(text("PRAGMA table_info('reconciliationevent')")).fetchall()
+        position_columns = {
+            row[1]
+            for row in connection.execute(
+                text("PRAGMA table_info('position')")
+            ).fetchall()
         }
-        trade_intent_columns = {row[1] for row in connection.execute(text("PRAGMA table_info('tradeintent')")).fetchall()}
-        allocation_alert_columns = {row[1] for row in connection.execute(text("PRAGMA table_info('allocationalert')")).fetchall()}
+        trade_columns = {
+            row[1]
+            for row in connection.execute(text("PRAGMA table_info('trade')")).fetchall()
+        }
+        execution_columns = {
+            row[1]
+            for row in connection.execute(
+                text("PRAGMA table_info('execution')")
+            ).fetchall()
+        }
+        reconciliation_columns = {
+            row[1]
+            for row in connection.execute(
+                text("PRAGMA table_info('reconciliationevent')")
+            ).fetchall()
+        }
+        trade_intent_columns = {
+            row[1]
+            for row in connection.execute(
+                text("PRAGMA table_info('tradeintent')")
+            ).fetchall()
+        }
+        allocation_alert_columns = {
+            row[1]
+            for row in connection.execute(
+                text("PRAGMA table_info('allocationalert')")
+            ).fetchall()
+        }
         indexes = {
-            row[1] for row in connection.execute(text("PRAGMA index_list('tradeintent')")).fetchall()
+            row[1]
+            for row in connection.execute(
+                text("PRAGMA index_list('tradeintent')")
+            ).fetchall()
         }
 
     assert "trade_intent_id" in position_columns

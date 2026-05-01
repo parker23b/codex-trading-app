@@ -24,9 +24,15 @@ class FakeBroker(Broker):
     _account_type: AccountType = AccountType.DEMO
     account_summary: BrokerAccountSummary | None = None
     remote_positions: list[BrokerPosition] = field(default_factory=list)
-    market_details_by_instrument: dict[str, BrokerMarketDetails] = field(default_factory=dict)
-    place_order_outcomes: list[BrokerOrderResult | Exception] = field(default_factory=list)
-    close_position_outcomes: list[BrokerOrderResult | Exception] = field(default_factory=list)
+    market_details_by_instrument: dict[str, BrokerMarketDetails] = field(
+        default_factory=dict
+    )
+    place_order_outcomes: list[BrokerOrderResult | Exception] = field(
+        default_factory=list
+    )
+    close_position_outcomes: list[BrokerOrderResult | Exception] = field(
+        default_factory=list
+    )
     placed_orders: list[OrderRequest] = field(default_factory=list)
     close_requests: list[dict[str, str | None]] = field(default_factory=list)
     latest_prices: dict[str, float] = field(default_factory=dict)
@@ -117,7 +123,11 @@ class FakeBroker(Broker):
         fallback_stop_distance: float | None = None,
     ) -> BrokerRiskSizingQuote:
         details = self.get_market_details(instrument)
-        sizing_profile = details.metadata.get("sizing_profile") if isinstance(details.metadata, dict) else None
+        sizing_profile = (
+            details.metadata.get("sizing_profile")
+            if isinstance(details.metadata, dict)
+            else None
+        )
         if not isinstance(sizing_profile, dict):
             sizing_profile = {
                 "mode": BrokerSizingMode.APPROXIMATE_PRICE_DELTA.value,
@@ -136,7 +146,9 @@ class FakeBroker(Broker):
             mode = BrokerSizingMode.UNSUPPORTED
         if mode is BrokerSizingMode.EXACT_POINT_VALUE:
             price_increment = float(sizing_profile.get("price_increment") or 0.0)
-            value_per_increment = float(sizing_profile.get("value_per_increment") or 0.0)
+            value_per_increment = float(
+                sizing_profile.get("value_per_increment") or 0.0
+            )
             if price_increment <= 0 or value_per_increment <= 0:
                 return BrokerRiskSizingQuote(
                     instrument=instrument,
@@ -155,7 +167,9 @@ class FakeBroker(Broker):
             risk_per_unit = (stop_distance / price_increment) * value_per_increment
             precision = BrokerSizingPrecision.EXACT
         elif mode is BrokerSizingMode.EXACT_CONTRACT_RISK:
-            contract_multiplier = float(sizing_profile.get("contract_multiplier") or 0.0)
+            contract_multiplier = float(
+                sizing_profile.get("contract_multiplier") or 0.0
+            )
             if contract_multiplier <= 0:
                 return BrokerRiskSizingQuote(
                     instrument=instrument,
@@ -174,7 +188,9 @@ class FakeBroker(Broker):
             risk_per_unit = stop_distance * contract_multiplier
             precision = BrokerSizingPrecision.EXACT
         elif mode is BrokerSizingMode.APPROXIMATE_PRICE_DELTA:
-            contract_multiplier = float(sizing_profile.get("contract_multiplier") or 1.0)
+            contract_multiplier = float(
+                sizing_profile.get("contract_multiplier") or 1.0
+            )
             risk_per_unit = stop_distance * contract_multiplier
             precision = BrokerSizingPrecision.APPROXIMATE
         else:
@@ -213,12 +229,16 @@ class FakeBroker(Broker):
             details={"source": "fake_broker", "sizing_profile": sizing_profile},
         )
 
-    def normalize_order_size(self, instrument: str, requested_size: float) -> BrokerSizeNormalization:
+    def normalize_order_size(
+        self, instrument: str, requested_size: float
+    ) -> BrokerSizeNormalization:
         details = self.get_market_details(instrument)
         notes: list[str] = []
         normalized_size = max(float(requested_size), 0.0)
         if details.size_step is not None and details.size_step > 0:
-            normalized_size = int(normalized_size / details.size_step) * details.size_step
+            normalized_size = (
+                int(normalized_size / details.size_step) * details.size_step
+            )
             notes.append("rounded_down_to_size_step")
         normalized_size = round(normalized_size, 8)
         if normalized_size <= 0:
@@ -234,7 +254,10 @@ class FakeBroker(Broker):
                 details={},
                 notes=notes,
             )
-        if details.min_deal_size is not None and normalized_size < details.min_deal_size:
+        if (
+            details.min_deal_size is not None
+            and normalized_size < details.min_deal_size
+        ):
             return BrokerSizeNormalization(
                 instrument=instrument,
                 requested_size=requested_size,
@@ -332,7 +355,10 @@ class ContractRiskBroker(FakeBroker):
             sizing_method=sizing_method,
             min_stop_distance=details.min_normal_stop_or_limit_distance,
             normalization=normalization,
-            details={"source": "contract_risk_broker", "contract_multiplier": contract_multiplier},
+            details={
+                "source": "contract_risk_broker",
+                "contract_multiplier": contract_multiplier,
+            },
         )
 
 

@@ -45,7 +45,9 @@ async def lifespan(_: FastAPI):
     streaming_service = get_ig_streaming_service()
     get_health_service().heartbeat()
     streaming_enabled = streaming_service.is_enabled()
-    market_data_task = asyncio.create_task(MarketDataService(poll_prices=not streaming_enabled).run())
+    market_data_task = asyncio.create_task(
+        MarketDataService(poll_prices=not streaming_enabled).run()
+    )
     heartbeat_task = asyncio.create_task(_health_heartbeat_loop())
     streaming_task: asyncio.Task[None] | None = None
     if streaming_enabled:
@@ -129,7 +131,9 @@ async def log_requests(request: Request, call_next):
                 "duration_ms": duration_ms,
             },
         )
-    log_level = _classify_request_log_level(request=request, response=response, duration_ms=duration_ms)
+    log_level = _classify_request_log_level(
+        request=request, response=response, duration_ms=duration_ms
+    )
     logger.log(
         log_level,
         "API request handled",
@@ -143,7 +147,9 @@ async def log_requests(request: Request, call_next):
     return response
 
 
-def _classify_request_log_level(*, request: Request, response: Response, duration_ms: float) -> int:
+def _classify_request_log_level(
+    *, request: Request, response: Response, duration_ms: float
+) -> int:
     if response.status_code >= 500:
         return logging.ERROR
     if response.status_code >= 400:

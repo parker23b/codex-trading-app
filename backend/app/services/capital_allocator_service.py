@@ -8,11 +8,21 @@ from uuid import uuid4
 
 from sqlmodel import Session
 
-from app.core.broker import BrokerMarketDetails, BrokerRiskSizingQuote, BrokerSizingPrecision
+from app.core.broker import (
+    BrokerMarketDetails,
+    BrokerRiskSizingQuote,
+    BrokerSizingPrecision,
+)
 from app.core.config import get_settings
 from app.core.instrument_catalog import list_market_instruments
 from app.core.signals import EntrySignal, SignalCandidate
-from app.models.trade import AllocationCycle, Position, TradeIntent, TradeIntentState, utc_now
+from app.models.trade import (
+    AllocationCycle,
+    Position,
+    TradeIntent,
+    TradeIntentState,
+    utc_now,
+)
 from app.services.domain_event_service import domain_event_service
 from app.services.trade_service import TradeService
 
@@ -76,7 +86,9 @@ class CapitalAllocatorService:
         self.session = session
         self.settings = get_settings()
         self.trade_service = TradeService(session)
-        self._instrument_index = {instrument.epic: instrument for instrument in list_market_instruments()}
+        self._instrument_index = {
+            instrument.epic: instrument for instrument in list_market_instruments()
+        }
 
     def allocate(
         self,
@@ -87,10 +99,16 @@ class CapitalAllocatorService:
         if not candidates:
             return []
 
-        current_time = received_at.astimezone(UTC) if received_at is not None else datetime.now(UTC)
+        current_time = (
+            received_at.astimezone(UTC)
+            if received_at is not None
+            else datetime.now(UTC)
+        )
         cycle_id = f"alloc-{uuid4().hex[:12]}"
         open_positions = self.trade_service.list_positions()
-        reserved_intents = self.trade_service.list_trade_intents(states=RISK_RESERVED_INTENT_STATES)
+        reserved_intents = self.trade_service.list_trade_intents(
+            states=RISK_RESERVED_INTENT_STATES
+        )
         decisions: list[AllocationDecision] = []
         candidate_plans: list[CandidatePlan] = []
         open_state = self._build_open_state(open_positions, reserved_intents)
@@ -122,7 +140,9 @@ class CapitalAllocatorService:
             if stale_decision is not None:
                 decisions.append(stale_decision)
                 continue
-            plan, rejection = self._prepare_candidate_plan(candidate, current_time=current_time, open_state=open_state)
+            plan, rejection = self._prepare_candidate_plan(
+                candidate, current_time=current_time, open_state=open_state
+            )
             if rejection is not None:
                 decisions.append(rejection)
                 continue
@@ -132,11 +152,22 @@ class CapitalAllocatorService:
         candidate_plans = self._suppress_weaker_duplicates(candidate_plans, decisions)
         candidate_plans = self._resolve_direction_conflicts(candidate_plans, decisions)
 
-        for plan in sorted(candidate_plans, key=lambda item: (-item.priority_score, item.candidate.strategy_name, item.candidate.instrument)):
-            decision = self._allocate_candidate(plan, cycle_id=cycle_id, open_state=open_state, cycle_state=cycle_state)
+        for plan in sorted(
+            candidate_plans,
+            key=lambda item: (
+                -item.priority_score,
+                item.candidate.strategy_name,
+                item.candidate.instrument,
+            ),
+        ):
+            decision = self._allocate_candidate(
+                plan, cycle_id=cycle_id, open_state=open_state, cycle_state=cycle_state
+            )
             decisions.append(decision)
             if decision.selected:
-                self._reserve_cycle_state(plan=plan, decision=decision, cycle_state=cycle_state)
+                self._reserve_cycle_state(
+                    plan=plan, decision=decision, cycle_state=cycle_state
+                )
 
         for decision in decisions:
             if decision.cycle_id == "unassigned":
@@ -191,7 +222,8 @@ class CapitalAllocatorService:
                 risk_amount=account_equity * (requested_risk_percent / 100.0),
                 stop_loss_price=signal.stop_loss_price,
                 fallback_stop_distance=max(
-                    self._entry_price(signal) * self.settings.allocation_fallback_stop_distance_percent,
+                    self._entry_price(signal)
+                    * self.settings.allocation_fallback_stop_distance_percent,
                     1e-9,
                 ),
             )
@@ -205,17 +237,26 @@ class CapitalAllocatorService:
                 sizing_details={"error": str(exc)},
             )
 
-        if not sizing_quote.sizing_available or sizing_quote.precision is BrokerSizingPrecision.UNSUPPORTED:
+        if (
+            not sizing_quote.sizing_available
+            or sizing_quote.precision is BrokerSizingPrecision.UNSUPPORTED
+        ):
             return None, self._reject_candidate(
                 candidate,
                 "sizing_quote_unavailable",
-                sizing_quote.reason or "Broker sizing metadata is insufficient for coherent risk sizing.",
+                sizing_quote.reason
+                or "Broker sizing metadata is insufficient for coherent risk sizing.",
                 requested_risk_percent=requested_risk_percent,
                 account_equity=account_equity,
                 broker_details=broker_details,
-                sizing_details={"sizing_quote": self._serialize_sizing_quote(sizing_quote)},
+                sizing_details={
+                    "sizing_quote": self._serialize_sizing_quote(sizing_quote)
+                },
             )
-        if sizing_quote.precision is BrokerSizingPrecision.APPROXIMATE and broker.account_type.value == "LIVE":
+        if (
+            sizing_quote.precision is BrokerSizingPrecision.APPROXIMATE
+            and broker.account_type.value == "LIVE"
+        ):
             return None, self._reject_candidate(
                 candidate,
                 "approximate_sizing_unsupported",
@@ -223,7 +264,9 @@ class CapitalAllocatorService:
                 requested_risk_percent=requested_risk_percent,
                 account_equity=account_equity,
                 broker_details=broker_details,
-                sizing_details={"sizing_quote": self._serialize_sizing_quote(sizing_quote)},
+                sizing_details={
+                    "sizing_quote": self._serialize_sizing_quote(sizing_quote)
+                },
             )
 
         entry_price = float(sizing_quote.entry_price)
@@ -231,7 +274,9 @@ class CapitalAllocatorService:
         requested_size = max(float(sizing_quote.requested_size), 0.0)
         risk_amount = float(sizing_quote.risk_amount)
         sizing_method = str(sizing_quote.sizing_method or "unavailable")
-        sizing_details = self._build_sizing_details(candidate, sizing_quote=sizing_quote)
+        sizing_details = self._build_sizing_details(
+            candidate, sizing_quote=sizing_quote
+        )
         score_components = self._score_components(
             candidate,
             current_time=current_time,
@@ -269,42 +314,105 @@ class CapitalAllocatorService:
         open_state: dict[str, object],
         cycle_state: dict[str, object],
     ) -> AllocationDecision:
-        if self._portfolio_position_count(open_state, cycle_state) >= self.settings.runtime_max_open_positions:
-            return self._reject(plan, "portfolio_position_limit", "Portfolio max open positions reached.", binding_budget="portfolio_open_positions")
-        if self._strategy_position_count(plan.candidate.strategy_name, open_state, cycle_state) >= self.settings.runtime_max_positions_per_strategy:
-            return self._reject(plan, "strategy_position_limit", "Strategy max concurrent positions reached.", binding_budget="strategy_positions")
-        if cycle_state["selected_positions"] >= self.settings.allocation_max_new_positions_per_cycle:
-            return self._reject(plan, "cycle_position_limit", "Allocation cycle max new-position count reached.", binding_budget="cycle_positions")
+        if (
+            self._portfolio_position_count(open_state, cycle_state)
+            >= self.settings.runtime_max_open_positions
+        ):
+            return self._reject(
+                plan,
+                "portfolio_position_limit",
+                "Portfolio max open positions reached.",
+                binding_budget="portfolio_open_positions",
+            )
+        if (
+            self._strategy_position_count(
+                plan.candidate.strategy_name, open_state, cycle_state
+            )
+            >= self.settings.runtime_max_positions_per_strategy
+        ):
+            return self._reject(
+                plan,
+                "strategy_position_limit",
+                "Strategy max concurrent positions reached.",
+                binding_budget="strategy_positions",
+            )
+        if (
+            cycle_state["selected_positions"]
+            >= self.settings.allocation_max_new_positions_per_cycle
+        ):
+            return self._reject(
+                plan,
+                "cycle_position_limit",
+                "Allocation cycle max new-position count reached.",
+                binding_budget="cycle_positions",
+            )
 
-        allocatable_risk, hard_risk_limit, binding_budget, budget_snapshot = self._allocatable_risk_percent(
-            plan,
-            open_state=open_state,
-            cycle_state=cycle_state,
+        allocatable_risk, hard_risk_limit, binding_budget, budget_snapshot = (
+            self._allocatable_risk_percent(
+                plan,
+                open_state=open_state,
+                cycle_state=cycle_state,
+            )
         )
         if allocatable_risk <= 0:
             return self._reject(
                 plan,
-                reason_code=f"{binding_budget}_exhausted" if binding_budget else "allocation_budget_exhausted",
+                reason_code=f"{binding_budget}_exhausted"
+                if binding_budget
+                else "allocation_budget_exhausted",
                 reason="No risk budget remains for this candidate.",
                 binding_budget=binding_budget,
                 broker_details=plan.broker_details,
-                sizing_details={**plan.sizing_details, "budget_snapshot": budget_snapshot},
+                sizing_details={
+                    **plan.sizing_details,
+                    "budget_snapshot": budget_snapshot,
+                },
             )
 
-        risk_scale = allocatable_risk / plan.requested_risk_percent if plan.requested_risk_percent > 0 else 0.0
+        risk_scale = (
+            allocatable_risk / plan.requested_risk_percent
+            if plan.requested_risk_percent > 0
+            else 0.0
+        )
         raw_size = plan.requested_size * risk_scale
         raw_notional = abs(raw_size * plan.entry_price)
         if raw_size <= 0 or raw_notional <= 0:
-            return self._reject(plan, "size_zero", "Allocation reduced size to zero.", binding_budget=binding_budget)
+            return self._reject(
+                plan,
+                "size_zero",
+                "Allocation reduced size to zero.",
+                binding_budget=binding_budget,
+            )
 
-        gross_remaining_notional = self._gross_remaining_notional(plan.account_equity, open_state=open_state, cycle_state=cycle_state)
+        gross_remaining_notional = self._gross_remaining_notional(
+            plan.account_equity, open_state=open_state, cycle_state=cycle_state
+        )
         max_trade_notional = self.settings.runtime_max_position_notional
-        capped_notional = min(raw_notional, max_trade_notional, gross_remaining_notional)
-        capped_size = raw_size * (capped_notional / raw_notional) if raw_notional > 0 else raw_size
-        capped_risk_percent = allocatable_risk * (capped_size / raw_size) if raw_size > 0 else allocatable_risk
-        capped_risk_amount = plan.risk_amount * (capped_risk_percent / plan.requested_risk_percent) if plan.requested_risk_percent > 0 else 0.0
+        capped_notional = min(
+            raw_notional, max_trade_notional, gross_remaining_notional
+        )
+        capped_size = (
+            raw_size * (capped_notional / raw_notional)
+            if raw_notional > 0
+            else raw_size
+        )
+        capped_risk_percent = (
+            allocatable_risk * (capped_size / raw_size)
+            if raw_size > 0
+            else allocatable_risk
+        )
+        capped_risk_amount = (
+            plan.risk_amount * (capped_risk_percent / plan.requested_risk_percent)
+            if plan.requested_risk_percent > 0
+            else 0.0
+        )
         if capped_size <= 0 or capped_notional <= 0:
-            return self._reject(plan, "gross_exposure_limit", "Gross exposure budget would be exceeded.", binding_budget="gross_exposure")
+            return self._reject(
+                plan,
+                "gross_exposure_limit",
+                "Gross exposure budget would be exceeded.",
+                binding_budget="gross_exposure",
+            )
 
         normalized = self._normalize_size(
             plan=plan,
@@ -320,7 +428,11 @@ class CapitalAllocatorService:
                 reason=str(normalized["reason"]),
                 binding_budget=binding_budget,
                 broker_details=plan.broker_details,
-                sizing_details={**plan.sizing_details, **normalized, "budget_snapshot": budget_snapshot},
+                sizing_details={
+                    **plan.sizing_details,
+                    **normalized,
+                    "budget_snapshot": budget_snapshot,
+                },
             )
 
         actual_size = float(normalized["normalized_size"])
@@ -350,7 +462,9 @@ class CapitalAllocatorService:
                 "budget_snapshot": budget_snapshot,
                 "binding_budget_is_hard": binding_budget is not None,
                 "raw_size_after_budgets": round(capped_size, 8),
-                "raw_notional_after_budgets": round(abs(actual_size * plan.entry_price), 8),
+                "raw_notional_after_budgets": round(
+                    abs(actual_size * plan.entry_price), 8
+                ),
                 **normalized,
             },
             broker_details=self._serialize_broker_details(plan.broker_details),
@@ -370,7 +484,9 @@ class CapitalAllocatorService:
             "entry_price": round(float(sizing_quote.entry_price), 8),
             "requested_risk_percent": round(self._requested_risk_percent(candidate), 6),
             "risk_amount": round(float(sizing_quote.risk_amount), 6),
-            "stop_distance_price": round(float(sizing_quote.stop_distance_price or 0.0), 8),
+            "stop_distance_price": round(
+                float(sizing_quote.stop_distance_price or 0.0), 8
+            ),
             "risk_per_unit": round(float(sizing_quote.risk_per_unit or 0.0), 8),
             "sizing_precision": sizing_quote.precision.value,
             "sizing_mode": sizing_quote.mode.value,
@@ -393,7 +509,9 @@ class CapitalAllocatorService:
         requested_risk_amount: float,
         hard_risk_limit_percent: float,
     ) -> dict[str, object]:
-        normalization = plan.candidate.engine.broker.normalize_order_size(plan.candidate.instrument, requested_size)
+        normalization = plan.candidate.engine.broker.normalize_order_size(
+            plan.candidate.instrument, requested_size
+        )
         notes = list(normalization.notes)
         if normalization.accepted:
             normalized_size = normalization.normalized_size
@@ -403,21 +521,45 @@ class CapitalAllocatorService:
                 "reason": normalization.reason,
                 "normalization_resized": abs(normalized_size - requested_size) > 1e-8,
                 "normalized_size": round(normalized_size, 8),
-                "allocated_risk_percent": round(requested_risk_percent * (normalized_size / max(requested_size, 1e-9)), 6),
-                "allocated_risk_amount": round(requested_risk_amount * (normalized_size / max(requested_size, 1e-9)), 6),
+                "allocated_risk_percent": round(
+                    requested_risk_percent
+                    * (normalized_size / max(requested_size, 1e-9)),
+                    6,
+                ),
+                "allocated_risk_amount": round(
+                    requested_risk_amount
+                    * (normalized_size / max(requested_size, 1e-9)),
+                    6,
+                ),
                 "minimum_deal_size": normalization.min_deal_size,
                 "size_step": normalization.size_step,
                 "normalization_details": normalization.details,
                 "notes": notes,
             }
 
-        if normalization.reason_code == "below_min_size" and normalization.min_deal_size is not None:
+        if (
+            normalization.reason_code == "below_min_size"
+            and normalization.min_deal_size is not None
+        ):
             round_up_size = normalization.min_deal_size
             if normalization.size_step is not None and normalization.size_step > 0:
-                round_up_size = max(normalization.min_deal_size, self._round_up(normalization.min_deal_size, normalization.size_step))
-            round_up_risk_percent = requested_risk_percent * (round_up_size / max(requested_size, 1e-9))
-            tolerance_multiplier = 1.0 + (self.settings.allocation_under_minimum_round_up_tolerance_percent / 100.0)
-            if round_up_risk_percent <= requested_risk_percent * tolerance_multiplier and round_up_risk_percent <= hard_risk_limit_percent:
+                round_up_size = max(
+                    normalization.min_deal_size,
+                    self._round_up(
+                        normalization.min_deal_size, normalization.size_step
+                    ),
+                )
+            round_up_risk_percent = requested_risk_percent * (
+                round_up_size / max(requested_size, 1e-9)
+            )
+            tolerance_multiplier = 1.0 + (
+                self.settings.allocation_under_minimum_round_up_tolerance_percent
+                / 100.0
+            )
+            if (
+                round_up_risk_percent <= requested_risk_percent * tolerance_multiplier
+                and round_up_risk_percent <= hard_risk_limit_percent
+            ):
                 notes.append("rounded_up_to_minimum_deal_size")
                 return {
                     "accepted": True,
@@ -426,7 +568,11 @@ class CapitalAllocatorService:
                     "normalization_resized": True,
                     "normalized_size": round(round_up_size, 8),
                     "allocated_risk_percent": round(round_up_risk_percent, 6),
-                    "allocated_risk_amount": round(requested_risk_amount * (round_up_size / max(requested_size, 1e-9)), 6),
+                    "allocated_risk_amount": round(
+                        requested_risk_amount
+                        * (round_up_size / max(requested_size, 1e-9)),
+                        6,
+                    ),
                     "minimum_deal_size": normalization.min_deal_size,
                     "size_step": normalization.size_step,
                     "normalization_details": normalization.details,
@@ -437,10 +583,19 @@ class CapitalAllocatorService:
             "accepted": False,
             "reason_code": normalization.reason_code,
             "reason": normalization.reason,
-            "normalization_resized": abs(normalization.normalized_size - requested_size) > 1e-8,
+            "normalization_resized": abs(normalization.normalized_size - requested_size)
+            > 1e-8,
             "normalized_size": round(normalization.normalized_size, 8),
-            "allocated_risk_percent": round(requested_risk_percent * (normalization.normalized_size / max(requested_size, 1e-9)), 6),
-            "allocated_risk_amount": round(requested_risk_amount * (normalization.normalized_size / max(requested_size, 1e-9)), 6),
+            "allocated_risk_percent": round(
+                requested_risk_percent
+                * (normalization.normalized_size / max(requested_size, 1e-9)),
+                6,
+            ),
+            "allocated_risk_amount": round(
+                requested_risk_amount
+                * (normalization.normalized_size / max(requested_size, 1e-9)),
+                6,
+            ),
             "minimum_deal_size": normalization.min_deal_size,
             "size_step": normalization.size_step,
             "normalization_details": normalization.details,
@@ -464,10 +619,16 @@ class CapitalAllocatorService:
     ) -> tuple[float, float, str | None, dict[str, float]]:
         remaining = {
             "portfolio_risk": max(
-                self.settings.runtime_max_open_risk_percent - float(open_state["total_risk"]) - float(cycle_state["selected_risk"]),
+                self.settings.runtime_max_open_risk_percent
+                - float(open_state["total_risk"])
+                - float(cycle_state["selected_risk"]),
                 0.0,
             ),
-            "cycle_risk": max(self.settings.allocation_max_new_risk_per_cycle_percent - float(cycle_state["selected_risk"]), 0.0),
+            "cycle_risk": max(
+                self.settings.allocation_max_new_risk_per_cycle_percent
+                - float(cycle_state["selected_risk"]),
+                0.0,
+            ),
             "strategy_risk": max(
                 self.settings.allocation_max_risk_per_strategy_percent
                 - float(open_state["strategy_risk"][plan.candidate.strategy_name])
@@ -502,16 +663,30 @@ class CapitalAllocatorService:
             {key: round(value, 6) for key, value in remaining.items()},
         )
 
-    def _reserve_cycle_state(self, *, plan: CandidatePlan, decision: AllocationDecision, cycle_state: dict[str, object]) -> None:
+    def _reserve_cycle_state(
+        self,
+        *,
+        plan: CandidatePlan,
+        decision: AllocationDecision,
+        cycle_state: dict[str, object],
+    ) -> None:
         cycle_state["selected_positions"] += 1
         cycle_state["selected_risk"] += decision.allocated_risk_percent
-        cycle_state["selected_gross_notional"] += abs(decision.normalized_size * plan.entry_price)
+        cycle_state["selected_gross_notional"] += abs(
+            decision.normalized_size * plan.entry_price
+        )
         cycle_state["selected_strategy_positions"][plan.candidate.strategy_name] += 1
-        cycle_state["strategy_risk"][plan.candidate.strategy_name] += decision.allocated_risk_percent
+        cycle_state["strategy_risk"][plan.candidate.strategy_name] += (
+            decision.allocated_risk_percent
+        )
         cycle_state["family_risk"][plan.family_name] += decision.allocated_risk_percent
-        cycle_state["instrument_risk"][plan.candidate.instrument] += decision.allocated_risk_percent
+        cycle_state["instrument_risk"][plan.candidate.instrument] += (
+            decision.allocated_risk_percent
+        )
         for currency in plan.currencies:
-            cycle_state["currency_risk"][currency] += decision.allocated_risk_percent / max(len(plan.currencies), 1)
+            cycle_state["currency_risk"][currency] += (
+                decision.allocated_risk_percent / max(len(plan.currencies), 1)
+            )
 
     def _score_components(
         self,
@@ -524,15 +699,35 @@ class CapitalAllocatorService:
     ) -> dict[str, float]:
         signal = candidate.signal
         assert isinstance(signal, EntrySignal)
-        confidence = max(0.0, min(candidate.confidence if candidate.confidence is not None else 0.5, 1.0))
-        signal_age_ms = max((current_time - signal.signal_at.astimezone(UTC)).total_seconds() * 1000.0, 0.0)
+        confidence = max(
+            0.0,
+            min(candidate.confidence if candidate.confidence is not None else 0.5, 1.0),
+        )
+        signal_age_ms = max(
+            (current_time - signal.signal_at.astimezone(UTC)).total_seconds() * 1000.0,
+            0.0,
+        )
         freshness = 1.0
         if self.settings.max_price_age_ms > 0:
-            freshness = max(0.0, 1.0 - min(signal_age_ms, self.settings.max_price_age_ms) / self.settings.max_price_age_ms)
-        spread = (signal.ask - signal.bid) if signal.bid is not None and signal.ask is not None else None
+            freshness = max(
+                0.0,
+                1.0
+                - min(signal_age_ms, self.settings.max_price_age_ms)
+                / self.settings.max_price_age_ms,
+            )
+        spread = (
+            (signal.ask - signal.bid)
+            if signal.bid is not None and signal.ask is not None
+            else None
+        )
         spread_score = 0.5
         if spread is not None and self.settings.max_spread_pips > 0:
-            spread_score = max(0.0, 1.0 - min(spread, self.settings.max_spread_pips) / self.settings.max_spread_pips)
+            spread_score = max(
+                0.0,
+                1.0
+                - min(spread, self.settings.max_spread_pips)
+                / self.settings.max_spread_pips,
+            )
         source_quality = 1.0 if candidate.source_tier == "TIER1" else 0.85
         reward_risk_score = 0.5
         if signal.expected_reward_risk is not None:
@@ -543,7 +738,9 @@ class CapitalAllocatorService:
         if float(open_state["family_risk"][family_name]) > 0:
             diversification_penalty += 0.1
         for currency in self._currency_buckets(signal.instrument, broker_details):
-            if float(open_state["currency_risk"][currency]) >= (self.settings.allocation_max_risk_per_currency_percent * 0.5):
+            if float(open_state["currency_risk"][currency]) >= (
+                self.settings.allocation_max_risk_per_currency_percent * 0.5
+            ):
                 diversification_penalty += 0.1
         diversification = max(0.0, 1.0 - diversification_penalty)
         return {
@@ -555,7 +752,9 @@ class CapitalAllocatorService:
             "diversification": round(diversification * 0.15, 6),
         }
 
-    def _build_open_state(self, open_positions: list[Position], reserved_intents: list[TradeIntent]) -> dict[str, object]:
+    def _build_open_state(
+        self, open_positions: list[Position], reserved_intents: list[TradeIntent]
+    ) -> dict[str, object]:
         total_risk = 0.0
         total_gross_notional = 0.0
         strategy_risk: defaultdict[str, float] = defaultdict(float)
@@ -586,7 +785,9 @@ class CapitalAllocatorService:
                 continue
             if intent.position_id is not None:
                 continue
-            risk_percent = float(intent.allocated_risk_percent or intent.proposed_risk_percent or 0.0)
+            risk_percent = float(
+                intent.allocated_risk_percent or intent.proposed_risk_percent or 0.0
+            )
             size = float(intent.allocated_size or intent.proposed_size or 0.0)
             price = float(intent.average_fill_price or intent.observed_price or 0.0)
             family_name = str(intent.family_name or intent.strategy_name)
@@ -608,23 +809,61 @@ class CapitalAllocatorService:
             "instrument_risk": instrument_risk,
             "currency_risk": currency_risk,
             "strategy_positions": strategy_positions,
-            "open_positions": len(open_positions) + len([intent for intent in reserved_intents if intent.position_id is None and (intent.id is None or intent.id not in reserved_intent_ids)]),
+            "open_positions": len(open_positions)
+            + len(
+                [
+                    intent
+                    for intent in reserved_intents
+                    if intent.position_id is None
+                    and (intent.id is None or intent.id not in reserved_intent_ids)
+                ]
+            ),
         }
 
-    def _portfolio_position_count(self, open_state: dict[str, object], cycle_state: dict[str, object]) -> int:
-        return int(open_state["open_positions"]) + int(cycle_state["selected_positions"])
+    def _portfolio_position_count(
+        self, open_state: dict[str, object], cycle_state: dict[str, object]
+    ) -> int:
+        return int(open_state["open_positions"]) + int(
+            cycle_state["selected_positions"]
+        )
 
-    def _strategy_position_count(self, strategy_name: str, open_state: dict[str, object], cycle_state: dict[str, object]) -> int:
-        return int(open_state["strategy_positions"][strategy_name]) + int(cycle_state["selected_strategy_positions"][strategy_name])
+    def _strategy_position_count(
+        self,
+        strategy_name: str,
+        open_state: dict[str, object],
+        cycle_state: dict[str, object],
+    ) -> int:
+        return int(open_state["strategy_positions"][strategy_name]) + int(
+            cycle_state["selected_strategy_positions"][strategy_name]
+        )
 
-    def _gross_remaining_notional(self, equity: float, *, open_state: dict[str, object], cycle_state: dict[str, object]) -> float:
-        gross_limit = equity * (self.settings.allocation_max_gross_exposure_percent / 100.0)
-        used = float(open_state["total_gross_notional"]) + float(cycle_state["selected_gross_notional"])
+    def _gross_remaining_notional(
+        self,
+        equity: float,
+        *,
+        open_state: dict[str, object],
+        cycle_state: dict[str, object],
+    ) -> float:
+        gross_limit = equity * (
+            self.settings.allocation_max_gross_exposure_percent / 100.0
+        )
+        used = float(open_state["total_gross_notional"]) + float(
+            cycle_state["selected_gross_notional"]
+        )
         return max(gross_limit - used, 0.0)
 
-    def _suppress_weaker_duplicates(self, plans: list[CandidatePlan], decisions: list[AllocationDecision]) -> list[CandidatePlan]:
+    def _suppress_weaker_duplicates(
+        self, plans: list[CandidatePlan], decisions: list[AllocationDecision]
+    ) -> list[CandidatePlan]:
         best_by_key: dict[tuple[str, str], CandidatePlan] = {}
-        for plan in sorted(plans, key=lambda item: (-item.priority_score, item.candidate.strategy_name, item.candidate.instrument)):
+        for plan in sorted(
+            plans,
+            key=lambda item: (
+                -item.priority_score,
+                item.candidate.strategy_name,
+                item.candidate.instrument,
+            ),
+        ):
             signal = plan.candidate.signal
             assert isinstance(signal, EntrySignal)
             key = (plan.candidate.instrument, signal.direction.value)
@@ -641,7 +880,9 @@ class CapitalAllocatorService:
             )
         return list(best_by_key.values())
 
-    def _resolve_direction_conflicts(self, plans: list[CandidatePlan], decisions: list[AllocationDecision]) -> list[CandidatePlan]:
+    def _resolve_direction_conflicts(
+        self, plans: list[CandidatePlan], decisions: list[AllocationDecision]
+    ) -> list[CandidatePlan]:
         grouped: defaultdict[str, list[CandidatePlan]] = defaultdict(list)
         for plan in plans:
             grouped[plan.candidate.instrument].append(plan)
@@ -650,7 +891,10 @@ class CapitalAllocatorService:
             if len(entries) == 1:
                 selected.extend(entries)
                 continue
-            ranked = sorted(entries, key=lambda item: (-item.priority_score, item.candidate.strategy_name))
+            ranked = sorted(
+                entries,
+                key=lambda item: (-item.priority_score, item.candidate.strategy_name),
+            )
             selected.append(ranked[0])
             for plan in ranked[1:]:
                 decisions.append(
@@ -662,7 +906,9 @@ class CapitalAllocatorService:
                 )
         return selected
 
-    def _reject_if_stale(self, candidate: SignalCandidate, *, current_time: datetime) -> AllocationDecision | None:
+    def _reject_if_stale(
+        self, candidate: SignalCandidate, *, current_time: datetime
+    ) -> AllocationDecision | None:
         signal = candidate.signal
         assert isinstance(signal, EntrySignal)
         age_seconds = (current_time - signal.signal_at.astimezone(UTC)).total_seconds()
@@ -712,7 +958,9 @@ class CapitalAllocatorService:
             )
             or "UNSUPPORTED",
             sizing_details=sizing_details or {},
-            broker_details=self._serialize_broker_details(broker_details) if broker_details is not None else {},
+            broker_details=self._serialize_broker_details(broker_details)
+            if broker_details is not None
+            else {},
             degraded=((sizing_details or {}).get("degraded_mode") is True),
         )
 
@@ -742,7 +990,9 @@ class CapitalAllocatorService:
             binding_budget=binding_budget,
             score_components=plan.score_components,
             sizing_details=sizing_details or dict(plan.sizing_details),
-            broker_details=self._serialize_broker_details(broker_details or plan.broker_details),
+            broker_details=self._serialize_broker_details(
+                broker_details or plan.broker_details
+            ),
             degraded=plan.sizing_quote.precision is BrokerSizingPrecision.APPROXIMATE,
         )
 
@@ -767,7 +1017,11 @@ class CapitalAllocatorService:
         open_state: dict[str, object],
         cycle_state: dict[str, object],
     ) -> None:
-        entry_decisions = [decision for decision in decisions if isinstance(decision.candidate.signal, EntrySignal)]
+        entry_decisions = [
+            decision
+            for decision in decisions
+            if isinstance(decision.candidate.signal, EntrySignal)
+        ]
         if not entry_decisions:
             return
         binding_budget_counts: defaultdict[str, int] = defaultdict(int)
@@ -784,12 +1038,21 @@ class CapitalAllocatorService:
                 binding_budget_counts[decision.binding_budget] += 1
             if not decision.selected:
                 rejection_reason_counts[decision.reason_code] += 1
-            raw_after_budgets = float((decision.sizing_details or {}).get("raw_size_after_budgets") or 0.0)
-            if raw_after_budgets > 0 and abs(raw_after_budgets - float(decision.normalized_size or 0.0)) > 1e-8:
+            raw_after_budgets = float(
+                (decision.sizing_details or {}).get("raw_size_after_budgets") or 0.0
+            )
+            if (
+                raw_after_budgets > 0
+                and abs(raw_after_budgets - float(decision.normalized_size or 0.0))
+                > 1e-8
+            ):
                 resized_candidate_count += 1
             if decision.degraded:
                 degraded_candidate_count += 1
-            if decision.reason_code in {"sizing_quote_unavailable", "broker_metadata_unavailable"}:
+            if decision.reason_code in {
+                "sizing_quote_unavailable",
+                "broker_metadata_unavailable",
+            }:
                 blocked_unsupported_sizing_count += 1
             if decision.reason_code == "approximate_sizing_unsupported":
                 blocked_approximate_live_count += 1
@@ -815,10 +1078,23 @@ class CapitalAllocatorService:
             received_at=received_at,
             completed_at=utc_now(),
             candidate_count=len(entry_decisions),
-            approved_count=len([decision for decision in entry_decisions if decision.selected]),
-            rejected_count=len([decision for decision in entry_decisions if not decision.selected]),
-            total_requested_risk_percent=round(sum(decision.requested_risk_percent for decision in entry_decisions), 6),
-            total_allocated_risk_percent=round(sum(decision.allocated_risk_percent for decision in entry_decisions if decision.selected), 6),
+            approved_count=len(
+                [decision for decision in entry_decisions if decision.selected]
+            ),
+            rejected_count=len(
+                [decision for decision in entry_decisions if not decision.selected]
+            ),
+            total_requested_risk_percent=round(
+                sum(decision.requested_risk_percent for decision in entry_decisions), 6
+            ),
+            total_allocated_risk_percent=round(
+                sum(
+                    decision.allocated_risk_percent
+                    for decision in entry_decisions
+                    if decision.selected
+                ),
+                6,
+            ),
             remaining_portfolio_risk_percent=round(remaining_portfolio_risk, 6),
             resized_candidate_count=resized_candidate_count,
             degraded_candidate_count=degraded_candidate_count,
@@ -830,10 +1106,18 @@ class CapitalAllocatorService:
             binding_budget_counts=dict(binding_budget_counts),
             rejection_reason_counts=dict(rejection_reason_counts),
             details={
-                "portfolio_risk_before_cycle": round(float(open_state["total_risk"]), 6),
-                "portfolio_risk_reserved_by_cycle": round(float(cycle_state["selected_risk"]), 6),
-                "portfolio_gross_notional_before_cycle": round(float(open_state["total_gross_notional"]), 6),
-                "portfolio_gross_notional_reserved_by_cycle": round(float(cycle_state["selected_gross_notional"]), 6),
+                "portfolio_risk_before_cycle": round(
+                    float(open_state["total_risk"]), 6
+                ),
+                "portfolio_risk_reserved_by_cycle": round(
+                    float(cycle_state["selected_risk"]), 6
+                ),
+                "portfolio_gross_notional_before_cycle": round(
+                    float(open_state["total_gross_notional"]), 6
+                ),
+                "portfolio_gross_notional_reserved_by_cycle": round(
+                    float(cycle_state["selected_gross_notional"]), 6
+                ),
                 "degraded": degraded_candidate_count > 0,
             },
         )
@@ -860,7 +1144,9 @@ class CapitalAllocatorService:
             created_at=allocation_cycle.completed_at,
         )
 
-    def _currency_buckets(self, instrument: str, broker_details: BrokerMarketDetails | None) -> tuple[str, ...]:
+    def _currency_buckets(
+        self, instrument: str, broker_details: BrokerMarketDetails | None
+    ) -> tuple[str, ...]:
         base = broker_details.base_currency if broker_details is not None else None
         quote = broker_details.quote_currency if broker_details is not None else None
         if base and quote:
@@ -879,7 +1165,9 @@ class CapitalAllocatorService:
         return rounded_down + step
 
     @staticmethod
-    def _serialize_broker_details(details: BrokerMarketDetails | None) -> dict[str, object]:
+    def _serialize_broker_details(
+        details: BrokerMarketDetails | None,
+    ) -> dict[str, object]:
         if details is None:
             return {}
         return {

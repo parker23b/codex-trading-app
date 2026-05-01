@@ -9,15 +9,21 @@ router = APIRouter(prefix="/charts")
 
 
 @router.get("/equity")
-def get_equity_chart(session: Session = Depends(get_session)) -> list[dict[str, float | str]]:
+def get_equity_chart(
+    session: Session = Depends(get_session),
+) -> list[dict[str, float | str]]:
     return ChartService(TradeService(session)).get_equity_chart()
 
 
 @router.get("/drawdown")
-def get_drawdown_chart(session: Session = Depends(get_session)) -> list[dict[str, float | str]]:
+def get_drawdown_chart(
+    session: Session = Depends(get_session),
+) -> list[dict[str, float | str]]:
     return ChartService(TradeService(session)).get_drawdown_chart()
 
 
 @router.get("/risk-allocation")
-def get_risk_allocation_chart(session: Session = Depends(get_session)) -> dict[str, object]:
+def get_risk_allocation_chart(
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
     return ChartService(TradeService(session)).get_risk_allocation_chart()

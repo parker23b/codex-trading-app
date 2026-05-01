@@ -28,7 +28,10 @@ def get_allocation_cycle(
 ) -> dict[str, object]:
     cycle = AllocationReadService(session).get_cycle(cycle_id)
     if cycle is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Allocation cycle '{cycle_id}' not found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Allocation cycle '{cycle_id}' not found.",
+        )
     return cycle
 
 
@@ -57,7 +60,10 @@ def get_allocation_intent(
 ) -> dict[str, object]:
     intent = AllocationReadService(session).get_intent(trade_intent_id)
     if intent is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Trade intent '{trade_intent_id}' not found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Trade intent '{trade_intent_id}' not found.",
+        )
     return intent
 
 
@@ -67,7 +73,9 @@ def get_allocation_drift_summary(
     window_minutes: int | None = Query(default=None, ge=1, le=10_080),
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
-    return AllocationReadService(session).get_drift_summary(limit=limit, window_minutes=window_minutes)
+    return AllocationReadService(session).get_drift_summary(
+        limit=limit, window_minutes=window_minutes
+    )
 
 
 @router.get("/alerts")
@@ -115,10 +123,19 @@ def acknowledge_allocation_alert(
     payload: AlertActionRequest,
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
-    alert = AllocationAlertService(session).acknowledge_alert(alert_id, actor_id=payload.actor_id)
+    alert = AllocationAlertService(session).acknowledge_alert(
+        alert_id, actor_id=payload.actor_id
+    )
     if alert is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Allocation alert '{alert_id}' not found.")
-    return {"id": alert.id, "state": alert.state, "acknowledged_at": alert.acknowledged_at}
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Allocation alert '{alert_id}' not found.",
+        )
+    return {
+        "id": alert.id,
+        "state": alert.state,
+        "acknowledged_at": alert.acknowledged_at,
+    }
 
 
 @router.post("/alerts/{alert_id}/resolve")
@@ -127,9 +144,14 @@ def resolve_allocation_alert(
     payload: AlertActionRequest,
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
-    alert = AllocationAlertService(session).resolve_alert(alert_id, actor_id=payload.actor_id)
+    alert = AllocationAlertService(session).resolve_alert(
+        alert_id, actor_id=payload.actor_id
+    )
     if alert is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Allocation alert '{alert_id}' not found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Allocation alert '{alert_id}' not found.",
+        )
     return {"id": alert.id, "state": alert.state, "resolved_at": alert.resolved_at}
 
 
@@ -139,7 +161,9 @@ def list_unresolved_critical_allocation_alerts(
     window_minutes: int | None = Query(default=None, ge=1, le=10_080),
     session: Session = Depends(get_session),
 ) -> list[dict[str, object]]:
-    alerts = AllocationAlertService(session).list_alerts(limit=limit, include_resolved=False, refresh=True, window_minutes=window_minutes)
+    alerts = AllocationAlertService(session).list_alerts(
+        limit=limit, include_resolved=False, refresh=True, window_minutes=window_minutes
+    )
     critical = [alert for alert in alerts if alert.severity == "error"]
     return [
         {

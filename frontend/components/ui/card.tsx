@@ -22,4 +22,3 @@ export function Card({ title, subtitle, children, action, className }: CardProps
     </section>
   );
 }
-

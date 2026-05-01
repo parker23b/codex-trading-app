@@ -21,7 +21,9 @@ from app.services.domain_event_service import domain_event_service
 from app.services.health_service import get_health_service
 from app.services.ig_streaming_service import get_ig_streaming_service
 from app.services.promotion_request_service import PromotionRequestService
-from app.services.strategy_deployment_manager_service import StrategyDeploymentManagerService
+from app.services.strategy_deployment_manager_service import (
+    StrategyDeploymentManagerService,
+)
 from app.services.strategy_service import StrategyService
 from app.services.watchlist_service import get_watchlist_service
 
@@ -71,7 +73,9 @@ class MarketDataService:
         await self._refresh_tier2_once()
 
     async def _process_tier1_fallback_once(self) -> None:
-        active_instruments = list(get_watchlist_service().get_streaming_plan().instruments)
+        active_instruments = list(
+            get_watchlist_service().get_streaming_plan().instruments
+        )
         if not active_instruments:
             return
 
@@ -82,12 +86,16 @@ class MarketDataService:
                 self._update_polling_health_transition(instrument)
                 if not self._should_poll_instrument(instrument):
                     continue
-                instrument_engines = runtime_manager.get_engines_for_instrument(instrument)
+                instrument_engines = runtime_manager.get_engines_for_instrument(
+                    instrument
+                )
                 if not instrument_engines:
                     continue
                 trading_engine = instrument_engines[0][1]
                 try:
-                    market_details = await asyncio.to_thread(trading_engine.broker.get_market_details, instrument)
+                    market_details = await asyncio.to_thread(
+                        trading_engine.broker.get_market_details, instrument
+                    )
                 except IGBrokerError as exc:
                     runtime_manager.set_price_error(instrument, str(exc))
                     logger.error(
@@ -133,15 +141,23 @@ class MarketDataService:
             promotion_service = PromotionRequestService(session)
             for instrument in refresh_plan.instruments:
                 try:
-                    market_details = await asyncio.to_thread(self.broker.get_market_details, instrument)
+                    market_details = await asyncio.to_thread(
+                        self.broker.get_market_details, instrument
+                    )
                 except IGBrokerError as exc:
                     logger.warning(
                         "Tier 2 market refresh failed",
-                        extra={"instrument": instrument, "error": str(exc), "error_type": type(exc).__name__},
+                        extra={
+                            "instrument": instrument,
+                            "error": str(exc),
+                            "error_type": type(exc).__name__,
+                        },
                     )
                     continue
                 refreshed_at = self._now()
-                get_watchlist_service().record_tier2_refresh(instrument=instrument, refreshed_at=refreshed_at)
+                get_watchlist_service().record_tier2_refresh(
+                    instrument=instrument, refreshed_at=refreshed_at
+                )
                 snapshot = ScreeningSnapshot(
                     instrument=instrument,
                     market_details=market_details,
@@ -149,7 +165,13 @@ class MarketDataService:
                     streamed=instrument in refresh_plan.streamed_instruments,
                     source_tier="TIER2",
                 )
-                intents = [intent for intent in (scanner.evaluate(snapshot) for scanner in self._screeners) if intent is not None]
+                intents = [
+                    intent
+                    for intent in (
+                        scanner.evaluate(snapshot) for scanner in self._screeners
+                    )
+                    if intent is not None
+                ]
                 top_intent = max(intents, key=lambda intent: intent.score, default=None)
                 domain_event_service.record_event(
                     event_type="market.tier2_refreshed",
@@ -161,8 +183,12 @@ class MarketDataService:
                     instrument=instrument,
                     payload_json={
                         "scanner_count": len(self._screeners),
-                        "promotion_score": top_intent.score if top_intent is not None else None,
-                        "promotion_source": top_intent.scanner_name if top_intent is not None else None,
+                        "promotion_score": top_intent.score
+                        if top_intent is not None
+                        else None,
+                        "promotion_source": top_intent.scanner_name
+                        if top_intent is not None
+                        else None,
                         "market_status": market_details.market_status,
                         "tradable": market_details.tradable,
                         "streamed": instrument in refresh_plan.streamed_instruments,
@@ -179,10 +205,12 @@ class MarketDataService:
                     reason=top_intent.reason,
                     score=top_intent.score,
                     requested_at=refreshed_at,
-                    expires_at=refreshed_at.replace(tzinfo=UTC) + self._promotion_ttl_delta(),
+                    expires_at=refreshed_at.replace(tzinfo=UTC)
+                    + self._promotion_ttl_delta(),
                     market_status=market_details.market_status,
                     tradable=market_details.tradable,
-                    requested_frequency=top_intent.requested_frequency or self.settings.ig_streaming_requested_frequency,
+                    requested_frequency=top_intent.requested_frequency
+                    or self.settings.ig_streaming_requested_frequency,
                 )
                 domain_event_service.record_event(
                     event_type="coverage.promotion_requested",
@@ -205,8 +233,16 @@ class MarketDataService:
                     created_at=refreshed_at,
                 )
 
-            allocation_result = CoverageAllocatorService(session).allocate_pending_promotions(now=self._now())
-            if any([allocation_result.accepted, allocation_result.rejected, allocation_result.expired]):
+            allocation_result = CoverageAllocatorService(
+                session
+            ).allocate_pending_promotions(now=self._now())
+            if any(
+                [
+                    allocation_result.accepted,
+                    allocation_result.rejected,
+                    allocation_result.expired,
+                ]
+            ):
                 domain_event_service.record_event(
                     event_type="coverage.allocation_cycle_completed",
                     category="coverage",
@@ -223,7 +259,9 @@ class MarketDataService:
                     created_at=self._now(),
                 )
 
-            deployment_result = StrategyDeploymentManagerService(session).reconcile(now=self._now())
+            deployment_result = StrategyDeploymentManagerService(session).reconcile(
+                now=self._now()
+            )
             if any(
                 [
                     deployment_result.deployed,
@@ -271,7 +309,9 @@ class MarketDataService:
             self.health_service.set_stream_connected(False)
             return "no_ticks_seen"
 
-        seconds_since_last_tick = (self._now() - last_tick_at.astimezone(UTC)).total_seconds()
+        seconds_since_last_tick = (
+            self._now() - last_tick_at.astimezone(UTC)
+        ).total_seconds()
         stale_after_seconds = max(
             self.settings.market_data_poll_interval_seconds * 3,
             self.settings.ig_streaming_stale_after_seconds,
@@ -296,21 +336,30 @@ class MarketDataService:
             "stream_enabled": health.enabled,
             "stream_connected": health.connected,
             "subscribed_instruments": list(health.subscribed_instruments),
-            "last_tick_at": health.last_tick_at.isoformat() if health.last_tick_at is not None else None,
+            "last_tick_at": health.last_tick_at.isoformat()
+            if health.last_tick_at is not None
+            else None,
             "instrument_last_tick_at": (
-                instrument_last_tick_at.isoformat() if instrument_last_tick_at is not None else None
+                instrument_last_tick_at.isoformat()
+                if instrument_last_tick_at is not None
+                else None
             ),
         }
         debounce_window = self.settings.ig_streaming_transition_debounce_seconds
 
         if reason is not None:
             self._healthy_first_seen_at.pop(instrument, None)
-            first_seen_at = self._fallback_reason_first_seen_at.setdefault(instrument, now)
+            first_seen_at = self._fallback_reason_first_seen_at.setdefault(
+                instrument, now
+            )
             if (now - first_seen_at).total_seconds() < debounce_window:
                 return
         else:
             self._fallback_reason_first_seen_at.pop(instrument, None)
-            if instrument in self._fallback_active_instruments or instrument in self._stale_stream_instruments:
+            if (
+                instrument in self._fallback_active_instruments
+                or instrument in self._stale_stream_instruments
+            ):
                 healthy_since = self._healthy_first_seen_at.setdefault(instrument, now)
                 if (now - healthy_since).total_seconds() < debounce_window:
                     return
@@ -342,7 +391,10 @@ class MarketDataService:
                 instrument=instrument,
                 payload_json=payload,
             )
-        if reason == "stale_stream" and instrument not in self._stale_stream_instruments:
+        if (
+            reason == "stale_stream"
+            and instrument not in self._stale_stream_instruments
+        ):
             self._stale_stream_instruments.add(instrument)
             domain_event_service.record_event(
                 event_type="health.stream_stale",

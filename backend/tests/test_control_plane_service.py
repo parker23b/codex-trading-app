@@ -24,12 +24,16 @@ from app.services.operational_state_service import (
 )
 from app.services.operational_telemetry_service import OperationalTelemetryService
 from app.services.regime_suitability_service import DeploymentCandidate
-from app.services.strategy_deployment_manager_service import StrategyDeploymentManagerService
+from app.services.strategy_deployment_manager_service import (
+    StrategyDeploymentManagerService,
+)
 from app.services.strategy_governance_service import StrategyGovernanceService
 from app.services.strategy_service import StrategyService
 
 
-def _force_deployable_candidate(manager: StrategyDeploymentManagerService, *, instrument: str) -> None:
+def _force_deployable_candidate(
+    manager: StrategyDeploymentManagerService, *, instrument: str
+) -> None:
     manager.suitability_service.select_best_candidate = lambda **_: DeploymentCandidate(
         instrument=instrument,
         asset_class="INDICES",
@@ -75,7 +79,10 @@ def _enable_live_exit_context(monkeypatch, at: datetime) -> None:
             "get_last_tick_at": lambda self, instrument: now,
         },
     )()
-    monkeypatch.setattr("app.services.operational_state_service.get_operational_streaming_service", lambda: stub)
+    monkeypatch.setattr(
+        "app.services.operational_state_service.get_operational_streaming_service",
+        lambda: stub,
+    )
 
 
 def _attach_open_position(
@@ -124,7 +131,9 @@ def _attach_open_position(
     engine = runtime_manager.get_engine(strategy_name, instrument)
     if engine is not None:
         engine.current_position = position
-    runtime_manager.load_cached_price(instrument, price=position.current_price or position.open_price, updated_at=now)
+    runtime_manager.load_cached_price(
+        instrument, price=position.current_price or position.open_price, updated_at=now
+    )
     runtime = session.exec(
         select(StrategyRuntimeState).where(
             StrategyRuntimeState.strategy_name == strategy_name,
@@ -147,10 +156,21 @@ def test_control_plane_seeds_governance_defaults(session):
 
     assert summary["families"]
     families_by_name = {item["strategy_name"]: item for item in summary["families"]}
-    assert families_by_name["mean_reversion"]["governance"]["approval_state"] == "APPROVED"
-    assert families_by_name["mean_reversion"]["governance"]["autonomous_operation_allowed"] is True
-    assert "default" in families_by_name["mean_reversion"]["governance"]["available_profile_names"]
-    assert "fast" in families_by_name["mean_reversion"]["governance"]["available_profile_names"]
+    assert (
+        families_by_name["mean_reversion"]["governance"]["approval_state"] == "APPROVED"
+    )
+    assert (
+        families_by_name["mean_reversion"]["governance"]["autonomous_operation_allowed"]
+        is True
+    )
+    assert (
+        "default"
+        in families_by_name["mean_reversion"]["governance"]["available_profile_names"]
+    )
+    assert (
+        "fast"
+        in families_by_name["mean_reversion"]["governance"]["available_profile_names"]
+    )
 
 
 def test_control_plane_reports_effective_autonomy_override(session):
@@ -190,7 +210,10 @@ def test_control_plane_summary_exposes_operational_truth_fields(session, monkeyp
             "get_last_tick_at": lambda self, instrument: now - timedelta(seconds=30),
         },
     )()
-    monkeypatch.setattr("app.services.operational_state_service.get_operational_streaming_service", lambda: stub)
+    monkeypatch.setattr(
+        "app.services.operational_state_service.get_operational_streaming_service",
+        lambda: stub,
+    )
 
     summary = ControlPlaneService(session).get_summary()
 
@@ -202,7 +225,9 @@ def test_control_plane_summary_exposes_operational_truth_fields(session, monkeyp
     assert summary["entry_block_reason"] == "polling_fallback_active"
 
 
-def test_governance_service_upgrades_legacy_default_false_to_allowed(session, fixed_now):
+def test_governance_service_upgrades_legacy_default_false_to_allowed(
+    session, fixed_now
+):
     governance_service = StrategyGovernanceService(session)
     legacy = StrategyFamilyGovernance(
         strategy_name="mean_reversion",
@@ -229,7 +254,9 @@ def test_governance_service_upgrades_legacy_default_false_to_allowed(session, fi
     assert promoted.autonomous_operation_allowed is True
 
 
-def test_reconcile_auto_deploys_approved_autonomous_strategy(session, broker, fixed_now):
+def test_reconcile_auto_deploys_approved_autonomous_strategy(
+    session, broker, fixed_now
+):
     health_service = get_health_service()
     health_service.update_broker_state(connected=True, latency_ms=2.0)
     health_service.set_stream_connected(True)
@@ -250,10 +277,14 @@ def test_reconcile_auto_deploys_approved_autonomous_strategy(session, broker, fi
     result = manager.reconcile(now=fixed_now)
 
     deployment = session.exec(
-        select(StrategyDeployment).where(StrategyDeployment.strategy_name == "mean_reversion")
+        select(StrategyDeployment).where(
+            StrategyDeployment.strategy_name == "mean_reversion"
+        )
     ).one()
     runtime = session.exec(
-        select(StrategyRuntimeState).where(StrategyRuntimeState.strategy_name == "mean_reversion")
+        select(StrategyRuntimeState).where(
+            StrategyRuntimeState.strategy_name == "mean_reversion"
+        )
     ).one()
 
     assert result.deployed >= 1
@@ -266,7 +297,9 @@ def test_reconcile_auto_deploys_approved_autonomous_strategy(session, broker, fi
     assert runtime.deployment_id == deployment.id
     assert runtime.active_profile_name == "fast"
     assert runtime.parameters["window_size"] == 12
-    assert runtime_manager.get_engine("mean_reversion", "IX.D.FTSE.DAILY.IP") is not None
+    assert (
+        runtime_manager.get_engine("mean_reversion", "IX.D.FTSE.DAILY.IP") is not None
+    )
     engine = runtime_manager.get_engine("mean_reversion", "IX.D.FTSE.DAILY.IP")
     assert engine is not None
     assert engine.active_profile_name == "fast"
@@ -274,22 +307,31 @@ def test_reconcile_auto_deploys_approved_autonomous_strategy(session, broker, fi
     assert getattr(engine.strategy, "window_size") == 12
 
     strategy_summary = next(
-        strategy for strategy in StrategyService(session).list_strategies()
+        strategy
+        for strategy in StrategyService(session).list_strategies()
         if strategy["name"] == "mean_reversion"
     )
     assert strategy_summary["deployment_profile"] == "fast"
     assert strategy_summary["deployment_parameters"]["window_size"] == 12
-    assert next(
-        parameter for parameter in strategy_summary["parameters"]
-        if parameter["key"] == "window_size"
-    )["value"] == 12
-    control_plane_family = ControlPlaneService(session).get_family_detail("mean_reversion")
+    assert (
+        next(
+            parameter
+            for parameter in strategy_summary["parameters"]
+            if parameter["key"] == "window_size"
+        )["value"]
+        == 12
+    )
+    control_plane_family = ControlPlaneService(session).get_family_detail(
+        "mean_reversion"
+    )
     assert control_plane_family["deployment"]["selected_profile"] == "fast"
     assert control_plane_family["runtime"]["active_profile_name"] == "fast"
     assert control_plane_family["alignment"]["is_aligned"] is True
 
 
-def test_reconcile_emergency_stop_blocks_and_stops_auto_runtime(session, broker, fixed_now):
+def test_reconcile_emergency_stop_blocks_and_stops_auto_runtime(
+    session, broker, fixed_now
+):
     health_service = get_health_service()
     health_service.update_broker_state(connected=True, latency_ms=2.0)
     health_service.set_stream_connected(True)
@@ -315,10 +357,14 @@ def test_reconcile_emergency_stop_blocks_and_stops_auto_runtime(session, broker,
     result = manager.reconcile(now=fixed_now.replace(tzinfo=UTC))
 
     deployment = session.exec(
-        select(StrategyDeployment).where(StrategyDeployment.strategy_name == "mean_reversion")
+        select(StrategyDeployment).where(
+            StrategyDeployment.strategy_name == "mean_reversion"
+        )
     ).one()
     runtime = session.exec(
-        select(StrategyRuntimeState).where(StrategyRuntimeState.strategy_name == "mean_reversion")
+        select(StrategyRuntimeState).where(
+            StrategyRuntimeState.strategy_name == "mean_reversion"
+        )
     ).one()
 
     assert result.emergency_stopped >= 1
@@ -329,7 +375,9 @@ def test_reconcile_emergency_stop_blocks_and_stops_auto_runtime(session, broker,
     assert runtime_manager.get_engine("mean_reversion", "IX.D.FTSE.DAILY.IP") is None
 
 
-def test_profile_change_restarts_autonomous_runtime_with_new_parameters(session, broker, fixed_now):
+def test_profile_change_restarts_autonomous_runtime_with_new_parameters(
+    session, broker, fixed_now
+):
     health_service = get_health_service()
     health_service.update_broker_state(connected=True, latency_ms=2.0)
     health_service.set_stream_connected(True)
@@ -349,7 +397,9 @@ def test_profile_change_restarts_autonomous_runtime_with_new_parameters(session,
     manager.reconcile(now=fixed_now)
 
     first_runtime = session.exec(
-        select(StrategyRuntimeState).where(StrategyRuntimeState.strategy_name == "mean_reversion")
+        select(StrategyRuntimeState).where(
+            StrategyRuntimeState.strategy_name == "mean_reversion"
+        )
     ).one()
     first_runtime_id = first_runtime.runtime_id
     assert first_runtime.active_profile_name == "default"
@@ -362,12 +412,18 @@ def test_profile_change_restarts_autonomous_runtime_with_new_parameters(session,
     manager.reconcile(now=fixed_now.replace(tzinfo=UTC))
 
     deployment = session.exec(
-        select(StrategyDeployment).where(StrategyDeployment.strategy_name == "mean_reversion")
+        select(StrategyDeployment).where(
+            StrategyDeployment.strategy_name == "mean_reversion"
+        )
     ).one()
     runtimes = session.exec(
-        select(StrategyRuntimeState).where(StrategyRuntimeState.strategy_name == "mean_reversion")
+        select(StrategyRuntimeState).where(
+            StrategyRuntimeState.strategy_name == "mean_reversion"
+        )
     ).all()
-    active_runtime = next(runtime for runtime in runtimes if runtime.status == "RUNNING")
+    active_runtime = next(
+        runtime for runtime in runtimes if runtime.status == "RUNNING"
+    )
 
     assert deployment.selected_profile == "fast"
     assert deployment.profile_change_reason is not None
@@ -401,10 +457,16 @@ def test_control_plane_reports_runtime_deployment_mismatch(session, broker, fixe
     manager.reconcile(now=fixed_now)
 
     runtime = session.exec(
-        select(StrategyRuntimeState).where(StrategyRuntimeState.strategy_name == "mean_reversion")
+        select(StrategyRuntimeState).where(
+            StrategyRuntimeState.strategy_name == "mean_reversion"
+        )
     ).one()
     runtime.active_profile_name = "default"
-    runtime.parameters = {"window_size": 20, "entry_threshold": 0.0015, "exit_threshold": 0.0004}
+    runtime.parameters = {
+        "window_size": 20,
+        "entry_threshold": 0.0015,
+        "exit_threshold": 0.0004,
+    }
     session.add(runtime)
     session.commit()
 
@@ -418,7 +480,9 @@ def test_control_plane_reports_runtime_deployment_mismatch(session, broker, fixe
     )
 
 
-def test_reconcile_keeps_open_positions_in_exits_only_when_family_leaves_full_auto(session, broker, fixed_now, monkeypatch):
+def test_reconcile_keeps_open_positions_in_exits_only_when_family_leaves_full_auto(
+    session, broker, fixed_now, monkeypatch
+):
     _enable_live_exit_context(monkeypatch, fixed_now)
     governance_service = StrategyGovernanceService(session)
     governance_service.ensure_defaults()
@@ -440,14 +504,20 @@ def test_reconcile_keeps_open_positions_in_exits_only_when_family_leaves_full_au
         at=fixed_now,
     )
 
-    governance_service.upsert_strategy(strategy_name="mean_reversion", emergency_stop=True)
+    governance_service.upsert_strategy(
+        strategy_name="mean_reversion", emergency_stop=True
+    )
     manager.reconcile(now=fixed_now + timedelta(minutes=1))
 
     deployment = session.exec(
-        select(StrategyDeployment).where(StrategyDeployment.strategy_name == "mean_reversion")
+        select(StrategyDeployment).where(
+            StrategyDeployment.strategy_name == "mean_reversion"
+        )
     ).one()
     runtime = session.exec(
-        select(StrategyRuntimeState).where(StrategyRuntimeState.strategy_name == "mean_reversion")
+        select(StrategyRuntimeState).where(
+            StrategyRuntimeState.strategy_name == "mean_reversion"
+        )
     ).one()
     family = ControlPlaneService(session).get_family_detail("mean_reversion")
     telemetry = OperationalTelemetryService(session).get_summary()
@@ -456,14 +526,21 @@ def test_reconcile_keeps_open_positions_in_exits_only_when_family_leaves_full_au
     assert deployment.open_risk_management_state == "EXITS_ONLY"
     assert runtime.status == "RUNNING"
     assert runtime.runtime_mode == "EXITS_ONLY"
-    assert runtime_manager.get_engine("mean_reversion", "IX.D.FTSE.DAILY.IP") is not None
-    assert runtime_manager.get_engine("mean_reversion", "IX.D.FTSE.DAILY.IP").runtime_mode == "EXITS_ONLY"
+    assert (
+        runtime_manager.get_engine("mean_reversion", "IX.D.FTSE.DAILY.IP") is not None
+    )
+    assert (
+        runtime_manager.get_engine("mean_reversion", "IX.D.FTSE.DAILY.IP").runtime_mode
+        == "EXITS_ONLY"
+    )
     assert family["runtime"]["runtime_mode"] == "EXITS_ONLY"
     assert family["deployment"]["open_risk_management_state"] == "EXITS_ONLY"
     assert telemetry["open_risk_management_state"] == "EXITS_ONLY"
 
 
-def test_reconcile_flags_unmanaged_open_risk_when_exits_not_eligible(session, broker, fixed_now, monkeypatch):
+def test_reconcile_flags_unmanaged_open_risk_when_exits_not_eligible(
+    session, broker, fixed_now, monkeypatch
+):
     _enable_live_exit_context(monkeypatch, fixed_now)
     governance_service = StrategyGovernanceService(session)
     governance_service.ensure_defaults()
@@ -498,16 +575,24 @@ def test_reconcile_flags_unmanaged_open_risk_when_exits_not_eligible(session, br
         open_risk_management_reason="broker_disconnected",
     )
     manager.operational_state_service.get_summary = lambda: blocked_snapshot
-    manager.operational_state_service.get_summary_for_instrument = lambda instrument: blocked_snapshot
+    manager.operational_state_service.get_summary_for_instrument = lambda instrument: (
+        blocked_snapshot
+    )
 
-    governance_service.upsert_strategy(strategy_name="mean_reversion", emergency_stop=True)
+    governance_service.upsert_strategy(
+        strategy_name="mean_reversion", emergency_stop=True
+    )
     manager.reconcile(now=fixed_now + timedelta(minutes=1))
 
     deployment = session.exec(
-        select(StrategyDeployment).where(StrategyDeployment.strategy_name == "mean_reversion")
+        select(StrategyDeployment).where(
+            StrategyDeployment.strategy_name == "mean_reversion"
+        )
     ).one()
     runtime = session.exec(
-        select(StrategyRuntimeState).where(StrategyRuntimeState.strategy_name == "mean_reversion")
+        select(StrategyRuntimeState).where(
+            StrategyRuntimeState.strategy_name == "mean_reversion"
+        )
     ).one()
     summary = ControlPlaneService(session).get_summary()
     family = ControlPlaneService(session).get_family_detail("mean_reversion")
@@ -524,7 +609,9 @@ def test_reconcile_flags_unmanaged_open_risk_when_exits_not_eligible(session, br
     assert "open position" in (deployment.open_risk_management_reason or "").lower()
 
 
-def test_reconcile_rotation_keeps_old_open_risk_exit_capable(session, broker, fixed_now, monkeypatch):
+def test_reconcile_rotation_keeps_old_open_risk_exit_capable(
+    session, broker, fixed_now, monkeypatch
+):
     now = datetime.now(UTC)
     _enable_live_exit_context(monkeypatch, fixed_now)
     governance_service = StrategyGovernanceService(session)
@@ -553,11 +640,15 @@ def test_reconcile_rotation_keeps_old_open_risk_exit_capable(session, broker, fi
     manager.reconcile(now=fixed_now + timedelta(minutes=1))
 
     deployment = session.exec(
-        select(StrategyDeployment).where(StrategyDeployment.strategy_name == "mean_reversion")
+        select(StrategyDeployment).where(
+            StrategyDeployment.strategy_name == "mean_reversion"
+        )
     ).one()
     runtimes = list(
         session.exec(
-            select(StrategyRuntimeState).where(StrategyRuntimeState.strategy_name == "mean_reversion")
+            select(StrategyRuntimeState).where(
+                StrategyRuntimeState.strategy_name == "mean_reversion"
+            )
         )
     )
     runtimes_by_instrument = {runtime.instrument: runtime for runtime in runtimes}
@@ -571,7 +662,9 @@ def test_reconcile_rotation_keeps_old_open_risk_exit_capable(session, broker, fi
     assert runtimes_by_instrument["IX.D.DAX.DAILY.IP"].runtime_mode == "NORMAL"
 
 
-def test_reconcile_uses_instrument_specific_exit_eligibility(session, broker, fixed_now, monkeypatch):
+def test_reconcile_uses_instrument_specific_exit_eligibility(
+    session, broker, fixed_now, monkeypatch
+):
     now = datetime.now(UTC)
     _enable_live_exit_context(monkeypatch, fixed_now)
     governance_service = StrategyGovernanceService(session)
@@ -593,7 +686,9 @@ def test_reconcile_uses_instrument_specific_exit_eligibility(session, broker, fi
         instrument="IX.D.FTSE.DAILY.IP",
         at=fixed_now,
     )
-    runtime_manager.load_cached_price("IX.D.FTSE.DAILY.IP", price=100.0, updated_at=now - timedelta(seconds=30))
+    runtime_manager.load_cached_price(
+        "IX.D.FTSE.DAILY.IP", price=100.0, updated_at=now - timedelta(seconds=30)
+    )
 
     stale_snapshot = OperationalStateSnapshot(
         feed_source_state=FeedSourceState.STALE,
@@ -608,16 +703,24 @@ def test_reconcile_uses_instrument_specific_exit_eligibility(session, broker, fi
         open_risk_management_state=OpenRiskManagementState.UNMANAGED_OPEN_RISK,
         open_risk_management_reason="stale_price_data",
     )
-    manager.operational_state_service.get_summary_for_instrument = lambda instrument: stale_snapshot
+    manager.operational_state_service.get_summary_for_instrument = lambda instrument: (
+        stale_snapshot
+    )
 
-    governance_service.upsert_strategy(strategy_name="mean_reversion", emergency_stop=True)
+    governance_service.upsert_strategy(
+        strategy_name="mean_reversion", emergency_stop=True
+    )
     manager.reconcile(now=fixed_now + timedelta(minutes=1))
 
     deployment = session.exec(
-        select(StrategyDeployment).where(StrategyDeployment.strategy_name == "mean_reversion")
+        select(StrategyDeployment).where(
+            StrategyDeployment.strategy_name == "mean_reversion"
+        )
     ).one()
     runtime = session.exec(
-        select(StrategyRuntimeState).where(StrategyRuntimeState.strategy_name == "mean_reversion")
+        select(StrategyRuntimeState).where(
+            StrategyRuntimeState.strategy_name == "mean_reversion"
+        )
     ).one()
 
     assert deployment.open_risk_management_state == "UNMANAGED_OPEN_RISK"
@@ -625,7 +728,9 @@ def test_reconcile_uses_instrument_specific_exit_eligibility(session, broker, fi
     assert runtime.status == "STOPPED"
 
 
-def test_reconcile_preserves_selected_runtime_exits_only_after_partial_fill(session, broker, fixed_now, monkeypatch):
+def test_reconcile_preserves_selected_runtime_exits_only_after_partial_fill(
+    session, broker, fixed_now, monkeypatch
+):
     _enable_live_exit_context(monkeypatch, fixed_now)
     governance_service = StrategyGovernanceService(session)
     governance_service.ensure_defaults()
@@ -695,4 +800,9 @@ def test_reconcile_preserves_selected_runtime_exits_only_after_partial_fill(sess
 
     assert runtime_after.status == "RUNNING"
     assert runtime_after.runtime_mode == "EXITS_ONLY"
-    assert runtime_manager.get_engine("smoke_test_hold", "CS.D.EURUSD.MINI.IP").runtime_mode == "EXITS_ONLY"
+    assert (
+        runtime_manager.get_engine(
+            "smoke_test_hold", "CS.D.EURUSD.MINI.IP"
+        ).runtime_mode
+        == "EXITS_ONLY"
+    )

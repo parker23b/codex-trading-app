@@ -7,11 +7,19 @@ from sqlmodel import select
 from app.models.domain_event import DomainEvent
 from app.models.review import GeneratedReviewRecord
 from app.models.runtime import StrategyRuntimeState
-from app.models.trade import Execution, Position, ReconciliationEvent, Trade, TradeIntent
+from app.models.trade import (
+    Execution,
+    Position,
+    ReconciliationEvent,
+    Trade,
+    TradeIntent,
+)
 from app.services.history_reset_service import HistoryResetService
 
 
-def test_clear_test_history_removes_persisted_history_but_keeps_active_state(session, fixed_now):
+def test_clear_test_history_removes_persisted_history_but_keeps_active_state(
+    session, fixed_now
+):
     session.add(
         Trade(
             strategy_name="mean_reversion",

@@ -8,7 +8,9 @@ from app.services.broker_service import BrokerService
 from app.services.trade_service import TradeService
 
 
-def test_reconcile_positions_falls_back_to_local_positions_when_broker_unavailable(session, broker, fixed_now):
+def test_reconcile_positions_falls_back_to_local_positions_when_broker_unavailable(
+    session, broker, fixed_now
+):
     trade_service = TradeService(session)
     local_position = trade_service.record_broker_position(
         Position(
@@ -27,7 +29,9 @@ def test_reconcile_positions_falls_back_to_local_positions_when_broker_unavailab
     )
 
     broker.remote_positions = []
-    broker.get_positions = lambda: (_ for _ in ()).throw(IGBrokerError("Unable to reach IG API: timeout"))
+    broker.get_positions = lambda: (_ for _ in ()).throw(
+        IGBrokerError("Unable to reach IG API: timeout")
+    )
 
     positions = BrokerService().reconcile_positions(session)
 

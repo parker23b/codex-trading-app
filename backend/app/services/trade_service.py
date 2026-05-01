@@ -20,7 +20,9 @@ from app.services.domain_event_service import domain_event_service
 
 
 class ActiveTradeIntentConflictError(RuntimeError):
-    def __init__(self, *, instrument: str, conflicting_intent_id: int | None = None) -> None:
+    def __init__(
+        self, *, instrument: str, conflicting_intent_id: int | None = None
+    ) -> None:
         self.instrument = instrument
         self.conflicting_intent_id = conflicting_intent_id
         message = f"Instrument {instrument} already has an active trade intent."
@@ -51,11 +53,17 @@ class TradeService:
         return list(self.session.exec(statement).all())
 
     def list_positions(self) -> list[Position]:
-        statement = select(Position).where(Position.is_open.is_(True)).order_by(desc(Position.open_time))
+        statement = (
+            select(Position)
+            .where(Position.is_open.is_(True))
+            .order_by(desc(Position.open_time))
+        )
         return list(self.session.exec(statement).all())
 
     def list_executions(self, *, limit: int = 100) -> list[Execution]:
-        statement = select(Execution).order_by(desc(Execution.last_transition_at)).limit(limit)
+        statement = (
+            select(Execution).order_by(desc(Execution.last_transition_at)).limit(limit)
+        )
         return list(self.session.exec(statement).all())
 
     def list_executions_for_trade_intent(self, trade_intent_id: int) -> list[Execution]:
@@ -66,7 +74,9 @@ class TradeService:
         )
         return list(self.session.exec(statement).all())
 
-    def get_latest_execution_for_trade_intent(self, trade_intent_id: int) -> Execution | None:
+    def get_latest_execution_for_trade_intent(
+        self, trade_intent_id: int
+    ) -> Execution | None:
         statement = (
             select(Execution)
             .where(Execution.trade_intent_id == trade_intent_id)
@@ -88,7 +98,9 @@ class TradeService:
     ) -> list[TradeIntent]:
         statement = select(TradeIntent)
         if allocation_cycle_id is not None:
-            statement = statement.where(TradeIntent.allocation_cycle_id == allocation_cycle_id)
+            statement = statement.where(
+                TradeIntent.allocation_cycle_id == allocation_cycle_id
+            )
         if strategy_name is not None:
             statement = statement.where(TradeIntent.strategy_name == strategy_name)
         if instrument is not None:
@@ -109,7 +121,11 @@ class TradeService:
         date_to: datetime | None = None,
         limit: int = 250,
     ) -> list[ReconciliationEvent]:
-        statement = select(ReconciliationEvent).order_by(desc(ReconciliationEvent.created_at)).limit(limit)
+        statement = (
+            select(ReconciliationEvent)
+            .order_by(desc(ReconciliationEvent.created_at))
+            .limit(limit)
+        )
         if date_from:
             statement = statement.where(ReconciliationEvent.created_at >= date_from)
         if date_to:
@@ -164,7 +180,9 @@ class TradeService:
                 )
                 raise ActiveTradeIntentConflictError(
                     instrument=intent.instrument,
-                    conflicting_intent_id=conflicting.id if conflicting is not None else None,
+                    conflicting_intent_id=conflicting.id
+                    if conflicting is not None
+                    else None,
                 ) from exc
             raise
 
@@ -173,14 +191,20 @@ class TradeService:
         return self.session.exec(statement).first()
 
     def list_allocation_cycles(self, *, limit: int = 100) -> list[AllocationCycle]:
-        statement = select(AllocationCycle).order_by(desc(AllocationCycle.received_at), desc(AllocationCycle.id)).limit(limit)
+        statement = (
+            select(AllocationCycle)
+            .order_by(desc(AllocationCycle.received_at), desc(AllocationCycle.id))
+            .limit(limit)
+        )
         return list(self.session.exec(statement).all())
 
     def get_allocation_cycle(self, cycle_id: str) -> AllocationCycle | None:
         statement = select(AllocationCycle).where(AllocationCycle.cycle_id == cycle_id)
         return self.session.exec(statement).first()
 
-    def record_allocation_cycle(self, allocation_cycle: AllocationCycle) -> AllocationCycle:
+    def record_allocation_cycle(
+        self, allocation_cycle: AllocationCycle
+    ) -> AllocationCycle:
         self.session.add(allocation_cycle)
         self.session.commit()
         self.session.refresh(allocation_cycle)
@@ -195,7 +219,9 @@ class TradeService:
         statement = select(AllocationAlert)
         if states:
             statement = statement.where(AllocationAlert.state.in_(tuple(states)))
-        statement = statement.order_by(desc(AllocationAlert.updated_at), desc(AllocationAlert.id)).limit(limit)
+        statement = statement.order_by(
+            desc(AllocationAlert.updated_at), desc(AllocationAlert.id)
+        ).limit(limit)
         return list(self.session.exec(statement).all())
 
     def get_allocation_alert(self, alert_id: int) -> AllocationAlert | None:
@@ -203,7 +229,9 @@ class TradeService:
         return self.session.exec(statement).first()
 
     def get_allocation_alert_by_key(self, alert_key: str) -> AllocationAlert | None:
-        statement = select(AllocationAlert).where(AllocationAlert.alert_key == alert_key)
+        statement = select(AllocationAlert).where(
+            AllocationAlert.alert_key == alert_key
+        )
         return self.session.exec(statement).first()
 
     def upsert_allocation_alert(self, alert: AllocationAlert) -> AllocationAlert:
@@ -212,8 +240,12 @@ class TradeService:
         self.session.refresh(alert)
         return alert
 
-    def find_active_trade_intent_for_instrument(self, instrument: str) -> TradeIntent | None:
-        return self.find_active_trade_intent_for_instrument_excluding(instrument, exclude_intent_id=None)
+    def find_active_trade_intent_for_instrument(
+        self, instrument: str
+    ) -> TradeIntent | None:
+        return self.find_active_trade_intent_for_instrument_excluding(
+            instrument, exclude_intent_id=None
+        )
 
     def find_active_trade_intent_for_instrument_excluding(
         self,
@@ -255,7 +287,9 @@ class TradeService:
         if instrument is not None:
             statement = statement.where(TradeIntent.instrument == instrument)
         if broker_reference is not None:
-            statement = statement.where(TradeIntent.broker_reference == broker_reference)
+            statement = statement.where(
+                TradeIntent.broker_reference == broker_reference
+            )
         if position_id is not None:
             statement = statement.where(TradeIntent.position_id == position_id)
         statement = statement.order_by(desc(TradeIntent.updated_at))
@@ -282,7 +316,9 @@ class TradeService:
             ),
         )
         if broker_reference is not None:
-            statement = statement.where(TradeIntent.broker_reference == broker_reference)
+            statement = statement.where(
+                TradeIntent.broker_reference == broker_reference
+            )
         if position_id is not None:
             statement = statement.where(TradeIntent.position_id == position_id)
         statement = statement.order_by(desc(TradeIntent.updated_at))
@@ -419,7 +455,9 @@ class TradeService:
                 )
                 raise ActiveTradeIntentConflictError(
                     instrument=intent.instrument,
-                    conflicting_intent_id=conflicting.id if conflicting is not None else None,
+                    conflicting_intent_id=conflicting.id
+                    if conflicting is not None
+                    else None,
                 ) from exc
             raise
 
@@ -429,8 +467,12 @@ class TradeService:
         self.session.refresh(execution)
         return execution
 
-    def find_execution_by_client_request_id(self, client_request_id: str) -> Execution | None:
-        statement = select(Execution).where(Execution.client_request_id == client_request_id)
+    def find_execution_by_client_request_id(
+        self, client_request_id: str
+    ) -> Execution | None:
+        statement = select(Execution).where(
+            Execution.client_request_id == client_request_id
+        )
         return self.session.exec(statement).first()
 
     def find_latest_execution_for_action(
@@ -480,8 +522,12 @@ class TradeService:
         details: dict[str, object] | None = None,
     ) -> Execution:
         previous_status = execution.status
-        execution.status = status.value if isinstance(status, ExecutionStatus) else status
-        execution.last_transition_at = completed_at or acknowledged_at or submitted_at or utc_now()
+        execution.status = (
+            status.value if isinstance(status, ExecutionStatus) else status
+        )
+        execution.last_transition_at = (
+            completed_at or acknowledged_at or submitted_at or utc_now()
+        )
         execution.updated_at = utc_now()
         if trade_intent_id is not None:
             execution.trade_intent_id = trade_intent_id
@@ -613,13 +659,23 @@ class TradeService:
         broker_confirmed_at: datetime | None = None,
     ) -> Position:
         position.is_open = False
-        position.close_price = close_price if close_price is not None else position.close_price
-        position.close_time = close_time if close_time is not None else position.close_time
+        position.close_price = (
+            close_price if close_price is not None else position.close_price
+        )
+        position.close_time = (
+            close_time if close_time is not None else position.close_time
+        )
         position.pnl = pnl if pnl is not None else position.pnl
-        position.current_price = position.close_price if position.close_price is not None else position.current_price
+        position.current_price = (
+            position.close_price
+            if position.close_price is not None
+            else position.current_price
+        )
         position.unrealized_pnl = 0.0
         position.broker_sync_status = broker_sync_status
-        position.broker_closed_confirmed_at = broker_confirmed_at or position.close_time or utc_now()
+        position.broker_closed_confirmed_at = (
+            broker_confirmed_at or position.close_time or utc_now()
+        )
         position.last_reconciled_at = utc_now()
         if close_reason is not None:
             position.reason = close_reason
@@ -654,7 +710,9 @@ class TradeService:
         return event
 
     @staticmethod
-    def _record_execution_domain_event(execution: Execution, *, previous_status: str | None) -> None:
+    def _record_execution_domain_event(
+        execution: Execution, *, previous_status: str | None
+    ) -> None:
         if previous_status == execution.status:
             return
 
@@ -725,8 +783,16 @@ class TradeService:
             severity=str(event_metadata["severity"]),
             error_type=(
                 execution.error_code
-                or ("ManualReviewRequired" if execution.status == ExecutionStatus.NEEDS_MANUAL_REVIEW.value else None)
-                or ("ExecutionFailed" if execution.status == ExecutionStatus.FAILED.value else None)
+                or (
+                    "ManualReviewRequired"
+                    if execution.status == ExecutionStatus.NEEDS_MANUAL_REVIEW.value
+                    else None
+                )
+                or (
+                    "ExecutionFailed"
+                    if execution.status == ExecutionStatus.FAILED.value
+                    else None
+                )
             ),
             source="trade_service.transition_execution",
             title=str(event_metadata["title"]),

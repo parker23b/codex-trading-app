@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlmodel import Session
@@ -18,5 +16,7 @@ class CoverageSummaryResponse(BaseModel):
 
 
 @router.get("/coverage/summary", response_model=CoverageSummaryResponse)
-def get_coverage_summary(session: Session = Depends(get_session)) -> CoverageSummaryResponse:
+def get_coverage_summary(
+    session: Session = Depends(get_session),
+) -> CoverageSummaryResponse:
     return CoverageSummaryResponse(**CoverageService(session).get_summary())

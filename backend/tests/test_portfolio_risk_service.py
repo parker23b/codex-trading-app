@@ -5,7 +5,6 @@ from datetime import timedelta
 from app.core.broker import OrderDirection
 from app.core.runtime import runtime_manager
 from app.core.signals import EntrySignal, SignalKind, SignalStatus
-from app.models.runtime import StrategyRuntimeState
 from app.models.trade import Position, TradeIntent, TradeIntentState
 from app.services.portfolio_risk_service import PortfolioRiskService
 from app.services.runtime_state_service import RuntimeStateService
@@ -32,10 +31,14 @@ def make_entry_signal(*, signal_at, observed_price: float = 100.0) -> EntrySigna
 
 
 def test_assess_entry_rejects_stale_market_data(session, fixed_now):
-    runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now - timedelta(seconds=30)
+    runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now - timedelta(
+        seconds=30
+    )
     signal = make_entry_signal(signal_at=fixed_now)
 
-    result = PortfolioRiskService(session).assess_entry(signal, open_positions=[], trades=[])
+    result = PortfolioRiskService(session).assess_entry(
+        signal, open_positions=[], trades=[]
+    )
 
     assert result.status is SignalStatus.REJECTED
     assert result.rejection_layer == "market_quality"
@@ -50,7 +53,9 @@ def test_assess_entry_rejects_stale_market_data(session, fixed_now):
     assert stale_check["reason"] == "Latest price update is stale."
 
 
-def test_assess_entry_rejects_duplicate_signal_within_suppression_window(session, fixed_now, monkeypatch):
+def test_assess_entry_rejects_duplicate_signal_within_suppression_window(
+    session, fixed_now, monkeypatch
+):
     runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
     recent_intent = TradeIntent(
         strategy_name="mean_reversion",
@@ -68,7 +73,9 @@ def test_assess_entry_rejects_duplicate_signal_within_suppression_window(session
     signal = make_entry_signal(signal_at=fixed_now)
     signal.strategy_name = "mean_reversion"
 
-    result = PortfolioRiskService(session).assess_entry(signal, open_positions=[], trades=[])
+    result = PortfolioRiskService(session).assess_entry(
+        signal, open_positions=[], trades=[]
+    )
 
     assert result.status is SignalStatus.REJECTED
     assert result.rejection_layer == "pre_trade"
@@ -83,7 +90,9 @@ def test_assess_entry_rejects_duplicate_signal_within_suppression_window(session
     assert duplicate_check["actual"] == 1
 
 
-def test_assess_entry_uses_trade_intent_failures_for_retry_cooldown(session, fixed_now, monkeypatch):
+def test_assess_entry_uses_trade_intent_failures_for_retry_cooldown(
+    session, fixed_now, monkeypatch
+):
     runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
     failed_intent = TradeIntent(
         strategy_name="mean_reversion",
@@ -101,7 +110,9 @@ def test_assess_entry_uses_trade_intent_failures_for_retry_cooldown(session, fix
     signal = make_entry_signal(signal_at=fixed_now)
     signal.strategy_name = "mean_reversion"
 
-    result = PortfolioRiskService(session).assess_entry(signal, open_positions=[], trades=[])
+    result = PortfolioRiskService(session).assess_entry(
+        signal, open_positions=[], trades=[]
+    )
 
     assert result.status is SignalStatus.REJECTED
     assert result.rejection_layer == "pre_trade"
@@ -135,7 +146,9 @@ def test_assess_entry_rejects_projected_open_risk_breach(session, fixed_now):
     signal.strategy_name = "mean_reversion"
     signal.risk_percent = 1.0
 
-    result = PortfolioRiskService(session).assess_entry(signal, open_positions=[existing_position], trades=[])
+    result = PortfolioRiskService(session).assess_entry(
+        signal, open_positions=[existing_position], trades=[]
+    )
 
     assert result.status is SignalStatus.REJECTED
     assert result.rejection_layer == "portfolio"
@@ -192,7 +205,9 @@ def test_assess_entry_rejects_when_runtime_is_marked_unhealthy(session, fixed_no
     )
     signal = make_entry_signal(signal_at=fixed_now)
 
-    result = PortfolioRiskService(session).assess_entry(signal, open_positions=[], trades=[])
+    result = PortfolioRiskService(session).assess_entry(
+        signal, open_positions=[], trades=[]
+    )
 
     assert result.status is SignalStatus.REJECTED
     assert result.rejection_layer == "platform_health"

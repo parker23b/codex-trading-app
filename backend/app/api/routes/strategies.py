@@ -16,8 +16,12 @@ class StartStrategyRequest(BaseModel):
 
 
 class StopStrategyRequest(BaseModel):
-    instrument: str | None = Field(default=None, description="Instrument currently being managed.")
-    strategy_name: str | None = Field(default=None, description="Optional strategy name to target a specific runtime.")
+    instrument: str | None = Field(
+        default=None, description="Instrument currently being managed."
+    )
+    strategy_name: str | None = Field(
+        default=None, description="Optional strategy name to target a specific runtime."
+    )
 
 
 class StrategyControlResponse(BaseModel):
@@ -91,7 +95,10 @@ def stop_strategy(
         instrument=payload.instrument,
         actor_type="operator",
         actor_id="api",
-        payload_json={"strategy_name": payload.strategy_name, "instrument": payload.instrument},
+        payload_json={
+            "strategy_name": payload.strategy_name,
+            "instrument": payload.instrument,
+        },
     )
 
     return {"status": "stopped"}
@@ -106,13 +113,18 @@ def start_strategy_by_name(
     strategies = {strategy["name"]: strategy for strategy in service.list_strategies()}
     strategy = strategies.get(name)
     if strategy is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Strategy '{name}' not found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Strategy '{name}' not found.",
+        )
 
     instrument = str(strategy["instrument"])
     try:
         service.start_strategy(strategy_name=name, instrument=instrument)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
     engine = runtime_manager.get_engine(name, instrument)
     domain_event_service.record_event(
         event_type="operator.runtime_started",
@@ -127,7 +139,9 @@ def start_strategy_by_name(
         actor_type="operator",
         actor_id="api",
     )
-    return StrategyControlResponse(status="started", strategy=name, instrument=instrument)
+    return StrategyControlResponse(
+        status="started", strategy=name, instrument=instrument
+    )
 
 
 @router.post("/strategies/{name}/stop", response_model=StrategyControlResponse)
@@ -139,13 +153,18 @@ def stop_strategy_by_name(
     strategies = {strategy["name"]: strategy for strategy in service.list_strategies()}
     strategy = strategies.get(name)
     if strategy is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Strategy '{name}' not found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Strategy '{name}' not found.",
+        )
 
     instrument = str(strategy["instrument"])
     try:
         service.stop_strategy(strategy_name=name)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
     domain_event_service.record_event(
         event_type="operator.runtime_stopped",
         category="operator",
@@ -158,4 +177,6 @@ def stop_strategy_by_name(
         actor_type="operator",
         actor_id="api",
     )
-    return StrategyControlResponse(status="stopped", strategy=name, instrument=instrument)
+    return StrategyControlResponse(
+        status="stopped", strategy=name, instrument=instrument
+    )

@@ -10,7 +10,9 @@ from app.models.runtime import StrategyRuntimeState
 from app.models.strategy_deployment import StrategyDeployment
 from app.services.operator_control_service import OperatorControlService
 from app.services.operational_state_service import OperationalStateService
-from app.services.strategy_deployment_manager_service import StrategyDeploymentManagerService
+from app.services.strategy_deployment_manager_service import (
+    StrategyDeploymentManagerService,
+)
 from app.services.strategy_governance_service import StrategyGovernanceService
 from app.strategies.registry import strategy_registry
 
@@ -26,14 +28,32 @@ class ControlPlaneService:
 
     def get_summary(self) -> dict[str, object]:
         families = self._build_family_rows()
-        counts = Counter(str(family["deployment"]["state"]) for family in families if family.get("deployment"))
-        misaligned_count = len([family for family in families if family["alignment"]["is_aligned"] is False])
+        counts = Counter(
+            str(family["deployment"]["state"])
+            for family in families
+            if family.get("deployment")
+        )
+        misaligned_count = len(
+            [
+                family
+                for family in families
+                if family["alignment"]["is_aligned"] is False
+            ]
+        )
         operator_control = self.operator_control_service.get_summary()
-        operational_state = self.operational_state_service.get_summary().model_dump(mode="json")
+        operational_state = self.operational_state_service.get_summary().model_dump(
+            mode="json"
+        )
         return {
-            "autonomous_control_enabled": operator_control["effective_autonomous_control_enabled"],
-            "configured_autonomous_control_enabled": operator_control["configured_autonomous_control_enabled"],
-            "effective_autonomous_control_enabled": operator_control["effective_autonomous_control_enabled"],
+            "autonomous_control_enabled": operator_control[
+                "effective_autonomous_control_enabled"
+            ],
+            "configured_autonomous_control_enabled": operator_control[
+                "configured_autonomous_control_enabled"
+            ],
+            "effective_autonomous_control_enabled": operator_control[
+                "effective_autonomous_control_enabled"
+            ],
             "autonomy_override_active": operator_control["override_active"],
             "autonomy_override_value": operator_control["override_value"],
             "autonomy_override_reason": operator_control["override_reason"],
@@ -46,7 +66,11 @@ class ControlPlaneService:
 
     def get_family_detail(self, strategy_name: str) -> dict[str, object]:
         family = next(
-            (row for row in self._build_family_rows() if row["strategy_name"] == strategy_name),
+            (
+                row
+                for row in self._build_family_rows()
+                if row["strategy_name"] == strategy_name
+            ),
             None,
         )
         if family is None:
@@ -63,12 +87,15 @@ class ControlPlaneService:
             for deployment in self.deployment_manager.list_deployments()
         }
         runtimes_by_strategy: dict[str, list[StrategyRuntimeState]] = {}
-        for runtime in self.session.exec(select(StrategyRuntimeState).order_by(StrategyRuntimeState.updated_at.desc())).all():
+        for runtime in self.session.exec(
+            select(StrategyRuntimeState).order_by(
+                StrategyRuntimeState.updated_at.desc()
+            )
+        ).all():
             runtimes_by_strategy.setdefault(runtime.strategy_name, []).append(runtime)
 
         metadata_by_name = {
-            metadata.name: metadata
-            for metadata in strategy_registry.list_metadata()
+            metadata.name: metadata for metadata in strategy_registry.list_metadata()
         }
         rows: list[dict[str, object]] = []
         for strategy_name, metadata in metadata_by_name.items():
@@ -82,18 +109,28 @@ class ControlPlaneService:
                     "strategy_name": strategy_name,
                     "description": metadata.description,
                     "supported_asset_classes": list(metadata.supported_asset_classes),
-                    "available_profile_names": [profile.name for profile in metadata.parameter_profiles],
-                    "governance": self._serialize_governance(governance_record, metadata),
+                    "available_profile_names": [
+                        profile.name for profile in metadata.parameter_profiles
+                    ],
+                    "governance": self._serialize_governance(
+                        governance_record, metadata
+                    ),
                     "deployment": self._serialize_deployment(deployment),
                     "runtime": self._serialize_runtime(active_runtime, runtimes),
-                    "alignment": self._build_alignment(deployment=deployment, active_runtime=active_runtime),
-                    "recent_events": [self._serialize_event(event) for event in recent_events],
+                    "alignment": self._build_alignment(
+                        deployment=deployment, active_runtime=active_runtime
+                    ),
+                    "recent_events": [
+                        self._serialize_event(event) for event in recent_events
+                    ],
                 }
             )
         return rows
 
     @staticmethod
-    def _select_active_runtime(runtimes: list[StrategyRuntimeState]) -> StrategyRuntimeState | None:
+    def _select_active_runtime(
+        runtimes: list[StrategyRuntimeState],
+    ) -> StrategyRuntimeState | None:
         running = [runtime for runtime in runtimes if runtime.status == "RUNNING"]
         if not running:
             return None
@@ -138,7 +175,9 @@ class ControlPlaneService:
                 "approved_instruments": [],
                 "approved_profile_names": [],
                 "supported_asset_classes": list(metadata.supported_asset_classes),
-                "available_profile_names": [profile.name for profile in metadata.parameter_profiles],
+                "available_profile_names": [
+                    profile.name for profile in metadata.parameter_profiles
+                ],
                 "updated_at": None,
             }
         return {
@@ -149,12 +188,16 @@ class ControlPlaneService:
             "approved_instruments": record.approved_instruments,
             "approved_profile_names": record.approved_profile_names,
             "supported_asset_classes": list(metadata.supported_asset_classes),
-            "available_profile_names": [profile.name for profile in metadata.parameter_profiles],
+            "available_profile_names": [
+                profile.name for profile in metadata.parameter_profiles
+            ],
             "updated_at": record.updated_at,
         }
 
     @staticmethod
-    def _serialize_deployment(deployment: StrategyDeployment | None) -> dict[str, object] | None:
+    def _serialize_deployment(
+        deployment: StrategyDeployment | None,
+    ) -> dict[str, object] | None:
         if deployment is None:
             return None
         return {
@@ -178,7 +221,10 @@ class ControlPlaneService:
         }
 
     @staticmethod
-    def _serialize_runtime(active_runtime: StrategyRuntimeState | None, runtimes: list[StrategyRuntimeState]) -> dict[str, object]:
+    def _serialize_runtime(
+        active_runtime: StrategyRuntimeState | None,
+        runtimes: list[StrategyRuntimeState],
+    ) -> dict[str, object]:
         if active_runtime is None:
             return {
                 "is_running": False,
@@ -261,19 +307,22 @@ class ControlPlaneService:
                 },
                 {
                     "code": "instrument_match",
-                    "passed": active_runtime.instrument == deployment.selected_instrument,
+                    "passed": active_runtime.instrument
+                    == deployment.selected_instrument,
                     "expected": deployment.selected_instrument,
                     "actual": active_runtime.instrument,
                 },
                 {
                     "code": "profile_match",
-                    "passed": active_runtime.active_profile_name == deployment.selected_profile,
+                    "passed": active_runtime.active_profile_name
+                    == deployment.selected_profile,
                     "expected": deployment.selected_profile,
                     "actual": active_runtime.active_profile_name,
                 },
                 {
                     "code": "parameters_match",
-                    "passed": (active_runtime.parameters or {}) == (deployment.selected_profile_parameters or {}),
+                    "passed": (active_runtime.parameters or {})
+                    == (deployment.selected_profile_parameters or {}),
                     "expected": deployment.selected_profile_parameters,
                     "actual": active_runtime.parameters,
                 },
@@ -333,7 +382,11 @@ class ControlPlaneService:
                 "status": "MISMATCH",
                 "reason": "An autonomous runtime is running while deployment is not in AUTO_DEPLOYED state.",
                 "checks": [
-                    {"code": "unexpected_auto_runtime", "passed": False, "actual": active_runtime.control_mode},
+                    {
+                        "code": "unexpected_auto_runtime",
+                        "passed": False,
+                        "actual": active_runtime.control_mode,
+                    },
                 ],
             }
         return {

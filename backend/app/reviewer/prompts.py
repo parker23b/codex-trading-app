@@ -30,7 +30,11 @@ TASK_INSTRUCTIONS: dict[ReviewType, str] = {
 }
 
 
-def build_review_prompts(review_type: ReviewType, review_payload: dict[str, Any], request_text: str | None = None) -> tuple[str, str]:
+def build_review_prompts(
+    review_type: ReviewType,
+    review_payload: dict[str, Any],
+    request_text: str | None = None,
+) -> tuple[str, str]:
     system_prompt = BASE_SYSTEM_PROMPT
     payload = {
         "task": TASK_INSTRUCTIONS[review_type],

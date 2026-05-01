@@ -4,7 +4,12 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from app.core.broker import AccountType, BrokerAccountSummary, BrokerMarketDetails, OrderDirection
+from app.core.broker import (
+    AccountType,
+    BrokerAccountSummary,
+    BrokerMarketDetails,
+    OrderDirection,
+)
 from app.core.config import get_settings
 from app.core.runtime import runtime_manager
 from app.core.signals import EntrySignal, SignalCandidate, SignalKind
@@ -13,7 +18,13 @@ from sqlmodel import select
 from app.core.broker import BrokerOrderResult, BrokerOrderStatus
 from app.models.runtime import StrategyRuntimeState
 from app.models.strategy_deployment import StrategyDeployment
-from app.models.trade import Execution, ExecutionPhase, ExecutionStatus, TradeIntent, TradeIntentState
+from app.models.trade import (
+    Execution,
+    ExecutionPhase,
+    ExecutionStatus,
+    TradeIntent,
+    TradeIntentState,
+)
 from app.services.health_service import get_health_service
 from app.services.market_status_service import MarketStatus, get_market_status_service
 from app.services.strategy_service import StrategyService
@@ -25,7 +36,9 @@ INSTRUMENT = "CS.D.EURUSD.MINI.IP"
 STRATEGY = "smoke_test_hold"
 
 
-def _enable_live_operational_context(monkeypatch: pytest.MonkeyPatch, fixed_now) -> None:
+def _enable_live_operational_context(
+    monkeypatch: pytest.MonkeyPatch, fixed_now
+) -> None:
     now = datetime.now(UTC)
     health_service = get_health_service()
     health_service.update_broker_state(connected=True, latency_ms=5.0)
@@ -48,7 +61,10 @@ def _enable_live_operational_context(monkeypatch: pytest.MonkeyPatch, fixed_now)
             "get_last_tick_at": lambda self, instrument: now,
         },
     )()
-    monkeypatch.setattr("app.services.operational_state_service.get_operational_streaming_service", lambda: stub)
+    monkeypatch.setattr(
+        "app.services.operational_state_service.get_operational_streaming_service",
+        lambda: stub,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -78,7 +94,9 @@ def test_start_and_stop_strategy_persists_runtime_state(session):
     assert stopped_runtime.recovery_state == "PAUSED"
 
 
-def test_prepare_execution_reuses_existing_entry_attempt_for_same_opportunity(session, fixed_now):
+def test_prepare_execution_reuses_existing_entry_attempt_for_same_opportunity(
+    session, fixed_now
+):
     trade_service = TradeService(session)
     initial_execution = trade_service.create_execution(
         Execution(
@@ -90,7 +108,10 @@ def test_prepare_execution_reuses_existing_entry_attempt_for_same_opportunity(se
             signal_time=fixed_now,
             requested_size=1.0,
             requested_price=100.0,
-            details={"action_key": f"entry:mean_reversion:{INSTRUMENT}:BUY", "direction": "BUY"},
+            details={
+                "action_key": f"entry:mean_reversion:{INSTRUMENT}:BUY",
+                "direction": "BUY",
+            },
         )
     )
 
@@ -103,7 +124,10 @@ def test_prepare_execution_reuses_existing_entry_attempt_for_same_opportunity(se
         requested_size=1.0,
         requested_price=100.2,
         reason="Entry signal generated",
-        details={"action_key": f"entry:mean_reversion:{INSTRUMENT}:BUY", "direction": "BUY"},
+        details={
+            "action_key": f"entry:mean_reversion:{INSTRUMENT}:BUY",
+            "direction": "BUY",
+        },
     )
 
     executions = trade_service.list_executions(limit=10)
@@ -157,7 +181,9 @@ def test_prepare_execution_blocks_unsafe_duplicate_close_retry(session, fixed_no
     assert len(executions) == 1
 
 
-def test_execute_entry_signal_requires_approved_trade_intent(session, broker, fixed_now):
+def test_execute_entry_signal_requires_approved_trade_intent(
+    session, broker, fixed_now
+):
     trade_service = TradeService(session)
     intent = trade_service.create_trade_intent(
         TradeIntent(
@@ -199,7 +225,9 @@ def test_execute_entry_signal_requires_approved_trade_intent(session, broker, fi
         market_status="TRADEABLE",
         tradable=True,
     )
-    engine = runtime_manager.start(strategy_name="smoke_test_hold", instrument=INSTRUMENT)
+    engine = runtime_manager.start(
+        strategy_name="smoke_test_hold", instrument=INSTRUMENT
+    )
 
     with pytest.raises(ValueError, match="APPROVED trade intent"):
         StrategyService._execute_entry_signal(
@@ -213,7 +241,9 @@ def test_execute_entry_signal_requires_approved_trade_intent(session, broker, fi
     assert broker.placed_orders == []
 
 
-def test_execute_entry_signal_reuses_broker_normalization_for_revalidation(session, broker, fixed_now):
+def test_execute_entry_signal_reuses_broker_normalization_for_revalidation(
+    session, broker, fixed_now
+):
     trade_service = TradeService(session)
     runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
     broker.market_details_by_instrument[INSTRUMENT] = BrokerMarketDetails(
@@ -270,21 +300,25 @@ def test_execute_entry_signal_reuses_broker_normalization_for_revalidation(sessi
         market_status="TRADEABLE",
         tradable=True,
     )
-    engine = runtime_manager.start(strategy_name="smoke_test_hold", instrument=INSTRUMENT)
+    engine = runtime_manager.start(
+        strategy_name="smoke_test_hold", instrument=INSTRUMENT
+    )
     market_status_service = get_market_status_service()
     original_get_status = market_status_service.get_status
-    market_status_service.get_status = lambda instrument, *, broker=None, now=None: MarketStatus(
-        instrument=instrument,
-        is_ok=True,
-        market_open=True,
-        tradable=True,
-        quote_fresh=True,
-        spread_ok=True,
-        session_valid=True,
-        dealing_allowed=True,
-        last_price_age_ms=0.0,
-        spread=0.1,
-        reason=None,
+    market_status_service.get_status = lambda instrument, *, broker=None, now=None: (
+        MarketStatus(
+            instrument=instrument,
+            is_ok=True,
+            market_open=True,
+            tradable=True,
+            quote_fresh=True,
+            spread_ok=True,
+            session_valid=True,
+            dealing_allowed=True,
+            last_price_age_ms=0.0,
+            spread=0.1,
+            reason=None,
+        )
     )
 
     try:
@@ -337,15 +371,39 @@ def test_process_price_update_runs_entry_to_close_lifecycle(session, broker, fix
         )
     )
 
-    service.process_price_update(INSTRUMENT, 100.0, bid=99.99, ask=100.01, market_status="TRADEABLE", tradable=True, received_at=fixed_now)
-    service.process_price_update(INSTRUMENT, 101.0, bid=100.99, ask=101.01, market_status="TRADEABLE", tradable=True, received_at=fixed_now + timedelta(seconds=1))
+    service.process_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        101.0,
+        bid=100.99,
+        ask=101.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
 
     open_positions = trade_service.list_positions()
     assert len(open_positions) == 1
     assert open_positions[0].broker_reference == "entry-1"
     assert open_positions[0].open_price == 101.25
 
-    service.process_price_update(INSTRUMENT, 103.0, bid=102.8, ask=103.2, market_status="TRADEABLE", tradable=True, received_at=fixed_now + timedelta(seconds=40))
+    service.process_price_update(
+        INSTRUMENT,
+        103.0,
+        bid=102.8,
+        ask=103.2,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=40),
+    )
 
     trades = trade_service.list_trades()
     executions = trade_service.list_executions(limit=10)
@@ -368,7 +426,9 @@ def test_process_price_update_runs_entry_to_close_lifecycle(session, broker, fix
     )
 
 
-def test_evaluate_price_update_is_decoupled_from_execution_orchestration(session, broker, fixed_now):
+def test_evaluate_price_update_is_decoupled_from_execution_orchestration(
+    session, broker, fixed_now
+):
     service = StrategyService(session)
     trade_service = TradeService(session)
     broker.account_summary = BrokerAccountSummary(
@@ -445,14 +505,19 @@ def test_new_execution_rows_start_at_submission_pending(session, fixed_now):
         requested_size=1.0,
         requested_price=100.0,
         reason="Execution attempt created for approved entry intent",
-        details={"action_key": f"entry:mean_reversion:{INSTRUMENT}:BUY", "direction": "BUY"},
+        details={
+            "action_key": f"entry:mean_reversion:{INSTRUMENT}:BUY",
+            "direction": "BUY",
+        },
     )
 
     assert should_submit is True
     assert execution.status == ExecutionStatus.SUBMISSION_PENDING.value
 
 
-def test_allocate_signal_candidates_filters_weaker_conflicting_entries(session, broker, fixed_now):
+def test_allocate_signal_candidates_filters_weaker_conflicting_entries(
+    session, broker, fixed_now
+):
     service = StrategyService(session)
     instrument = INSTRUMENT
     runtime_manager.last_price_updated_at[instrument] = fixed_now
@@ -469,8 +534,16 @@ def test_allocate_signal_candidates_filters_weaker_conflicting_entries(session, 
         update_time=fixed_now.isoformat(),
         tradable=True,
     )
-    buy_engine = SimpleNamespace(strategy=SimpleNamespace(name="breakout_guard"), broker=broker, instrument=instrument)
-    sell_engine = SimpleNamespace(strategy=SimpleNamespace(name="mean_reversion"), broker=broker, instrument=instrument)
+    buy_engine = SimpleNamespace(
+        strategy=SimpleNamespace(name="breakout_guard"),
+        broker=broker,
+        instrument=instrument,
+    )
+    sell_engine = SimpleNamespace(
+        strategy=SimpleNamespace(name="mean_reversion"),
+        broker=broker,
+        instrument=instrument,
+    )
     strong_buy = SignalCandidate(
         strategy_name="breakout_guard",
         instrument=instrument,
@@ -514,20 +587,40 @@ def test_allocate_signal_candidates_filters_weaker_conflicting_entries(session, 
         metadata=SimpleNamespace(risk_per_trade=0.7),
     )
 
-    selected = service.allocate_signal_candidates([sell_conflict, strong_buy], received_at=fixed_now)
+    selected = service.allocate_signal_candidates(
+        [sell_conflict, strong_buy], received_at=fixed_now
+    )
 
     assert len(selected) == 1
     assert selected[0].strategy_name == "breakout_guard"
 
 
-def test_entry_broker_failure_fails_safely_without_opening_position(session, broker, fixed_now):
+def test_entry_broker_failure_fails_safely_without_opening_position(
+    session, broker, fixed_now
+):
     service = StrategyService(session)
     trade_service = TradeService(session)
     service.start_strategy(STRATEGY, INSTRUMENT)
     broker.place_order_outcomes.append(RuntimeError("entry endpoint timeout"))
 
-    service.process_price_update(INSTRUMENT, 100.0, bid=99.99, ask=100.01, market_status="TRADEABLE", tradable=True, received_at=fixed_now)
-    service.process_price_update(INSTRUMENT, 100.5, bid=100.49, ask=100.51, market_status="TRADEABLE", tradable=True, received_at=fixed_now + timedelta(seconds=1))
+    service.process_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        100.5,
+        bid=100.49,
+        ask=100.51,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
 
     executions = trade_service.list_executions(limit=10)
     engine = session.exec(
@@ -545,7 +638,9 @@ def test_entry_broker_failure_fails_safely_without_opening_position(session, bro
     assert engine.current_position_broker_reference is None
 
 
-def test_entry_below_broker_minimum_is_risk_rejected_before_submission(session, broker, fixed_now):
+def test_entry_below_broker_minimum_is_risk_rejected_before_submission(
+    session, broker, fixed_now
+):
     service = StrategyService(session)
     trade_service = TradeService(session)
     broker.account_summary = BrokerAccountSummary(
@@ -615,7 +710,13 @@ def test_entry_is_blocked_when_market_quote_is_stale(session, broker, fixed_now)
 
     def stale_get_status(instrument: str, *, broker=None, now=None):
         status = original_get_status(instrument, broker=broker, now=now)
-        return status.model_copy(update={"is_ok": False, "reason": "Latest quote is stale at 2000.0ms old.", "quote_fresh": False})
+        return status.model_copy(
+            update={
+                "is_ok": False,
+                "reason": "Latest quote is stale at 2000.0ms old.",
+                "quote_fresh": False,
+            }
+        )
 
     market_status_service.get_status = stale_get_status
     try:
@@ -669,7 +770,15 @@ def test_entry_is_blocked_when_spread_exceeds_threshold(session, broker, fixed_n
     )
     service.start_strategy(STRATEGY, INSTRUMENT)
 
-    service.process_price_update(INSTRUMENT, 1.10010, bid=1.10000, ask=1.10020, market_status="TRADEABLE", tradable=True, received_at=fixed_now)
+    service.process_price_update(
+        INSTRUMENT,
+        1.10010,
+        bid=1.10000,
+        ask=1.10020,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
     get_market_status_service().reset()
     service.process_price_update(
         INSTRUMENT,
@@ -688,7 +797,9 @@ def test_entry_is_blocked_when_spread_exceeds_threshold(session, broker, fixed_n
     assert "spread" in (intents[0].decision_reason or "").lower()
 
 
-def test_execution_rechecks_market_status_before_order_submission(session, broker, fixed_now):
+def test_execution_rechecks_market_status_before_order_submission(
+    session, broker, fixed_now
+):
     service = StrategyService(session)
     trade_service = TradeService(session)
     service.start_strategy(STRATEGY, INSTRUMENT)
@@ -712,13 +823,35 @@ def test_execution_rechecks_market_status_before_order_submission(session, broke
         calls["count"] += 1
         status = original_get_status(instrument, broker=broker, now=now)
         if calls["count"] >= 2:
-            return status.model_copy(update={"is_ok": False, "reason": "Quote turned stale before execution.", "quote_fresh": False})
+            return status.model_copy(
+                update={
+                    "is_ok": False,
+                    "reason": "Quote turned stale before execution.",
+                    "quote_fresh": False,
+                }
+            )
         return status
 
     market_status_service.get_status = guarded_get_status
     try:
-        service.process_price_update(INSTRUMENT, 100.0, bid=99.99, ask=100.01, market_status="TRADEABLE", tradable=True, received_at=fixed_now)
-        service.process_price_update(INSTRUMENT, 100.5, bid=100.49, ask=100.51, market_status="TRADEABLE", tradable=True, received_at=fixed_now + timedelta(seconds=1))
+        service.process_price_update(
+            INSTRUMENT,
+            100.0,
+            bid=99.99,
+            ask=100.01,
+            market_status="TRADEABLE",
+            tradable=True,
+            received_at=fixed_now,
+        )
+        service.process_price_update(
+            INSTRUMENT,
+            100.5,
+            bid=100.49,
+            ask=100.51,
+            market_status="TRADEABLE",
+            tradable=True,
+            received_at=fixed_now + timedelta(seconds=1),
+        )
     finally:
         market_status_service.get_status = original_get_status
 
@@ -726,10 +859,14 @@ def test_execution_rechecks_market_status_before_order_submission(session, broke
     assert broker.placed_orders == []
     assert executions[0].status == ExecutionStatus.FAILED.value
     assert "execution blocked by market status" in executions[0].reason.lower()
-    assert get_health_service().get_health_report()["details"].order_failures_last_5m == 0
+    assert (
+        get_health_service().get_health_report()["details"].order_failures_last_5m == 0
+    )
 
 
-def test_close_failure_keeps_position_open_and_flags_manual_review(session, broker, fixed_now):
+def test_close_failure_keeps_position_open_and_flags_manual_review(
+    session, broker, fixed_now
+):
     service = StrategyService(session)
     trade_service = TradeService(session)
     service.start_strategy(STRATEGY, INSTRUMENT)
@@ -745,9 +882,33 @@ def test_close_failure_keeps_position_open_and_flags_manual_review(session, brok
     )
     broker.close_position_outcomes.append(RuntimeError("close endpoint timeout"))
 
-    service.process_price_update(INSTRUMENT, 100.0, bid=99.99, ask=100.01, market_status="TRADEABLE", tradable=True, received_at=fixed_now)
-    service.process_price_update(INSTRUMENT, 100.5, bid=100.49, ask=100.51, market_status="TRADEABLE", tradable=True, received_at=fixed_now + timedelta(seconds=1))
-    service.process_price_update(INSTRUMENT, 101.0, bid=100.9, ask=101.1, market_status="TRADEABLE", tradable=True, received_at=fixed_now + timedelta(seconds=40))
+    service.process_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        100.5,
+        bid=100.49,
+        ask=100.51,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        101.0,
+        bid=100.9,
+        ask=101.1,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=40),
+    )
 
     executions = trade_service.list_executions(limit=10)
     assert len(trade_service.list_positions()) == 1
@@ -756,7 +917,9 @@ def test_close_failure_keeps_position_open_and_flags_manual_review(session, brok
     assert executions[0].requires_manual_review is True
 
 
-def test_partial_close_result_moves_execution_to_manual_review(session, broker, fixed_now):
+def test_partial_close_result_moves_execution_to_manual_review(
+    session, broker, fixed_now
+):
     service = StrategyService(session)
     trade_service = TradeService(session)
     service.start_strategy(STRATEGY, INSTRUMENT)
@@ -787,9 +950,33 @@ def test_partial_close_result_moves_execution_to_manual_review(session, broker, 
         )
     )
 
-    service.process_price_update(INSTRUMENT, 100.0, bid=99.99, ask=100.01, market_status="TRADEABLE", tradable=True, received_at=fixed_now)
-    service.process_price_update(INSTRUMENT, 100.5, bid=100.49, ask=100.51, market_status="TRADEABLE", tradable=True, received_at=fixed_now + timedelta(seconds=1))
-    service.process_price_update(INSTRUMENT, 101.0, bid=100.99, ask=101.01, market_status="TRADEABLE", tradable=True, received_at=fixed_now + timedelta(seconds=40))
+    service.process_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        100.5,
+        bid=100.49,
+        ask=100.51,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        101.0,
+        bid=100.99,
+        ask=101.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=40),
+    )
 
     executions = trade_service.list_executions(limit=10)
     assert len(trade_service.list_positions()) == 1
@@ -801,7 +988,9 @@ def test_partial_close_result_moves_execution_to_manual_review(session, broker, 
     assert executions[0].average_fill_price == 101.0
 
 
-def test_partial_entry_fill_keeps_position_but_restricts_runtime(session, broker, fixed_now):
+def test_partial_entry_fill_keeps_position_but_restricts_runtime(
+    session, broker, fixed_now
+):
     service = StrategyService(session)
     trade_service = TradeService(session)
     service.start_strategy(STRATEGY, INSTRUMENT)
@@ -822,8 +1011,24 @@ def test_partial_entry_fill_keeps_position_but_restricts_runtime(session, broker
         )
     )
 
-    service.process_price_update(INSTRUMENT, 100.0, bid=99.99, ask=100.01, market_status="TRADEABLE", tradable=True, received_at=fixed_now)
-    service.process_price_update(INSTRUMENT, 100.5, bid=100.49, ask=100.51, market_status="TRADEABLE", tradable=True, received_at=fixed_now + timedelta(seconds=1))
+    service.process_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        100.5,
+        bid=100.49,
+        ask=100.51,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
 
     intent = trade_service.list_trade_intents(limit=1)[0]
     execution = trade_service.list_executions(limit=1)[0]
@@ -847,7 +1052,9 @@ def test_exits_only_runtime_mode_suppresses_new_entries(session, broker, fixed_n
     service = StrategyService(session)
     trade_service = TradeService(session)
     service.start_strategy(STRATEGY, INSTRUMENT)
-    service.set_runtime_mode(strategy_name=STRATEGY, instrument=INSTRUMENT, runtime_mode="EXITS_ONLY")
+    service.set_runtime_mode(
+        strategy_name=STRATEGY, instrument=INSTRUMENT, runtime_mode="EXITS_ONLY"
+    )
 
     service.process_price_update(
         INSTRUMENT,
@@ -878,7 +1085,9 @@ def test_exits_only_runtime_mode_suppresses_new_entries(session, broker, fixed_n
     assert trade_service.list_trade_intents(limit=10) == []
 
 
-def test_exits_only_runtime_mode_still_allows_strategy_driven_exits(session, broker, fixed_now):
+def test_exits_only_runtime_mode_still_allows_strategy_driven_exits(
+    session, broker, fixed_now
+):
     service = StrategyService(session)
     trade_service = TradeService(session)
     broker.account_summary = BrokerAccountSummary(
@@ -913,12 +1122,30 @@ def test_exits_only_runtime_mode_still_allows_strategy_driven_exits(session, bro
         )
     )
 
-    service.process_price_update(INSTRUMENT, 100.0, bid=99.99, ask=100.01, market_status="TRADEABLE", tradable=True, received_at=fixed_now)
-    service.process_price_update(INSTRUMENT, 101.0, bid=100.99, ask=101.01, market_status="TRADEABLE", tradable=True, received_at=fixed_now + timedelta(seconds=1))
+    service.process_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        101.0,
+        bid=100.99,
+        ask=101.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
 
     assert len(trade_service.list_positions()) == 1
 
-    service.set_runtime_mode(strategy_name=STRATEGY, instrument=INSTRUMENT, runtime_mode="EXITS_ONLY")
+    service.set_runtime_mode(
+        strategy_name=STRATEGY, instrument=INSTRUMENT, runtime_mode="EXITS_ONLY"
+    )
     service.process_price_update(
         INSTRUMENT,
         103.0,
@@ -942,7 +1169,9 @@ def test_exits_only_runtime_mode_still_allows_strategy_driven_exits(session, bro
     assert trades[0].close_broker_reference == "close-exits-only"
 
 
-def test_mode_flip_to_exits_only_after_decision_admission_blocks_submission(session, broker, fixed_now):
+def test_mode_flip_to_exits_only_after_decision_admission_blocks_submission(
+    session, broker, fixed_now
+):
     service = StrategyService(session)
     trade_service = TradeService(session)
     broker.account_summary = BrokerAccountSummary(
@@ -973,10 +1202,14 @@ def test_mode_flip_to_exits_only_after_decision_admission_blocks_submission(sess
         received_at=fixed_now + timedelta(seconds=1),
     )
 
-    decisions = service.decide_signal_candidates(candidates, received_at=fixed_now + timedelta(seconds=1))
+    decisions = service.decide_signal_candidates(
+        candidates, received_at=fixed_now + timedelta(seconds=1)
+    )
     assert decisions[0].admitted is True
 
-    service.set_runtime_mode(strategy_name=STRATEGY, instrument=INSTRUMENT, runtime_mode="EXITS_ONLY")
+    service.set_runtime_mode(
+        strategy_name=STRATEGY, instrument=INSTRUMENT, runtime_mode="EXITS_ONLY"
+    )
     service.orchestrate_trade_decisions(
         decisions,
         price=101.0,
@@ -992,7 +1225,9 @@ def test_mode_flip_to_exits_only_after_decision_admission_blocks_submission(sess
     assert intent.decision_reason_code == "entry_execution_blocked_runtime_mode_changed"
 
 
-def test_execute_entry_signal_refuses_when_runtime_mode_is_exits_only(session, broker, fixed_now):
+def test_execute_entry_signal_refuses_when_runtime_mode_is_exits_only(
+    session, broker, fixed_now
+):
     trade_service = TradeService(session)
     intent = trade_service.create_trade_intent(
         TradeIntent(
@@ -1038,7 +1273,9 @@ def test_execute_entry_signal_refuses_when_runtime_mode_is_exits_only(session, b
     service.start_strategy(STRATEGY, INSTRUMENT)
     engine = runtime_manager.get_engine(STRATEGY, INSTRUMENT)
     assert engine is not None
-    service.set_runtime_mode(strategy_name=STRATEGY, instrument=INSTRUMENT, runtime_mode="EXITS_ONLY")
+    service.set_runtime_mode(
+        strategy_name=STRATEGY, instrument=INSTRUMENT, runtime_mode="EXITS_ONLY"
+    )
 
     with pytest.raises(ValueError, match="runtime mode is EXITS_ONLY"):
         StrategyService._execute_entry_signal(
@@ -1052,11 +1289,20 @@ def test_execute_entry_signal_refuses_when_runtime_mode_is_exits_only(session, b
     refreshed_intent = trade_service.get_trade_intent(intent.id)
     refreshed_execution = trade_service.get_latest_execution_for_trade_intent(intent.id)
     assert broker.placed_orders == []
-    assert refreshed_intent is not None and refreshed_intent.decision_reason_code == "entry_execution_blocked_runtime_mode_changed"
-    assert refreshed_execution is not None and refreshed_execution.status == ExecutionStatus.FAILED.value
+    assert (
+        refreshed_intent is not None
+        and refreshed_intent.decision_reason_code
+        == "entry_execution_blocked_runtime_mode_changed"
+    )
+    assert (
+        refreshed_execution is not None
+        and refreshed_execution.status == ExecutionStatus.FAILED.value
+    )
 
 
-def test_execute_entry_signal_refuses_when_operational_entry_policy_is_false(session, broker, fixed_now, monkeypatch):
+def test_execute_entry_signal_refuses_when_operational_entry_policy_is_false(
+    session, broker, fixed_now, monkeypatch
+):
     now = datetime.now(UTC)
     health_service = get_health_service()
     health_service.update_broker_state(connected=True, latency_ms=5.0)
@@ -1078,7 +1324,10 @@ def test_execute_entry_signal_refuses_when_operational_entry_policy_is_false(ses
             )()
         },
     )()
-    monkeypatch.setattr("app.services.operational_state_service.get_operational_streaming_service", lambda: stub)
+    monkeypatch.setattr(
+        "app.services.operational_state_service.get_operational_streaming_service",
+        lambda: stub,
+    )
 
     trade_service = TradeService(session)
     intent = trade_service.create_trade_intent(
@@ -1138,8 +1387,15 @@ def test_execute_entry_signal_refuses_when_operational_entry_policy_is_false(ses
     refreshed_intent = trade_service.get_trade_intent(intent.id)
     refreshed_execution = trade_service.get_latest_execution_for_trade_intent(intent.id)
     assert broker.placed_orders == []
-    assert refreshed_intent is not None and refreshed_intent.decision_reason_code == "entry_execution_blocked_operational_policy"
-    assert refreshed_execution is not None and refreshed_execution.status == ExecutionStatus.FAILED.value
+    assert (
+        refreshed_intent is not None
+        and refreshed_intent.decision_reason_code
+        == "entry_execution_blocked_operational_policy"
+    )
+    assert (
+        refreshed_execution is not None
+        and refreshed_execution.status == ExecutionStatus.FAILED.value
+    )
 
 
 def test_start_strategy_uses_persisted_exits_only_mode_by_default(session):
@@ -1185,7 +1441,23 @@ def test_start_strategy_blocks_normal_restart_when_open_risk_is_unmanaged(sessio
 
 
 def test_open_pnl_and_mark_price_helpers_use_directional_pricing():
-    assert StrategyService._mark_price(direction="BUY", price=100.0, bid=99.8, ask=100.2) == 99.8
-    assert StrategyService._mark_price(direction="SELL", price=100.0, bid=99.8, ask=100.2) == 100.2
-    assert StrategyService._calculate_open_pnl(direction="BUY", open_price=100.0, current_price=101.5, size=2.0) == 3.0
-    assert StrategyService._calculate_open_pnl(direction="SELL", open_price=100.0, current_price=98.5, size=2.0) == 3.0
+    assert (
+        StrategyService._mark_price(direction="BUY", price=100.0, bid=99.8, ask=100.2)
+        == 99.8
+    )
+    assert (
+        StrategyService._mark_price(direction="SELL", price=100.0, bid=99.8, ask=100.2)
+        == 100.2
+    )
+    assert (
+        StrategyService._calculate_open_pnl(
+            direction="BUY", open_price=100.0, current_price=101.5, size=2.0
+        )
+        == 3.0
+    )
+    assert (
+        StrategyService._calculate_open_pnl(
+            direction="SELL", open_price=100.0, current_price=98.5, size=2.0
+        )
+        == 3.0
+    )

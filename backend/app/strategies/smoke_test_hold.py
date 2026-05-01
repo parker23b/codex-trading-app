@@ -48,7 +48,11 @@ class SmokeTestHoldStrategy(Strategy):
         return self.tick_count >= self.warmup_ticks
 
     def should_exit_trade(self) -> bool:
-        if not self._in_position or self._opened_at is None or self._last_update_at is None:
+        if (
+            not self._in_position
+            or self._opened_at is None
+            or self._last_update_at is None
+        ):
             return False
         held_seconds = (self._last_update_at - self._opened_at).total_seconds()
         return held_seconds >= (self.hold_minutes * 60.0)
@@ -56,7 +60,9 @@ class SmokeTestHoldStrategy(Strategy):
     def entry_direction(self) -> OrderDirection:
         return self.direction
 
-    def on_position_opened(self, *, direction: OrderDirection, entry_price: float) -> None:
+    def on_position_opened(
+        self, *, direction: OrderDirection, entry_price: float
+    ) -> None:
         self._in_position = True
         self._opened_at = self._last_update_at
 
@@ -72,7 +78,9 @@ class SmokeTestHoldStrategy(Strategy):
         return {
             "tick_count": self.tick_count,
             "opened_at": self._opened_at.isoformat() if self._opened_at else None,
-            "last_update_at": self._last_update_at.isoformat() if self._last_update_at else None,
+            "last_update_at": self._last_update_at.isoformat()
+            if self._last_update_at
+            else None,
             "in_position": self._in_position,
         }
 
@@ -81,5 +89,7 @@ class SmokeTestHoldStrategy(Strategy):
         opened_at = snapshot.get("opened_at")
         last_update_at = snapshot.get("last_update_at")
         self._opened_at = datetime.fromisoformat(opened_at) if opened_at else None
-        self._last_update_at = datetime.fromisoformat(last_update_at) if last_update_at else None
+        self._last_update_at = (
+            datetime.fromisoformat(last_update_at) if last_update_at else None
+        )
         self._in_position = bool(snapshot.get("in_position"))

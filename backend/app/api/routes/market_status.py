@@ -3,7 +3,7 @@ from datetime import datetime
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
-from app.services.market_status_service import MarketStatus, get_market_status_service
+from app.services.market_status_service import get_market_status_service
 
 router = APIRouter()
 
@@ -23,6 +23,8 @@ class MarketStatusResponse(BaseModel):
 
 
 @router.get("/market-status/{instrument}", response_model=MarketStatusResponse)
-def get_market_status(instrument: str, at: datetime | None = Query(default=None)) -> MarketStatusResponse:
+def get_market_status(
+    instrument: str, at: datetime | None = Query(default=None)
+) -> MarketStatusResponse:
     status = get_market_status_service().get_status(instrument, now=at)
     return MarketStatusResponse(**status.model_dump())

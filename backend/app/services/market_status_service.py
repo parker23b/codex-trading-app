@@ -80,7 +80,9 @@ class MarketStatusService:
             runtime_timestamp=runtime_manager.get_last_price_updated_at(instrument),
             broker_timestamp=market_details.update_time,
         )
-        last_price_age_ms = self._get_last_price_age_ms(last_price_updated_at=quote_timestamp, now=current_time)
+        last_price_age_ms = self._get_last_price_age_ms(
+            last_price_updated_at=quote_timestamp, now=current_time
+        )
         spread = self._get_spread(market_details)
         market_open = self._is_market_open(market_details.market_status)
         tradable = bool(market_details.tradable)
@@ -116,13 +118,17 @@ class MarketStatusService:
         return status
 
     @staticmethod
-    def _get_last_price_age_ms(*, last_price_updated_at: datetime | None, now: datetime) -> float:
+    def _get_last_price_age_ms(
+        *, last_price_updated_at: datetime | None, now: datetime
+    ) -> float:
         if last_price_updated_at is None:
             return float("inf")
         return (now - last_price_updated_at.astimezone(UTC)).total_seconds() * 1000
 
     @staticmethod
-    def _resolve_quote_timestamp(*, runtime_timestamp: datetime | None, broker_timestamp: str | None) -> datetime | None:
+    def _resolve_quote_timestamp(
+        *, runtime_timestamp: datetime | None, broker_timestamp: str | None
+    ) -> datetime | None:
         if broker_timestamp:
             normalized = broker_timestamp.replace("Z", "+00:00")
             try:

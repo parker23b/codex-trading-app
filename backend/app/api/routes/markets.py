@@ -25,7 +25,9 @@ def get_market_overview(
     try:
         return service.get_category_overview(category)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
     except IGBrokerError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -44,16 +46,22 @@ def get_shortlist(session: Session = Depends(get_session)) -> dict[str, object]:
 
 
 @router.post("/watchlist/shortlist/{instrument_id}")
-def add_shortlist_item(instrument_id: str, session: Session = Depends(get_session)) -> dict[str, object]:
+def add_shortlist_item(
+    instrument_id: str, session: Session = Depends(get_session)
+) -> dict[str, object]:
     try:
         instrument = WatchlistService(session).set_shortlisted(instrument_id)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
     return {"status": "shortlisted", "instrument": instrument}
 
 
 @router.delete("/watchlist/shortlist/{instrument_id}")
-def remove_shortlist_item(instrument_id: str, session: Session = Depends(get_session)) -> dict[str, object]:
+def remove_shortlist_item(
+    instrument_id: str, session: Session = Depends(get_session)
+) -> dict[str, object]:
     WatchlistService(session).remove_shortlisted(instrument_id)
     return {"status": "removed", "instrument": instrument_id}
 
@@ -67,12 +75,16 @@ def add_strategy_watchlist_items(
 
 
 @router.get("/strategy-watchlist")
-def get_strategy_watchlist(session: Session = Depends(get_session)) -> dict[str, object]:
+def get_strategy_watchlist(
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
     return WatchlistService(session).strategy_watchlist_response()
 
 
 @router.delete("/strategy-watchlist/{instrument_id}")
-def remove_strategy_watchlist_item(instrument_id: str, session: Session = Depends(get_session)) -> dict[str, object]:
+def remove_strategy_watchlist_item(
+    instrument_id: str, session: Session = Depends(get_session)
+) -> dict[str, object]:
     WatchlistService(session).remove_from_strategy_watchlist(instrument_id)
     return {"status": "removed", "instrument": instrument_id}
 
@@ -83,7 +95,9 @@ def get_feed_state(session: Session = Depends(get_session)) -> dict[str, object]
 
 
 @router.get("/market-data/feed-state/{instrument_id}")
-def get_instrument_feed_state(instrument_id: str, session: Session = Depends(get_session)) -> dict[str, object]:
+def get_instrument_feed_state(
+    instrument_id: str, session: Session = Depends(get_session)
+) -> dict[str, object]:
     return WatchlistService(session).feed_state_for_instrument(instrument_id)
 
 
@@ -93,4 +107,6 @@ def get_live_instrument_chart(
     timeframe: str = Query(default="1m"),
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
-    return ChartService(TradeService(session)).get_live_instrument_chart(instrument_id, timeframe=timeframe)
+    return ChartService(TradeService(session)).get_live_instrument_chart(
+        instrument_id, timeframe=timeframe
+    )

@@ -7,7 +7,10 @@ from sqlmodel import Session
 
 from app.core.signals import EntrySignal, ExitSignal, SignalCandidate, SignalStatus
 from app.models.trade import TradeIntent, TradeIntentState
-from app.services.capital_allocator_service import AllocationDecision, CapitalAllocatorService
+from app.services.capital_allocator_service import (
+    AllocationDecision,
+    CapitalAllocatorService,
+)
 from app.services.market_status_service import get_market_status_service
 from app.services.operational_state_service import OperationalStateService
 from app.services.portfolio_risk_service import PortfolioRiskService
@@ -79,12 +82,22 @@ class TradeDecisionService:
         *,
         received_at: datetime | None = None,
     ) -> list[TradeDecisionResult]:
-        entries = [candidate for candidate in candidates if isinstance(candidate.signal, EntrySignal)]
-        exits = [candidate for candidate in candidates if isinstance(candidate.signal, ExitSignal)]
+        entries = [
+            candidate
+            for candidate in candidates
+            if isinstance(candidate.signal, EntrySignal)
+        ]
+        exits = [
+            candidate
+            for candidate in candidates
+            if isinstance(candidate.signal, ExitSignal)
+        ]
         results: list[TradeDecisionResult] = []
 
         if entries:
-            results.extend(self._decide_entry_candidates(entries, received_at=received_at))
+            results.extend(
+                self._decide_entry_candidates(entries, received_at=received_at)
+            )
         for candidate in exits:
             results.append(self._link_exit_candidate(candidate))
         return results
@@ -98,16 +111,32 @@ class TradeDecisionService:
         results: list[TradeDecisionResult] = []
         open_positions = self.trade_service.list_positions()
         trades = self.trade_service.list_trades()
-        allocation_decisions = self.capital_allocator.allocate(candidates, received_at=received_at)
+        allocation_decisions = self.capital_allocator.allocate(
+            candidates, received_at=received_at
+        )
         for allocation in allocation_decisions:
             candidate = allocation.candidate
             signal = candidate.signal
             assert isinstance(signal, EntrySignal)
-            mapped_reason = self.ALLOCATOR_REASON_MAP.get(allocation.reason_code, allocation.reason_code)
-            signal.size = allocation.normalized_size if allocation.selected else allocation.requested_size
-            signal.risk_percent = allocation.allocated_risk_percent if allocation.selected else allocation.requested_risk_percent
+            mapped_reason = self.ALLOCATOR_REASON_MAP.get(
+                allocation.reason_code, allocation.reason_code
+            )
+            signal.size = (
+                allocation.normalized_size
+                if allocation.selected
+                else allocation.requested_size
+            )
+            signal.risk_percent = (
+                allocation.allocated_risk_percent
+                if allocation.selected
+                else allocation.requested_risk_percent
+            )
             if allocation.selected:
-                existing_active = self.trade_service.find_active_trade_intent_for_instrument(candidate.instrument)
+                existing_active = (
+                    self.trade_service.find_active_trade_intent_for_instrument(
+                        candidate.instrument
+                    )
+                )
                 if existing_active is not None:
                     intent = self._create_trade_intent(
                         candidate=candidate,
@@ -230,9 +259,13 @@ class TradeDecisionService:
                 )
                 continue
 
-            approved_signal = self._apply_operational_policy_gate(candidate=candidate, signal=signal)
+            approved_signal = self._apply_operational_policy_gate(
+                candidate=candidate, signal=signal
+            )
             if approved_signal.status is not SignalStatus.REJECTED:
-                approved_signal = self._apply_market_status_gate(candidate=candidate, signal=approved_signal)
+                approved_signal = self._apply_market_status_gate(
+                    candidate=candidate, signal=approved_signal
+                )
             if approved_signal.status is not SignalStatus.REJECTED:
                 approved_signal = self.risk_service.assess_entry(
                     approved_signal,
@@ -286,7 +319,8 @@ class TradeDecisionService:
                         allocated_size=approved_signal.size,
                         allocated_risk_percent=approved_signal.risk_percent,
                         decision_reason_code="approved",
-                        decision_reason=approved_signal.reason or "Approved by centralized trade decision service.",
+                        decision_reason=approved_signal.reason
+                        or "Approved by centralized trade decision service.",
                         details={
                             "allocator_score": allocation.priority_score,
                             "allocation_priority_score": allocation.priority_score,
@@ -451,11 +485,18 @@ class TradeDecisionService:
         details: dict[str, object] | None = None,
     ) -> TradeIntent:
         risk_currency = (
-            ((allocation.sizing_details or {}).get("sizing_quote") or {}).get("details") or {}
+            ((allocation.sizing_details or {}).get("sizing_quote") or {}).get("details")
+            or {}
         ).get("account_currency")
-        allocation_outcome_stage = "allocator_rejected" if not allocation.selected else "proposed_for_risk_overlay"
+        allocation_outcome_stage = (
+            "allocator_rejected"
+            if not allocation.selected
+            else "proposed_for_risk_overlay"
+        )
         effective_risk_percent = (
-            allocation.allocated_risk_percent if allocation.selected else allocation.requested_risk_percent
+            allocation.allocated_risk_percent
+            if allocation.selected
+            else allocation.requested_risk_percent
         )
         allocation_drift_metrics = self._build_allocation_drift_metrics(allocation)
         return self.trade_service.create_trade_intent(
@@ -467,8 +508,12 @@ class TradeDecisionService:
                 direction=signal.direction.value,
                 state=initial_state.value,
                 signal_time=signal.signal_at,
-                proposed_size=allocation.requested_size if allocation.requested_size is not None else signal.size,
-                allocated_size=allocation.normalized_size if allocation.normalized_size is not None else signal.size,
+                proposed_size=allocation.requested_size
+                if allocation.requested_size is not None
+                else signal.size,
+                allocated_size=allocation.normalized_size
+                if allocation.normalized_size is not None
+                else signal.size,
                 proposed_risk_percent=(
                     allocation.requested_risk_percent
                     if allocation.requested_risk_percent is not None
@@ -549,7 +594,9 @@ class TradeDecisionService:
                         "estimated": {
                             "risk_amount": allocation.risk_amount,
                             "risk_percent": effective_risk_percent,
-                            "size": allocation.normalized_size if allocation.selected else allocation.requested_size,
+                            "size": allocation.normalized_size
+                            if allocation.selected
+                            else allocation.requested_size,
                             "entry_price": signal.observed_price,
                             "risk_currency": risk_currency,
                             "derivation_mode": "allocation_estimate",
@@ -574,7 +621,9 @@ class TradeDecisionService:
         )
 
     @staticmethod
-    def _metric(expected: float | None, actual: float | None) -> dict[str, float | bool] | None:
+    def _metric(
+        expected: float | None, actual: float | None
+    ) -> dict[str, float | bool] | None:
         if expected is None or actual is None:
             return None
         absolute_drift = float(actual) - float(expected)
@@ -586,21 +635,33 @@ class TradeDecisionService:
             "actual": round(float(actual), 8),
             "absolute_drift": round(absolute_drift, 8),
             "absolute_drift_abs": round(abs(absolute_drift), 8),
-            "percent_drift": round(percent_drift, 8) if percent_drift is not None else None,
-            "percent_drift_abs": round(abs(percent_drift), 8) if percent_drift is not None else None,
+            "percent_drift": round(percent_drift, 8)
+            if percent_drift is not None
+            else None,
+            "percent_drift_abs": round(abs(percent_drift), 8)
+            if percent_drift is not None
+            else None,
         }
 
-    def _build_allocation_drift_metrics(self, allocation: AllocationDecision) -> dict[str, object]:
+    def _build_allocation_drift_metrics(
+        self, allocation: AllocationDecision
+    ) -> dict[str, object]:
         return {
-            "requested_to_normalized_size": self._metric(allocation.requested_size, allocation.normalized_size),
+            "requested_to_normalized_size": self._metric(
+                allocation.requested_size, allocation.normalized_size
+            ),
             "requested_to_allocated_risk_percent": self._metric(
                 allocation.requested_risk_percent,
                 allocation.allocated_risk_percent,
             ),
         }
 
-    def _apply_market_status_gate(self, *, candidate: SignalCandidate, signal: EntrySignal) -> EntrySignal:
-        status = self.market_status_service.get_status(signal.instrument, broker=candidate.engine.broker, now=signal.signal_at)
+    def _apply_market_status_gate(
+        self, *, candidate: SignalCandidate, signal: EntrySignal
+    ) -> EntrySignal:
+        status = self.market_status_service.get_status(
+            signal.instrument, broker=candidate.engine.broker, now=signal.signal_at
+        )
         audit_summary = dict(signal.audit_summary)
         audit_summary["market_status"] = status.model_dump(mode="json")
         if status.is_ok:
@@ -633,16 +694,26 @@ class TradeDecisionService:
             audit_summary=audit_summary,
         )
 
-    def _apply_operational_policy_gate(self, *, candidate: SignalCandidate, signal: EntrySignal) -> EntrySignal:
+    def _apply_operational_policy_gate(
+        self, *, candidate: SignalCandidate, signal: EntrySignal
+    ) -> EntrySignal:
         operational_state = self.operational_state_service.get_summary()
         audit_summary = dict(signal.audit_summary)
         audit_summary["operational_policy"] = operational_state.model_dump(mode="json")
-        runtime_mode = str(getattr(candidate.engine, "runtime_mode", "NORMAL") or "NORMAL")
+        runtime_mode = str(
+            getattr(candidate.engine, "runtime_mode", "NORMAL") or "NORMAL"
+        )
         if operational_state.entry_eligible and runtime_mode != "EXITS_ONLY":
             return replace(signal, audit_summary=audit_summary)
         audit_trail = list(signal.audit_trail)
-        gate_reason = "runtime_exits_only" if runtime_mode == "EXITS_ONLY" else operational_state.entry_block_reason
-        rejection_reason = f"Operational policy blocked new autonomous entries: {gate_reason}."
+        gate_reason = (
+            "runtime_exits_only"
+            if runtime_mode == "EXITS_ONLY"
+            else operational_state.entry_block_reason
+        )
+        rejection_reason = (
+            f"Operational policy blocked new autonomous entries: {gate_reason}."
+        )
         audit_trail.append(
             {
                 "layer": "operational_policy",
@@ -654,12 +725,17 @@ class TradeDecisionService:
                         "code": "entry_eligible",
                         "passed": False,
                         "reason": gate_reason,
-                        "actual": {**operational_state.model_dump(mode="json"), "runtime_mode": runtime_mode},
+                        "actual": {
+                            **operational_state.model_dump(mode="json"),
+                            "runtime_mode": runtime_mode,
+                        },
                     }
                 ],
             }
         )
-        audit_summary.update({"approved": False, "rejection_layer": "operational_policy"})
+        audit_summary.update(
+            {"approved": False, "rejection_layer": "operational_policy"}
+        )
         return replace(
             signal,
             status=SignalStatus.REJECTED,
@@ -674,7 +750,11 @@ class TradeDecisionService:
         if signal.rejection_layer == "operational_policy":
             return "operational_policy_blocked"
         if signal.rejection_layer == "market_status":
-            return "market_closed" if "closed" in (signal.reason or "").lower() else "instrument_not_tradable"
+            return (
+                "market_closed"
+                if "closed" in (signal.reason or "").lower()
+                else "instrument_not_tradable"
+            )
         if signal.rejection_layer in {"portfolio", "kill_switch"}:
             return "portfolio_risk_rejected"
         if signal.rejection_layer == "market_quality":

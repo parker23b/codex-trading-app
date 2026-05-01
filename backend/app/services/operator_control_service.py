@@ -14,7 +14,9 @@ class OperatorControlService:
         self.settings = get_settings()
 
     def get_state(self) -> OperatorControlState:
-        state = self.session.exec(select(OperatorControlState).where(OperatorControlState.id == 1)).first()
+        state = self.session.exec(
+            select(OperatorControlState).where(OperatorControlState.id == 1)
+        ).first()
         if state is None:
             state = OperatorControlState(id=1)
             self.session.add(state)

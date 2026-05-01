@@ -196,7 +196,9 @@ class Broker(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def normalize_order_size(self, instrument: str, requested_size: float) -> BrokerSizeNormalization:
+    def normalize_order_size(
+        self, instrument: str, requested_size: float
+    ) -> BrokerSizeNormalization:
         raise NotImplementedError
 
 

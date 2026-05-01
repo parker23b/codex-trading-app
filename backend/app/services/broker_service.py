@@ -24,9 +24,13 @@ class BrokerService:
         try:
             positions = get_broker().get_positions()
         except Exception:
-            get_health_service().update_broker_state(connected=False, latency_ms=(perf_counter() - started_at) * 1000)
+            get_health_service().update_broker_state(
+                connected=False, latency_ms=(perf_counter() - started_at) * 1000
+            )
             raise
-        get_health_service().update_broker_state(connected=True, latency_ms=(perf_counter() - started_at) * 1000)
+        get_health_service().update_broker_state(
+            connected=True, latency_ms=(perf_counter() - started_at) * 1000
+        )
         return positions
 
     def get_account_summary(self) -> BrokerAccountSummary:
@@ -34,9 +38,13 @@ class BrokerService:
         try:
             summary = get_broker().get_account_summary()
         except Exception:
-            get_health_service().update_broker_state(connected=False, latency_ms=(perf_counter() - started_at) * 1000)
+            get_health_service().update_broker_state(
+                connected=False, latency_ms=(perf_counter() - started_at) * 1000
+            )
             raise
-        get_health_service().update_broker_state(connected=True, latency_ms=(perf_counter() - started_at) * 1000)
+        get_health_service().update_broker_state(
+            connected=True, latency_ms=(perf_counter() - started_at) * 1000
+        )
         return summary
 
     def reconcile_positions(self, session: Session) -> list[Position]:

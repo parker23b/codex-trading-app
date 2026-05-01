@@ -406,7 +406,14 @@ INSTRUMENT_CATALOG: tuple[InstrumentDefinition, ...] = (
 
 
 def list_instruments() -> list[dict[str, str]]:
-    return [{"epic": instrument.epic, "label": instrument.label, "category": instrument.category} for instrument in INSTRUMENT_CATALOG]
+    return [
+        {
+            "epic": instrument.epic,
+            "label": instrument.label,
+            "category": instrument.category,
+        }
+        for instrument in INSTRUMENT_CATALOG
+    ]
 
 
 def list_market_instruments() -> list[InstrumentDefinition]:

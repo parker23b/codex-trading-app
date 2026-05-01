@@ -32,7 +32,9 @@ def _feed_tick(
 
 
 def test_registry_lists_volatility_adjusted_pullback_continuation_strategy():
-    metadata = strategy_registry.get_metadata("volatility_adjusted_pullback_continuation")
+    metadata = strategy_registry.get_metadata(
+        "volatility_adjusted_pullback_continuation"
+    )
 
     assert metadata.default_instrument == "CS.D.EURUSD.MINI.IP"
     assert metadata.position_size == 0.4
@@ -42,7 +44,9 @@ def test_long_entry_and_trailing_exit():
     strategy = VolatilityAdjustedPullbackContinuationStrategy()
 
     prices = [1.1000 + (step * 0.0003) for step in range(60)]
-    prices.extend([1.1168, 1.1163, 1.1158, 1.1153, 1.1148, 1.1151, 1.1155, 1.1160, 1.1164])
+    prices.extend(
+        [1.1168, 1.1163, 1.1158, 1.1153, 1.1148, 1.1151, 1.1155, 1.1160, 1.1164]
+    )
     for index, price in enumerate(prices):
         if index < 50:
             _feed_tick(strategy, price, high_offset=0.00025, low_offset=0.00025)
@@ -69,7 +73,9 @@ def test_short_entry_and_trailing_exit():
     strategy = VolatilityAdjustedPullbackContinuationStrategy()
 
     prices = [1.1400 - (step * 0.0003) for step in range(60)]
-    prices.extend([1.1232, 1.1237, 1.1242, 1.1247, 1.1252, 1.1249, 1.1245, 1.1240, 1.1236])
+    prices.extend(
+        [1.1232, 1.1237, 1.1242, 1.1247, 1.1252, 1.1249, 1.1245, 1.1240, 1.1236]
+    )
     for index, price in enumerate(prices):
         if index < 50:
             _feed_tick(strategy, price, high_offset=0.00025, low_offset=0.00025)
@@ -111,10 +117,14 @@ def test_snapshot_restore_preserves_active_trade_state():
 
 
 def test_wide_spread_blocks_entry():
-    strategy = VolatilityAdjustedPullbackContinuationStrategy(max_spread_threshold=0.00005)
+    strategy = VolatilityAdjustedPullbackContinuationStrategy(
+        max_spread_threshold=0.00005
+    )
 
     prices = [1.1000 + (step * 0.0003) for step in range(60)]
-    prices.extend([1.1168, 1.1163, 1.1158, 1.1153, 1.1148, 1.1151, 1.1155, 1.1160, 1.1164])
+    prices.extend(
+        [1.1168, 1.1163, 1.1158, 1.1153, 1.1148, 1.1151, 1.1155, 1.1160, 1.1164]
+    )
     for price in prices:
         _feed_tick(strategy, price, spread=0.00008)
 

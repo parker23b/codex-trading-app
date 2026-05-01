@@ -24,8 +24,12 @@ class ChartService:
     def get_risk_allocation_chart(self) -> dict[str, object]:
         return self.dashboard_service.build_risk_allocation()
 
-    def get_live_instrument_chart(self, instrument: str, *, timeframe: str = "1m") -> dict[str, object]:
-        candle_projection = self._load_candles(instrument=instrument, timeframe=timeframe)
+    def get_live_instrument_chart(
+        self, instrument: str, *, timeframe: str = "1m"
+    ) -> dict[str, object]:
+        candle_projection = self._load_candles(
+            instrument=instrument, timeframe=timeframe
+        )
         watchlist_service = WatchlistService(self.trade_service.session)
         return {
             "instrument": instrument,
@@ -43,13 +47,18 @@ class ChartService:
 
     def _load_candles(self, *, instrument: str, timeframe: str) -> dict[str, object]:
         watchlist_service = WatchlistService(self.trade_service.session)
-        definition = next((item for item in list_market_instruments() if item.epic == instrument), None)
+        definition = next(
+            (item for item in list_market_instruments() if item.epic == instrument),
+            None,
+        )
         if definition is None:
             return {
                 "candles": [],
                 "source": "UNAVAILABLE",
                 "data_state": "UNSUPPORTED",
-                "reason_detail": watchlist_service.reason_detail("unsupported_chart_instrument"),
+                "reason_detail": watchlist_service.reason_detail(
+                    "unsupported_chart_instrument"
+                ),
             }
 
         broker = get_broker()
@@ -62,7 +71,9 @@ class ChartService:
                 )
                 if candles:
                     return {
-                        "candles": [self._normalize_candle(candle) for candle in candles],
+                        "candles": [
+                            self._normalize_candle(candle) for candle in candles
+                        ],
                         "source": "REST_CANDLES",
                         "data_state": "READY",
                         "reason_detail": None,
@@ -72,7 +83,9 @@ class ChartService:
                     "candles": [],
                     "source": "UNAVAILABLE",
                     "data_state": "EMPTY",
-                    "reason_detail": watchlist_service.reason_detail("broker_candles_unavailable"),
+                    "reason_detail": watchlist_service.reason_detail(
+                        "broker_candles_unavailable"
+                    ),
                 }
 
         return {
@@ -86,7 +99,17 @@ class ChartService:
     def _normalize_candle(candle: dict[str, object]) -> dict[str, object]:
         return {
             **candle,
-            "source": "REST_CANDLES" if candle.get("source") not in {"STREAM", "REST_CANDLES", "SNAPSHOT", "FALLBACK", "STALE", "UNAVAILABLE"} else candle.get("source"),
+            "source": "REST_CANDLES"
+            if candle.get("source")
+            not in {
+                "STREAM",
+                "REST_CANDLES",
+                "SNAPSHOT",
+                "FALLBACK",
+                "STALE",
+                "UNAVAILABLE",
+            }
+            else candle.get("source"),
         }
 
     def _candidate_markers(self, instrument: str) -> list[dict[str, object]]:
@@ -101,7 +124,9 @@ class ChartService:
                 "reason": intent.decision_reason or intent.decision_reason_code,
                 "trade_intent_id": intent.id,
             }
-            for intent in self.trade_service.list_trade_intents(limit=200, instrument=instrument)
+            for intent in self.trade_service.list_trade_intents(
+                limit=200, instrument=instrument
+            )
         ]
 
     def _intent_markers(self, instrument: str) -> list[dict[str, object]]:
@@ -116,7 +141,9 @@ class ChartService:
                 "reason": intent.decision_reason or intent.decision_reason_code,
                 "trade_intent_id": intent.id,
             }
-            for intent in self.trade_service.list_trade_intents(limit=200, instrument=instrument)
+            for intent in self.trade_service.list_trade_intents(
+                limit=200, instrument=instrument
+            )
         ]
 
     def _execution_markers(self, instrument: str) -> list[dict[str, object]]:
@@ -168,6 +195,9 @@ class ChartService:
             TradeIntentState.POSITION_OPENED.value,
         }:
             return "promoted_to_trade_intent"
-        if intent.state in {TradeIntentState.FAILED.value, TradeIntentState.CANCELLED.value}:
+        if intent.state in {
+            TradeIntentState.FAILED.value,
+            TradeIntentState.CANCELLED.value,
+        }:
             return "expired"
         return "selected"

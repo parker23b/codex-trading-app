@@ -6,7 +6,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.core.broker import AccountType, BrokerAccountSummary, BrokerMarketDetails, BrokerSizingMode, OrderDirection
+from app.core.broker import (
+    AccountType,
+    BrokerAccountSummary,
+    BrokerMarketDetails,
+    BrokerSizingMode,
+    OrderDirection,
+)
 from app.core.runtime import runtime_manager
 from app.core.signals import EntrySignal, SignalCandidate, SignalKind
 from app.models.trade import Position, TradeIntent, TradeIntentState
@@ -51,7 +57,13 @@ def _candidate(
             size_step=size_step,
             base_currency="EUR" if instrument.startswith("CS.D.EURUSD") else None,
             quote_currency="USD" if instrument.startswith("CS.D.EURUSD") else None,
-            metadata={"sizing_profile": sizing_profile or {"mode": BrokerSizingMode.APPROXIMATE_PRICE_DELTA.value, "contract_multiplier": 1.0}},
+            metadata={
+                "sizing_profile": sizing_profile
+                or {
+                    "mode": BrokerSizingMode.APPROXIMATE_PRICE_DELTA.value,
+                    "contract_multiplier": 1.0,
+                }
+            },
         ),
     )
     return SignalCandidate(
@@ -73,7 +85,11 @@ def _candidate(
             market_status="TRADEABLE",
             tradable=True,
         ),
-        engine=SimpleNamespace(strategy=SimpleNamespace(name=strategy_name), broker=broker, instrument=instrument),
+        engine=SimpleNamespace(
+            strategy=SimpleNamespace(name=strategy_name),
+            broker=broker,
+            instrument=instrument,
+        ),
         source_tier="TIER1",
         confidence=confidence,
         metadata=SimpleNamespace(
@@ -83,12 +99,16 @@ def _candidate(
 
 
 def test_allocator_no_longer_contains_ig_specific_sizing_branch():
-    source = Path("/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/capital_allocator_service.py").read_text()
+    source = Path(
+        "/Users/benparker/Documents/repos/codex-trading-app/backend/app/services/capital_allocator_service.py"
+    ).read_text()
 
     assert "ig_point_value" not in source
 
 
-def test_allocator_sizes_with_broker_owned_exact_point_value_quote(session, broker, fixed_now):
+def test_allocator_sizes_with_broker_owned_exact_point_value_quote(
+    session, broker, fixed_now
+):
     broker.account_summary = BrokerAccountSummary(
         account_id="ig-exact",
         balance=1_000.0,
@@ -113,17 +133,24 @@ def test_allocator_sizes_with_broker_owned_exact_point_value_quote(session, brok
         },
     )
 
-    decision = CapitalAllocatorService(session).allocate([candidate], received_at=fixed_now)[0]
+    decision = CapitalAllocatorService(session).allocate(
+        [candidate], received_at=fixed_now
+    )[0]
 
     assert decision.selected is True
     assert decision.sizing_method == "stop_distance"
     assert decision.risk_amount == pytest.approx(10.0)
     assert decision.normalized_size == pytest.approx(1.0)
-    assert decision.sizing_details["sizing_mode"] == BrokerSizingMode.EXACT_POINT_VALUE.value
+    assert (
+        decision.sizing_details["sizing_mode"]
+        == BrokerSizingMode.EXACT_POINT_VALUE.value
+    )
     assert decision.sizing_details["risk_per_unit"] == pytest.approx(10.0)
 
 
-def test_allocator_uses_same_broker_quote_model_for_fallback_stop(session, broker, fixed_now):
+def test_allocator_uses_same_broker_quote_model_for_fallback_stop(
+    session, broker, fixed_now
+):
     broker.account_summary = BrokerAccountSummary(
         account_id="ig-fallback",
         balance=1_000.0,
@@ -147,17 +174,24 @@ def test_allocator_uses_same_broker_quote_model_for_fallback_stop(session, broke
         },
     )
 
-    decision = CapitalAllocatorService(session).allocate([candidate], received_at=fixed_now)[0]
+    decision = CapitalAllocatorService(session).allocate(
+        [candidate], received_at=fixed_now
+    )[0]
 
     assert decision.selected is True
     assert decision.sizing_method == "fallback_percent_stop"
-    assert decision.sizing_details["sizing_mode"] == BrokerSizingMode.EXACT_POINT_VALUE.value
+    assert (
+        decision.sizing_details["sizing_mode"]
+        == BrokerSizingMode.EXACT_POINT_VALUE.value
+    )
     assert decision.sizing_details["stop_distance_price"] == pytest.approx(0.006)
     assert decision.sizing_details["risk_per_unit"] == pytest.approx(60.0)
     assert decision.normalized_size == pytest.approx(10.0 / 60.0)
 
 
-def test_allocator_supports_second_broker_with_exact_contract_risk_mode(session, fixed_now):
+def test_allocator_supports_second_broker_with_exact_contract_risk_mode(
+    session, fixed_now
+):
     broker = ContractRiskBroker(
         account_summary=BrokerAccountSummary(
             account_id="contract-broker",
@@ -197,15 +231,22 @@ def test_allocator_supports_second_broker_with_exact_contract_risk_mode(session,
         stop_loss_price=1.2490,
     )
 
-    decision = CapitalAllocatorService(session).allocate([candidate], received_at=fixed_now)[0]
+    decision = CapitalAllocatorService(session).allocate(
+        [candidate], received_at=fixed_now
+    )[0]
 
     assert decision.selected is True
-    assert decision.sizing_details["sizing_mode"] == BrokerSizingMode.EXACT_CONTRACT_RISK.value
+    assert (
+        decision.sizing_details["sizing_mode"]
+        == BrokerSizingMode.EXACT_CONTRACT_RISK.value
+    )
     assert decision.sizing_details["risk_per_unit"] == pytest.approx(100.0)
     assert decision.normalized_size == pytest.approx(0.5)
 
 
-def test_allocator_reserves_budget_for_pending_intents_across_cycles(session, broker, fixed_now):
+def test_allocator_reserves_budget_for_pending_intents_across_cycles(
+    session, broker, fixed_now
+):
     broker.account_summary = BrokerAccountSummary(
         account_id="reserved-budget",
         balance=1_000.0,
@@ -250,8 +291,14 @@ def test_allocator_reserves_budget_for_pending_intents_across_cycles(session, br
     assert decision.allocated_risk_percent == pytest.approx(0.1)
 
 
-def test_allocator_rejects_when_account_equity_is_unavailable(session, broker, fixed_now, monkeypatch):
-    monkeypatch.setattr(broker, "get_account_summary", lambda: (_ for _ in ()).throw(RuntimeError("broker down")))
+def test_allocator_rejects_when_account_equity_is_unavailable(
+    session, broker, fixed_now, monkeypatch
+):
+    monkeypatch.setattr(
+        broker,
+        "get_account_summary",
+        lambda: (_ for _ in ()).throw(RuntimeError("broker down")),
+    )
     candidate = _candidate(
         strategy_name="mean_reversion",
         instrument="IX.D.FTSE.DAILY.IP",
@@ -261,13 +308,17 @@ def test_allocator_rejects_when_account_equity_is_unavailable(session, broker, f
         price=100.0,
     )
 
-    decision = CapitalAllocatorService(session).allocate([candidate], received_at=fixed_now)[0]
+    decision = CapitalAllocatorService(session).allocate(
+        [candidate], received_at=fixed_now
+    )[0]
 
     assert decision.selected is False
     assert decision.reason_code == "account_equity_unavailable"
 
 
-def test_allocator_rejects_when_account_equity_is_non_positive(session, broker, fixed_now):
+def test_allocator_rejects_when_account_equity_is_non_positive(
+    session, broker, fixed_now
+):
     broker.account_summary = BrokerAccountSummary(
         account_id="invalid-equity",
         balance=0.0,
@@ -285,13 +336,17 @@ def test_allocator_rejects_when_account_equity_is_non_positive(session, broker, 
         price=100.0,
     )
 
-    decision = CapitalAllocatorService(session).allocate([candidate], received_at=fixed_now)[0]
+    decision = CapitalAllocatorService(session).allocate(
+        [candidate], received_at=fixed_now
+    )[0]
 
     assert decision.selected is False
     assert decision.reason_code == "account_equity_invalid"
 
 
-def test_allocator_handles_broker_metadata_failure_gracefully(session, broker, fixed_now, monkeypatch):
+def test_allocator_handles_broker_metadata_failure_gracefully(
+    session, broker, fixed_now, monkeypatch
+):
     broker.account_summary = BrokerAccountSummary(
         account_id="meta-fail",
         balance=1_000.0,
@@ -300,7 +355,11 @@ def test_allocator_handles_broker_metadata_failure_gracefully(session, broker, f
         equity=1_000.0,
         account_type=AccountType.DEMO,
     )
-    monkeypatch.setattr(broker, "get_market_details", lambda instrument: (_ for _ in ()).throw(RuntimeError("metadata unavailable")))
+    monkeypatch.setattr(
+        broker,
+        "get_market_details",
+        lambda instrument: (_ for _ in ()).throw(RuntimeError("metadata unavailable")),
+    )
     candidate = _candidate(
         strategy_name="mean_reversion",
         instrument="IX.D.FTSE.DAILY.IP",
@@ -310,13 +369,17 @@ def test_allocator_handles_broker_metadata_failure_gracefully(session, broker, f
         price=100.0,
     )
 
-    decision = CapitalAllocatorService(session).allocate([candidate], received_at=fixed_now)[0]
+    decision = CapitalAllocatorService(session).allocate(
+        [candidate], received_at=fixed_now
+    )[0]
 
     assert decision.selected is False
     assert decision.reason_code == "broker_metadata_unavailable"
 
 
-def test_allocator_rejects_approximate_broker_quote_for_live_account(session, broker, fixed_now):
+def test_allocator_rejects_approximate_broker_quote_for_live_account(
+    session, broker, fixed_now
+):
     broker._account_type = AccountType.LIVE
     broker.account_summary = BrokerAccountSummary(
         account_id="live-approx",
@@ -333,10 +396,15 @@ def test_allocator_rejects_approximate_broker_quote_for_live_account(session, br
         signal_at=fixed_now,
         broker=broker,
         price=100.0,
-        sizing_profile={"mode": BrokerSizingMode.APPROXIMATE_PRICE_DELTA.value, "contract_multiplier": 1.0},
+        sizing_profile={
+            "mode": BrokerSizingMode.APPROXIMATE_PRICE_DELTA.value,
+            "contract_multiplier": 1.0,
+        },
     )
 
-    decision = CapitalAllocatorService(session).allocate([candidate], received_at=fixed_now)[0]
+    decision = CapitalAllocatorService(session).allocate(
+        [candidate], received_at=fixed_now
+    )[0]
 
     assert decision.selected is False
     assert decision.reason_code == "approximate_sizing_unsupported"
@@ -393,7 +461,9 @@ def test_family_budget_uses_persisted_family_values(session, broker, fixed_now):
     assert decision.allocated_risk_percent == pytest.approx(0.1)
 
 
-def test_allocator_rounds_up_to_minimum_deal_size_without_exceeding_hard_budget(session, broker, fixed_now):
+def test_allocator_rounds_up_to_minimum_deal_size_without_exceeding_hard_budget(
+    session, broker, fixed_now
+):
     broker.account_summary = BrokerAccountSummary(
         account_id="round-up-safe",
         balance=47.5,
@@ -427,7 +497,9 @@ def test_allocator_rounds_up_to_minimum_deal_size_without_exceeding_hard_budget(
     assert "rounded_up_to_minimum_deal_size" in decision.notes
 
 
-def test_allocator_rejects_round_up_when_hard_budget_would_be_exceeded(session, broker, fixed_now):
+def test_allocator_rejects_round_up_when_hard_budget_would_be_exceeded(
+    session, broker, fixed_now
+):
     broker.account_summary = BrokerAccountSummary(
         account_id="round-up-hard-budget",
         balance=47.5,
@@ -459,7 +531,9 @@ def test_allocator_rejects_round_up_when_hard_budget_would_be_exceeded(session, 
     assert decision.reason_code == "below_min_size"
 
 
-def test_trade_decision_service_persists_allocation_audit_on_rejection(session, broker, fixed_now):
+def test_trade_decision_service_persists_allocation_audit_on_rejection(
+    session, broker, fixed_now
+):
     runtime_manager.last_price_updated_at["IX.D.FTSE.DAILY.IP"] = fixed_now
     broker.account_summary = BrokerAccountSummary(
         account_id="audit",
@@ -479,10 +553,14 @@ def test_trade_decision_service_persists_allocation_audit_on_rejection(session, 
         risk_per_trade=1.0,
     )
 
-    result = TradeDecisionService(session).decide_signal_candidates([candidate], received_at=fixed_now)[0]
+    result = TradeDecisionService(session).decide_signal_candidates(
+        [candidate], received_at=fixed_now
+    )[0]
     intent = TradeService(session).list_trade_intents(limit=1)[0]
 
     assert result.admitted is False
     assert intent.state == "REJECTED"
-    assert ((intent.details or {}).get("allocation") or {}).get("priority_score") is not None
+    assert ((intent.details or {}).get("allocation") or {}).get(
+        "priority_score"
+    ) is not None
     assert intent.decision_reason_code == "stale_signal"

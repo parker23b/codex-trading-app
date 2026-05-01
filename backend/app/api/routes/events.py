@@ -87,5 +87,8 @@ def list_events(
 def get_event(event_id: int) -> DomainEventResponse:
     event = domain_event_service.get_event(event_id)
     if event is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Event '{event_id}' not found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Event '{event_id}' not found.",
+        )
     return _serialize_event(event)

@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from sqlmodel import Session, select
 
-from app.core.broker import BrokerOrderStatus, OrderDirection, OrderRequest
+from app.core.broker import BrokerOrderStatus, OrderRequest
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.signals import EntrySignal, ExitSignal, SignalCandidate, SignalStatus
@@ -25,7 +25,10 @@ from app.models.trade import (
     utc_now,
 )
 from app.strategies.registry import strategy_registry
-from app.services.trade_decision_service import TradeDecisionResult, TradeDecisionService
+from app.services.trade_decision_service import (
+    TradeDecisionResult,
+    TradeDecisionService,
+)
 from app.services.domain_event_service import domain_event_service
 from app.services.health_service import get_health_service
 from app.services.market_status_service import MarketStatus, get_market_status_service
@@ -67,8 +70,12 @@ class StrategyService:
         self.event_service = domain_event_service
         self.health_service = get_health_service()
         self.market_status_service = get_market_status_service()
-        self.trade_decision_service = TradeDecisionService(session) if session is not None else None
-        self.runtime_state_service = RuntimeStateService(session) if session is not None else None
+        self.trade_decision_service = (
+            TradeDecisionService(session) if session is not None else None
+        )
+        self.runtime_state_service = (
+            RuntimeStateService(session) if session is not None else None
+        )
 
     def list_strategies(self) -> list[dict[str, object]]:
         if self.session is None:
@@ -79,8 +86,12 @@ class StrategyService:
         positions = trade_service.list_positions()
         executions = trade_service.list_executions(limit=250)
         intents = trade_service.list_trade_intents(limit=250)
-        today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-        today_intents = trade_service.list_trade_intents(limit=1000, date_from=today_start)
+        today_start = datetime.now(UTC).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        today_intents = trade_service.list_trade_intents(
+            limit=1000, date_from=today_start
+        )
         today_intents_by_strategy: dict[str, list[TradeIntent]] = defaultdict(list)
         for intent in today_intents:
             today_intents_by_strategy[intent.strategy_name].append(intent)
@@ -92,7 +103,10 @@ class StrategyService:
             trades_by_strategy[trade.strategy_name].append(trade.pnl)
         latest_execution_warning_by_key: dict[tuple[str, str], Execution] = {}
         for execution in executions:
-            if execution.status not in {ExecutionStatus.FAILED.value, ExecutionStatus.NEEDS_MANUAL_REVIEW.value}:
+            if execution.status not in {
+                ExecutionStatus.FAILED.value,
+                ExecutionStatus.NEEDS_MANUAL_REVIEW.value,
+            }:
                 continue
             key = (execution.strategy_name, execution.instrument)
             if key not in latest_execution_warning_by_key:
@@ -131,13 +145,23 @@ class StrategyService:
                 sum(position.unrealized_pnl or 0.0 for position in strategy_positions),
                 2,
             )
-            primary_instrument = primary_engine.instrument if primary_engine else metadata.default_instrument
-            primary_warning = latest_execution_warning_by_key.get((metadata.name, primary_instrument))
-            primary_decision_warning = latest_decision_warning_by_key.get((metadata.name, primary_instrument))
+            primary_instrument = (
+                primary_engine.instrument
+                if primary_engine
+                else metadata.default_instrument
+            )
+            primary_warning = latest_execution_warning_by_key.get(
+                (metadata.name, primary_instrument)
+            )
+            primary_decision_warning = latest_decision_warning_by_key.get(
+                (metadata.name, primary_instrument)
+            )
             primary_warning_message = None
             primary_warning_status = None
             if primary_warning is not None:
-                primary_warning_message = primary_warning.error_message or primary_warning.reason
+                primary_warning_message = (
+                    primary_warning.error_message or primary_warning.reason
+                )
                 primary_warning_status = primary_warning.status
             elif primary_decision_warning is not None:
                 primary_warning_message = primary_decision_warning.decision_reason
@@ -161,14 +185,17 @@ class StrategyService:
                 ]
             )
             blocked_today_count = len(
-                [intent for intent in strategy_today_intents if intent.state == TradeIntentState.REJECTED.value]
+                [
+                    intent
+                    for intent in strategy_today_intents
+                    if intent.state == TradeIntentState.REJECTED.value
+                ]
             )
             active_parameter_values = (
                 primary_runtime.parameters
                 if primary_runtime is not None and primary_runtime.parameters
                 else {
-                    parameter.key: parameter.value
-                    for parameter in metadata.parameters
+                    parameter.key: parameter.value for parameter in metadata.parameters
                 }
             )
             price_snapshot = (
@@ -187,19 +214,31 @@ class StrategyService:
                     "status": "RUNNING" if active_engines else "STOPPED",
                     "current_pnl": current_pnl,
                     "last_price": price_snapshot["price"] if price_snapshot else None,
-                    "price_status": price_snapshot["status"] if price_snapshot else "STOPPED",
+                    "price_status": price_snapshot["status"]
+                    if price_snapshot
+                    else "STOPPED",
                     "price_error": price_snapshot["error"] if price_snapshot else None,
-                    "last_price_updated_at": price_snapshot["updated_at"] if price_snapshot else None,
+                    "last_price_updated_at": price_snapshot["updated_at"]
+                    if price_snapshot
+                    else None,
                     "trade_count": trade_count,
-                    "win_rate": round((win_count / trade_count) * 100, 2) if trade_count else 0.0,
+                    "win_rate": round((win_count / trade_count) * 100, 2)
+                    if trade_count
+                    else 0.0,
                     "account_type": self.settings.broker_mode,
                     "position_size": metadata.position_size,
                     "risk_per_trade": metadata.risk_per_trade,
                     "supported_asset_classes": list(metadata.supported_asset_classes),
-                    "available_profiles": [profile.name for profile in metadata.parameter_profiles],
-                    "governance_approval_state": governance.approval_state if governance is not None else "UNKNOWN",
+                    "available_profiles": [
+                        profile.name for profile in metadata.parameter_profiles
+                    ],
+                    "governance_approval_state": governance.approval_state
+                    if governance is not None
+                    else "UNKNOWN",
                     "autonomous_operation_allowed": (
-                        governance.autonomous_operation_allowed if governance is not None else False
+                        governance.autonomous_operation_allowed
+                        if governance is not None
+                        else False
                     ),
                     "authorized": (
                         governance.approval_state == "APPROVED"
@@ -208,11 +247,21 @@ class StrategyService:
                         if governance is not None
                         else False
                     ),
-                    "emergency_stop": governance.emergency_stop if governance is not None else False,
-                    "deployment_state": deployment.state if deployment is not None else "UNASSIGNED",
-                    "deployment_profile": deployment.selected_profile if deployment is not None else None,
-                    "deployment_parameters": deployment.selected_profile_parameters if deployment is not None else {},
-                    "deployment_instrument": deployment.selected_instrument if deployment is not None else None,
+                    "emergency_stop": governance.emergency_stop
+                    if governance is not None
+                    else False,
+                    "deployment_state": deployment.state
+                    if deployment is not None
+                    else "UNASSIGNED",
+                    "deployment_profile": deployment.selected_profile
+                    if deployment is not None
+                    else None,
+                    "deployment_parameters": deployment.selected_profile_parameters
+                    if deployment is not None
+                    else {},
+                    "deployment_instrument": deployment.selected_instrument
+                    if deployment is not None
+                    else None,
                     "deployment_reason": (
                         deployment.blocked_reason
                         or deployment.degraded_reason
@@ -220,8 +269,12 @@ class StrategyService:
                         if deployment is not None
                         else None
                     ),
-                    "active_instruments": [engine.instrument for _, engine in active_engines],
-                    "evaluating_instrument_count": len({engine.instrument for _, engine in active_engines}),
+                    "active_instruments": [
+                        engine.instrument for _, engine in active_engines
+                    ],
+                    "evaluating_instrument_count": len(
+                        {engine.instrument for _, engine in active_engines}
+                    ),
                     "candidates_generated_today": len(strategy_today_intents),
                     "candidates_promoted_today": promoted_today_count,
                     "candidates_blocked_today": blocked_today_count,
@@ -231,7 +284,9 @@ class StrategyService:
                     "warning_instrument": (
                         primary_warning.instrument
                         if primary_warning is not None
-                        else primary_decision_warning.instrument if primary_decision_warning is not None else None
+                        else primary_decision_warning.instrument
+                        if primary_decision_warning is not None
+                        else None
                     ),
                     "warning_status": primary_warning_status,
                     "active_runtimes": [
@@ -240,33 +295,66 @@ class StrategyService:
                             "instrument": engine.instrument,
                             "runtime_key": f"{metadata.name}:{engine.instrument}",
                             "has_open_position": engine.current_position is not None,
-                            "broker_reference": engine.current_position.broker_reference if engine.current_position else None,
-                            "direction": engine.current_position.direction if engine.current_position else None,
-                            "current_price": engine.current_position.current_price if engine.current_position else None,
-                            "unrealized_pnl": engine.current_position.unrealized_pnl if engine.current_position else None,
+                            "broker_reference": engine.current_position.broker_reference
+                            if engine.current_position
+                            else None,
+                            "direction": engine.current_position.direction
+                            if engine.current_position
+                            else None,
+                            "current_price": engine.current_position.current_price
+                            if engine.current_position
+                            else None,
+                            "unrealized_pnl": engine.current_position.unrealized_pnl
+                            if engine.current_position
+                            else None,
                             "recovery_state": (
-                                runtimes_by_key.get((metadata.name, engine.instrument)).recovery_state
-                                if runtimes_by_key.get((metadata.name, engine.instrument)) is not None
+                                runtimes_by_key.get(
+                                    (metadata.name, engine.instrument)
+                                ).recovery_state
+                                if runtimes_by_key.get(
+                                    (metadata.name, engine.instrument)
+                                )
+                                is not None
                                 else "EPHEMERAL"
                             ),
                             "runtime_mode": (
-                                runtimes_by_key.get((metadata.name, engine.instrument)).runtime_mode
-                                if runtimes_by_key.get((metadata.name, engine.instrument)) is not None
+                                runtimes_by_key.get(
+                                    (metadata.name, engine.instrument)
+                                ).runtime_mode
+                                if runtimes_by_key.get(
+                                    (metadata.name, engine.instrument)
+                                )
+                                is not None
                                 else getattr(engine, "runtime_mode", "NORMAL")
                             ),
                             "control_mode": (
-                                runtimes_by_key.get((metadata.name, engine.instrument)).control_mode
-                                if runtimes_by_key.get((metadata.name, engine.instrument)) is not None
+                                runtimes_by_key.get(
+                                    (metadata.name, engine.instrument)
+                                ).control_mode
+                                if runtimes_by_key.get(
+                                    (metadata.name, engine.instrument)
+                                )
+                                is not None
                                 else "EPHEMERAL"
                             ),
                             "deployment_id": (
-                                runtimes_by_key.get((metadata.name, engine.instrument)).deployment_id
-                                if runtimes_by_key.get((metadata.name, engine.instrument)) is not None
+                                runtimes_by_key.get(
+                                    (metadata.name, engine.instrument)
+                                ).deployment_id
+                                if runtimes_by_key.get(
+                                    (metadata.name, engine.instrument)
+                                )
+                                is not None
                                 else None
                             ),
                             "recovery_reason": (
-                                runtimes_by_key.get((metadata.name, engine.instrument)).recovery_reason
-                                if runtimes_by_key.get((metadata.name, engine.instrument)) is not None
+                                runtimes_by_key.get(
+                                    (metadata.name, engine.instrument)
+                                ).recovery_reason
+                                if runtimes_by_key.get(
+                                    (metadata.name, engine.instrument)
+                                )
+                                is not None
                                 else None
                             ),
                         }
@@ -310,7 +398,9 @@ class StrategyService:
                         {
                             "key": parameter.key,
                             "label": parameter.label,
-                            "value": active_parameter_values.get(parameter.key, parameter.value),
+                            "value": active_parameter_values.get(
+                                parameter.key, parameter.value
+                            ),
                             "step": parameter.step,
                         }
                         for parameter in metadata.parameters
@@ -359,7 +449,9 @@ class StrategyService:
                 active_profile_name=engine.active_profile_name,
                 parameters=engine.strategy_parameters,
                 last_price_seen=runtime_manager.get_last_price(instrument),
-                last_price_seen_at=runtime_manager.get_last_price_updated_at(instrument),
+                last_price_seen_at=runtime_manager.get_last_price_updated_at(
+                    instrument
+                ),
                 current_position=engine.current_position,
             )
         self.event_service.record_event(
@@ -396,7 +488,9 @@ class StrategyService:
             return requested_runtime_mode or "NORMAL"
 
         deployment = self.session.exec(
-            select(StrategyDeployment).where(StrategyDeployment.strategy_name == strategy_name)
+            select(StrategyDeployment).where(
+                StrategyDeployment.strategy_name == strategy_name
+            )
         ).first()
         if (
             deployment is not None
@@ -410,10 +504,18 @@ class StrategyService:
         if requested_runtime_mode is not None:
             return requested_runtime_mode
 
-        persisted_runtime = self.runtime_state_service.get_runtime(strategy_name, instrument)
-        if persisted_runtime is not None and persisted_runtime.runtime_mode in {"NORMAL", "EXITS_ONLY"}:
+        persisted_runtime = self.runtime_state_service.get_runtime(
+            strategy_name, instrument
+        )
+        if persisted_runtime is not None and persisted_runtime.runtime_mode in {
+            "NORMAL",
+            "EXITS_ONLY",
+        }:
             return persisted_runtime.runtime_mode
-        if deployment is not None and deployment.open_risk_management_state == "EXITS_ONLY":
+        if (
+            deployment is not None
+            and deployment.open_risk_management_state == "EXITS_ONLY"
+        ):
             return "EXITS_ONLY"
         return "NORMAL"
 
@@ -427,7 +529,9 @@ class StrategyService:
     ) -> None:
         engine = runtime_manager.get_engine(strategy_name, instrument)
         if engine is None:
-            raise ValueError(f"No active engine for strategy '{strategy_name}' on '{instrument}'.")
+            raise ValueError(
+                f"No active engine for strategy '{strategy_name}' on '{instrument}'."
+            )
         engine.runtime_mode = runtime_mode
         if self.runtime_state_service is not None:
             self.runtime_state_service.sync_engine_state(
@@ -438,7 +542,9 @@ class StrategyService:
                 control_mode="AUTO",
                 runtime_mode=runtime_mode,
                 last_price_seen=runtime_manager.get_last_price(instrument),
-                last_price_seen_at=runtime_manager.get_last_price_updated_at(instrument),
+                last_price_seen_at=runtime_manager.get_last_price_updated_at(
+                    instrument
+                ),
                 current_position=engine.current_position,
                 recovery_reason=recovery_reason,
             )
@@ -455,8 +561,12 @@ class StrategyService:
             payload_json={"runtime_mode": runtime_mode, "reason": recovery_reason},
         )
 
-    def stop_strategy(self, instrument: str | None = None, strategy_name: str | None = None) -> None:
-        stopped_engines = runtime_manager.stop(instrument=instrument, strategy_name=strategy_name)
+    def stop_strategy(
+        self, instrument: str | None = None, strategy_name: str | None = None
+    ) -> None:
+        stopped_engines = runtime_manager.stop(
+            instrument=instrument, strategy_name=strategy_name
+        )
         if self.runtime_state_service is not None:
             for engine in stopped_engines:
                 self.runtime_state_service.mark_stopped(engine.runtime_id)
@@ -489,7 +599,9 @@ class StrategyService:
         self.health_service.set_paused_strategies(paused_count)
 
     @staticmethod
-    def _entry_execution_policy_block(*, session: Session, engine) -> tuple[str, str, dict[str, object]] | None:
+    def _entry_execution_policy_block(
+        *, session: Session, engine
+    ) -> tuple[str, str, dict[str, object]] | None:
         # This late guard intentionally mirrors the admission-time policy.
         # It must remain in place even if earlier layers already blocked
         # entries, because runtime mode or operational eligibility can change
@@ -506,7 +618,10 @@ class StrategyService:
             return (
                 "entry_execution_blocked_operational_policy",
                 f"Entry execution blocked by operational policy: {operational_state.entry_block_reason}.",
-                {"operational_policy": operational_state.model_dump(mode="json"), "runtime_mode": runtime_mode},
+                {
+                    "operational_policy": operational_state.model_dump(mode="json"),
+                    "runtime_mode": runtime_mode,
+                },
             )
         return None
 
@@ -565,7 +680,9 @@ class StrategyService:
         source_tier: str = "TIER1",
     ) -> list[SignalCandidate]:
         if self.session is None:
-            raise ValueError("A database session is required to evaluate price updates.")
+            raise ValueError(
+                "A database session is required to evaluate price updates."
+            )
 
         update_results = runtime_manager.process_price_update(
             instrument=instrument,
@@ -604,7 +721,9 @@ class StrategyService:
                     signal=update_result.signal,
                     engine=update_result.engine,
                     source_tier=source_tier,
-                    metadata=strategy_registry.get_metadata(update_result.engine.strategy.name),
+                    metadata=strategy_registry.get_metadata(
+                        update_result.engine.strategy.name
+                    ),
                 )
             )
         return candidates
@@ -616,8 +735,12 @@ class StrategyService:
         received_at: datetime | None = None,
     ) -> list[TradeDecisionResult]:
         if self.session is None or self.trade_decision_service is None:
-            raise ValueError("A database session is required to decide signal candidates.")
-        return self.trade_decision_service.decide_signal_candidates(candidates, received_at=received_at)
+            raise ValueError(
+                "A database session is required to decide signal candidates."
+            )
+        return self.trade_decision_service.decide_signal_candidates(
+            candidates, received_at=received_at
+        )
 
     def allocate_signal_candidates(
         self,
@@ -664,22 +787,25 @@ class StrategyService:
         received_at: datetime | None = None,
     ) -> None:
         if self.session is None:
-            raise ValueError("A database session is required to orchestrate trade decisions.")
+            raise ValueError(
+                "A database session is required to orchestrate trade decisions."
+            )
 
         trade_service = TradeService(self.session)
-        open_positions = trade_service.list_positions()
-        trades = trade_service.list_trades()
 
         for decision in decisions:
             candidate = decision.candidate
             engine = candidate.engine
-            metadata = candidate.metadata
             intent = decision.intent
             existing_position = trade_service.get_open_position(
                 candidate.instrument,
                 strategy_name=engine.strategy.name,
                 broker_reference=(
-                    getattr(getattr(engine, "current_position", None), "broker_reference", None)
+                    getattr(
+                        getattr(engine, "current_position", None),
+                        "broker_reference",
+                        None,
+                    )
                 ),
             )
             signal = candidate.signal
@@ -689,7 +815,9 @@ class StrategyService:
                 # and only materialize execution rows once an approved intent is
                 # actually entering broker-submission orchestration.
                 if decision.admitted and intent is not None:
-                    late_block = self._entry_execution_policy_block(session=self.session, engine=engine)
+                    late_block = self._entry_execution_policy_block(
+                        session=self.session, engine=engine
+                    )
                     if late_block is not None:
                         code, reason, details = late_block
                         trade_service.transition_trade_intent(
@@ -767,13 +895,27 @@ class StrategyService:
                         engine.current_position = None
                         engine.strategy.on_entry_failed()
                         if intent.state != TradeIntentState.POSITION_OPENED.value:
-                            latest_execution = trade_service.get_latest_execution_for_trade_intent(intent.id or 0) if intent.id is not None else execution
+                            latest_execution = (
+                                trade_service.get_latest_execution_for_trade_intent(
+                                    intent.id or 0
+                                )
+                                if intent.id is not None
+                                else execution
+                            )
                             execution_stage = "execution_failed"
                             fill_status = None
-                            if latest_execution is not None and latest_execution.status == ExecutionStatus.FILL_PARTIAL.value:
+                            if (
+                                latest_execution is not None
+                                and latest_execution.status
+                                == ExecutionStatus.FILL_PARTIAL.value
+                            ):
                                 execution_stage = "partial_fill_requires_review"
                                 fill_status = ExecutionStatus.FILL_PARTIAL.value
-                            elif latest_execution is not None and latest_execution.status == ExecutionStatus.FAILED.value:
+                            elif (
+                                latest_execution is not None
+                                and latest_execution.status
+                                == ExecutionStatus.FAILED.value
+                            ):
                                 execution_stage = "execution_failed"
                             trade_service.transition_trade_intent(
                                 intent,
@@ -810,7 +952,6 @@ class StrategyService:
                                 current_position=created_position,
                                 current_position_broker_reference=created_position.broker_reference,
                             )
-                        open_positions = trade_service.list_positions()
                 else:
                     engine.current_position = None
 
@@ -822,10 +963,17 @@ class StrategyService:
                 )
 
                 risk_percent = 0.0
-                current_position_risk = getattr(engine.current_position, "risk_percent", None)
+                current_position_risk = getattr(
+                    engine.current_position, "risk_percent", None
+                )
                 if current_position_risk is not None:
                     risk_percent = current_position_risk
-                mark_price = self._mark_price(direction=engine.current_position.direction, price=price, bid=bid, ask=ask)
+                mark_price = self._mark_price(
+                    direction=engine.current_position.direction,
+                    price=price,
+                    bid=bid,
+                    ask=ask,
+                )
                 unrealized_pnl = self._calculate_open_pnl(
                     direction=engine.current_position.direction,
                     open_price=engine.current_position.open_price,
@@ -836,7 +984,9 @@ class StrategyService:
                     engine.current_position.current_price = mark_price
                     engine.current_position.unrealized_pnl = round(unrealized_pnl, 2)
                     engine.current_position.risk_percent = risk_percent
-                    engine.current_position.reason = f"{engine.strategy.name} signal active"
+                    engine.current_position.reason = (
+                        f"{engine.strategy.name} signal active"
+                    )
                     if isinstance(engine.current_position, Position):
                         trade_service.record_broker_position(engine.current_position)
                 else:
@@ -876,11 +1026,17 @@ class StrategyService:
                     instrument=signal.instrument,
                     phase=ExecutionPhase.CLOSE.value,
                     signal_time=signal.signal_at,
-                    requested_size=signal.position.size if signal.position is not None else None,
+                    requested_size=signal.position.size
+                    if signal.position is not None
+                    else None,
                     requested_price=signal.observed_price,
                     reason="Execution attempt created for admissible close intent",
-                    broker_reference=signal.position.broker_reference if signal.position is not None else None,
-                    local_position_id=signal.position.id if signal.position is not None else None,
+                    broker_reference=signal.position.broker_reference
+                    if signal.position is not None
+                    else None,
+                    local_position_id=signal.position.id
+                    if signal.position is not None
+                    else None,
                     details={
                         "action_key": self._close_action_key(signal),
                         "market_status": signal.market_status,
@@ -902,14 +1058,18 @@ class StrategyService:
                     correlation_id=execution.client_request_id,
                     strategy_name=signal.strategy_name,
                     instrument=signal.instrument,
-                    position_id=signal.position.id if signal.position is not None else None,
+                    position_id=signal.position.id
+                    if signal.position is not None
+                    else None,
                     execution_id=execution.id,
                     payload_json={
                         "trade_intent_id": intent.id,
                         "observed_price": signal.observed_price,
                         "market_status": signal.market_status,
                         "tradable": signal.tradable,
-                        "broker_reference": signal.position.broker_reference if signal.position is not None else None,
+                        "broker_reference": signal.position.broker_reference
+                        if signal.position is not None
+                        else None,
                         "source_tier": candidate.source_tier,
                     },
                     created_at=signal.signal_at,
@@ -939,7 +1099,9 @@ class StrategyService:
                             intent.fill_derived_risk_amount
                             or intent.submitted_risk_amount
                             or intent.estimated_risk_amount
-                            or ((intent.details or {}).get("allocation") or {}).get("risk_amount")
+                            or ((intent.details or {}).get("allocation") or {}).get(
+                                "risk_amount"
+                            )
                         )
                 risk_budget = float(allocation_risk_amount or 0.0)
                 if risk_budget <= 0:
@@ -1019,12 +1181,12 @@ class StrategyService:
                         last_price_seen_at=trade.close_time,
                         current_position=None,
                     )
-                open_positions = trade_service.list_positions()
-                trades = trade_service.list_trades()
         self._refresh_paused_strategy_count()
 
     def _apply_market_status_gate(self, *, engine, signal: EntrySignal) -> EntrySignal:
-        status = self.market_status_service.get_status(signal.instrument, broker=engine.broker, now=signal.signal_at)
+        status = self.market_status_service.get_status(
+            signal.instrument, broker=engine.broker, now=signal.signal_at
+        )
         if status.is_ok:
             audit_summary = dict(signal.audit_summary)
             audit_summary["market_status"] = status.model_dump(mode="json")
@@ -1076,12 +1238,16 @@ class StrategyService:
         )
 
     @staticmethod
-    def _calculate_open_pnl(*, direction: str, open_price: float, current_price: float, size: float) -> float:
+    def _calculate_open_pnl(
+        *, direction: str, open_price: float, current_price: float, size: float
+    ) -> float:
         multiplier = 1 if direction == "BUY" else -1
         return (current_price - open_price) * size * multiplier
 
     @staticmethod
-    def _mark_price(*, direction: str, price: float, bid: float | None, ask: float | None) -> float:
+    def _mark_price(
+        *, direction: str, price: float, bid: float | None, ask: float | None
+    ) -> float:
         if direction == "BUY" and bid is not None:
             return bid
         if direction == "SELL" and ask is not None:
@@ -1090,7 +1256,7 @@ class StrategyService:
 
     @staticmethod
     def _allocation_details(intent: TradeIntent) -> dict[str, object]:
-        return ((intent.details or {}).get("allocation") or {})
+        return (intent.details or {}).get("allocation") or {}
 
     @staticmethod
     def _drift_metric(
@@ -1112,8 +1278,12 @@ class StrategyService:
             "actual": round(float(actual), 8),
             "absolute_drift": round(absolute_drift, 8),
             "absolute_drift_abs": round(abs(absolute_drift), 8),
-            "percent_drift": round(percent_drift, 8) if percent_drift is not None else None,
-            "percent_drift_abs": round(percent_drift_abs, 8) if percent_drift_abs is not None else None,
+            "percent_drift": round(percent_drift, 8)
+            if percent_drift is not None
+            else None,
+            "percent_drift_abs": round(percent_drift_abs, 8)
+            if percent_drift_abs is not None
+            else None,
             "material": (
                 percent_drift_abs is not None
                 and threshold_percent is not None
@@ -1129,7 +1299,9 @@ class StrategyService:
         if not current and not update:
             return None
         merged = dict(current or {})
-        merged.update({key: value for key, value in (update or {}).items() if value is not None})
+        merged.update(
+            {key: value for key, value in (update or {}).items() if value is not None}
+        )
         return merged
 
     @staticmethod
@@ -1150,7 +1322,12 @@ class StrategyService:
             return "ALLOCATION_INTENT_ONLY"
         if stage == "submitted":
             return "SUBMITTED_EXECUTABLE_ESTIMATE"
-        if stage == "filled" and fill_confirmed and source == "broker_quote_unit_risk" and precision == "EXACT":
+        if (
+            stage == "filled"
+            and fill_confirmed
+            and source == "broker_quote_unit_risk"
+            and precision == "EXACT"
+        ):
             return "EXACT_FILL_DERIVED"
         if stage == "filled" and fill_confirmed:
             return "BROKER_CONFIRMED_AVERAGE_FILL_ESTIMATED"
@@ -1173,88 +1350,156 @@ class StrategyService:
         fill_status: str | None = None,
     ) -> dict[str, object]:
         allocation = cls._allocation_details(intent)
-        existing = ((intent.details or {}).get("risk_reconciliation") or {})
+        existing = (intent.details or {}).get("risk_reconciliation") or {}
         settings = get_settings()
         estimated = cls._merge_stage_snapshot(
             existing.get("estimated") if isinstance(existing, dict) else None,
             {
-                "risk_amount": intent.estimated_risk_amount or allocation.get("risk_amount"),
-                "risk_percent": intent.allocated_risk_percent or allocation.get("allocated_risk_percent"),
-                "size": intent.allocated_size or allocation.get("normalized_size") or allocation.get("requested_size"),
+                "risk_amount": intent.estimated_risk_amount
+                or allocation.get("risk_amount"),
+                "risk_percent": intent.allocated_risk_percent
+                or allocation.get("allocated_risk_percent"),
+                "size": intent.allocated_size
+                or allocation.get("normalized_size")
+                or allocation.get("requested_size"),
                 "entry_price": intent.observed_price,
                 "risk_currency": intent.risk_currency,
                 "derivation_mode": "allocation_estimate",
                 "precision": allocation.get("sizing_precision"),
                 "sizing_mode": allocation.get("sizing_mode"),
-                "risk_truth_confidence": intent.risk_truth_confidence or "ALLOCATION_INTENT_ONLY",
+                "risk_truth_confidence": intent.risk_truth_confidence
+                or "ALLOCATION_INTENT_ONLY",
             },
         )
         submitted = cls._merge_stage_snapshot(
             existing.get("submitted") if isinstance(existing, dict) else None,
             {
-                "risk_amount": (submitted_risk_tracking or {}).get("submitted_executable_risk_amount") or intent.submitted_risk_amount,
-                "risk_percent": (submitted_risk_tracking or {}).get("submitted_executable_risk_percent"),
-                "size": submitted_size if submitted_size is not None else (submitted_risk_tracking or {}).get("submitted_size"),
+                "risk_amount": (submitted_risk_tracking or {}).get(
+                    "submitted_executable_risk_amount"
+                )
+                or intent.submitted_risk_amount,
+                "risk_percent": (submitted_risk_tracking or {}).get(
+                    "submitted_executable_risk_percent"
+                ),
+                "size": submitted_size
+                if submitted_size is not None
+                else (submitted_risk_tracking or {}).get("submitted_size"),
                 "entry_price": submitted_price,
                 "risk_currency": intent.risk_currency,
-                "derivation_mode": (submitted_risk_tracking or {}).get("risk_estimate_source"),
-                "precision": (submitted_risk_tracking or {}).get("risk_sizing_precision"),
+                "derivation_mode": (submitted_risk_tracking or {}).get(
+                    "risk_estimate_source"
+                ),
+                "precision": (submitted_risk_tracking or {}).get(
+                    "risk_sizing_precision"
+                ),
                 "sizing_mode": (submitted_risk_tracking or {}).get("risk_sizing_mode"),
-                "risk_truth_confidence": (submitted_risk_tracking or {}).get("risk_truth_confidence"),
+                "risk_truth_confidence": (submitted_risk_tracking or {}).get(
+                    "risk_truth_confidence"
+                ),
             },
         )
         fill_source = (fill_risk_tracking or {}).get("risk_estimate_source")
         filled = cls._merge_stage_snapshot(
             existing.get("filled") if isinstance(existing, dict) else None,
             {
-                "risk_amount": (fill_risk_tracking or {}).get("fill_derived_risk_amount") or intent.fill_derived_risk_amount,
-                "risk_percent": (fill_risk_tracking or {}).get("fill_derived_risk_percent"),
-                "size": filled_size if filled_size is not None else (fill_risk_tracking or {}).get("filled_size"),
+                "risk_amount": (fill_risk_tracking or {}).get(
+                    "fill_derived_risk_amount"
+                )
+                or intent.fill_derived_risk_amount,
+                "risk_percent": (fill_risk_tracking or {}).get(
+                    "fill_derived_risk_percent"
+                ),
+                "size": filled_size
+                if filled_size is not None
+                else (fill_risk_tracking or {}).get("filled_size"),
                 "entry_price": fill_price,
                 "risk_currency": intent.risk_currency,
-                "derivation_mode": fill_source or ("fill_price_fallback" if fill_price is not None else None),
+                "derivation_mode": fill_source
+                or ("fill_price_fallback" if fill_price is not None else None),
                 "precision": (fill_risk_tracking or {}).get("risk_sizing_precision"),
                 "sizing_mode": (fill_risk_tracking or {}).get("risk_sizing_mode"),
-                "risk_truth_confidence": (fill_risk_tracking or {}).get("risk_truth_confidence"),
+                "risk_truth_confidence": (fill_risk_tracking or {}).get(
+                    "risk_truth_confidence"
+                ),
             },
         )
         live_snapshot = cls._merge_stage_snapshot(
             existing.get("live_position") if isinstance(existing, dict) else None,
             {
-                "risk_amount": live_position.entry_risk_amount if live_position is not None else None,
-                "risk_percent": live_position.risk_percent if live_position is not None else None,
+                "risk_amount": live_position.entry_risk_amount
+                if live_position is not None
+                else None,
+                "risk_percent": live_position.risk_percent
+                if live_position is not None
+                else None,
                 "size": live_position.size if live_position is not None else None,
-                "entry_price": live_position.open_price if live_position is not None else None,
+                "entry_price": live_position.open_price
+                if live_position is not None
+                else None,
                 "risk_currency": intent.risk_currency,
-                "derivation_mode": "position_entry_risk_amount" if live_position is not None else None,
-                "risk_truth_confidence": live_position.risk_truth_confidence if live_position is not None else None,
+                "derivation_mode": "position_entry_risk_amount"
+                if live_position is not None
+                else None,
+                "risk_truth_confidence": live_position.risk_truth_confidence
+                if live_position is not None
+                else None,
             },
         )
         drift_metrics = {
-            "requested_to_normalized_size": ((allocation.get("drift_metrics") or {}).get("requested_to_normalized_size") if isinstance(allocation, dict) else None),
-            "requested_to_allocated_risk_percent": ((allocation.get("drift_metrics") or {}).get("requested_to_allocated_risk_percent") if isinstance(allocation, dict) else None),
+            "requested_to_normalized_size": (
+                (allocation.get("drift_metrics") or {}).get(
+                    "requested_to_normalized_size"
+                )
+                if isinstance(allocation, dict)
+                else None
+            ),
+            "requested_to_allocated_risk_percent": (
+                (allocation.get("drift_metrics") or {}).get(
+                    "requested_to_allocated_risk_percent"
+                )
+                if isinstance(allocation, dict)
+                else None
+            ),
             "normalized_to_submitted_size": cls._drift_metric(
-                expected=float(allocation.get("normalized_size")) if allocation.get("normalized_size") is not None else None,
-                actual=float(submitted["size"]) if submitted and submitted.get("size") is not None else None,
+                expected=float(allocation.get("normalized_size"))
+                if allocation.get("normalized_size") is not None
+                else None,
+                actual=float(submitted["size"])
+                if submitted and submitted.get("size") is not None
+                else None,
                 threshold_percent=settings.allocation_drift_warning_percent,
             ),
             "submitted_to_filled_size": cls._drift_metric(
-                expected=float(submitted["size"]) if submitted and submitted.get("size") is not None else None,
-                actual=float(filled["size"]) if filled and filled.get("size") is not None else None,
+                expected=float(submitted["size"])
+                if submitted and submitted.get("size") is not None
+                else None,
+                actual=float(filled["size"])
+                if filled and filled.get("size") is not None
+                else None,
                 threshold_percent=settings.allocation_drift_warning_percent,
             ),
             "estimated_to_submitted_risk": cls._drift_metric(
-                expected=float(estimated["risk_amount"]) if estimated and estimated.get("risk_amount") is not None else None,
-                actual=float(submitted["risk_amount"]) if submitted and submitted.get("risk_amount") is not None else None,
+                expected=float(estimated["risk_amount"])
+                if estimated and estimated.get("risk_amount") is not None
+                else None,
+                actual=float(submitted["risk_amount"])
+                if submitted and submitted.get("risk_amount") is not None
+                else None,
                 threshold_percent=settings.allocation_drift_warning_percent,
             ),
             "submitted_to_fill_risk": cls._drift_metric(
-                expected=float(submitted["risk_amount"]) if submitted and submitted.get("risk_amount") is not None else None,
-                actual=float(filled["risk_amount"]) if filled and filled.get("risk_amount") is not None else None,
+                expected=float(submitted["risk_amount"])
+                if submitted and submitted.get("risk_amount") is not None
+                else None,
+                actual=float(filled["risk_amount"])
+                if filled and filled.get("risk_amount") is not None
+                else None,
                 threshold_percent=settings.allocation_drift_warning_percent,
             ),
             "intended_to_fill_price": cls._drift_metric(
-                expected=float(intent.observed_price) if intent.observed_price is not None else None,
+                expected=float(intent.observed_price)
+                if intent.observed_price is not None
+                else None,
                 actual=float(fill_price) if fill_price is not None else None,
                 threshold_percent=settings.allocation_drift_warning_percent,
             ),
@@ -1262,7 +1507,14 @@ class StrategyService:
         material_execution_drift = any(
             isinstance(metric, dict) and bool(metric.get("material"))
             for key, metric in drift_metrics.items()
-            if key in {"normalized_to_submitted_size", "submitted_to_filled_size", "estimated_to_submitted_risk", "submitted_to_fill_risk", "intended_to_fill_price"}
+            if key
+            in {
+                "normalized_to_submitted_size",
+                "submitted_to_filled_size",
+                "estimated_to_submitted_risk",
+                "submitted_to_fill_risk",
+                "intended_to_fill_price",
+            }
         )
         incomplete_fill_data = bool(
             filled is not None
@@ -1272,7 +1524,9 @@ class StrategyService:
                 or filled.get("risk_amount") is None
             )
         )
-        partial_fill_provisional = bool(fill_status == BrokerOrderStatus.PARTIALLY_FILLED.value)
+        partial_fill_provisional = bool(
+            fill_status == BrokerOrderStatus.PARTIALLY_FILLED.value
+        )
         return {
             "estimated": estimated,
             "submitted": submitted,
@@ -1283,14 +1537,19 @@ class StrategyService:
                 "material_execution_drift": material_execution_drift,
                 "critical_execution_drift": any(
                     isinstance(metric, dict)
-                    and (metric.get("percent_drift_abs") or 0.0) >= settings.allocation_drift_critical_percent
+                    and (metric.get("percent_drift_abs") or 0.0)
+                    >= settings.allocation_drift_critical_percent
                     for metric in drift_metrics.values()
                     if metric is not None
                 ),
-                "fill_risk_estimated": bool(fill_source in {None, "size_scaled_allocation"}),
+                "fill_risk_estimated": bool(
+                    fill_source in {None, "size_scaled_allocation"}
+                ),
                 "incomplete_fill_data": incomplete_fill_data,
                 "partial_fill_provisional": partial_fill_provisional,
-                "degraded_sizing": bool(allocation.get("degraded")) if isinstance(allocation, dict) else False,
+                "degraded_sizing": bool(allocation.get("degraded"))
+                if isinstance(allocation, dict)
+                else False,
             },
         }
 
@@ -1336,19 +1595,40 @@ class StrategyService:
         filled_size_confirmed: bool = False,
     ) -> dict[str, object]:
         allocation = cls._allocation_details(intent)
-        sizing_details = (allocation.get("sizing_details") or {}) if isinstance(allocation, dict) else {}
+        sizing_details = (
+            (allocation.get("sizing_details") or {})
+            if isinstance(allocation, dict)
+            else {}
+        )
         risk_currency = intent.risk_currency or (
-            ((sizing_details.get("sizing_quote") or {}).get("details") or {}).get("account_currency")
+            ((sizing_details.get("sizing_quote") or {}).get("details") or {}).get(
+                "account_currency"
+            )
         )
         account_equity = float(allocation.get("account_equity") or 0.0)
         stop_loss_price = sizing_details.get("stop_loss_price")
         fallback_stop_distance = sizing_details.get("stop_distance_price")
-        estimated_amount = float(intent.estimated_risk_amount or allocation.get("risk_amount") or 0.0)
-        estimated_size = float(intent.allocated_size or allocation.get("normalized_size") or allocation.get("requested_size") or 0.0)
+        estimated_amount = float(
+            intent.estimated_risk_amount or allocation.get("risk_amount") or 0.0
+        )
+        estimated_size = float(
+            intent.allocated_size
+            or allocation.get("normalized_size")
+            or allocation.get("requested_size")
+            or 0.0
+        )
         risk_amount: float | None = None
         risk_percent: float | None = None
-        risk_precision = str(allocation.get("sizing_precision") or sizing_details.get("sizing_precision") or "UNSUPPORTED")
-        risk_mode = str(allocation.get("sizing_mode") or sizing_details.get("sizing_mode") or "UNSUPPORTED")
+        risk_precision = str(
+            allocation.get("sizing_precision")
+            or sizing_details.get("sizing_precision")
+            or "UNSUPPORTED"
+        )
+        risk_mode = str(
+            allocation.get("sizing_mode")
+            or sizing_details.get("sizing_mode")
+            or "UNSUPPORTED"
+        )
         source = "size_scaled_allocation"
         if size > 0 and entry_price > 0:
             try:
@@ -1356,12 +1636,20 @@ class StrategyService:
                     intent.instrument,
                     entry_price=entry_price,
                     risk_amount=1.0,
-                    stop_loss_price=float(stop_loss_price) if stop_loss_price is not None else None,
-                    fallback_stop_distance=float(fallback_stop_distance) if fallback_stop_distance is not None else None,
+                    stop_loss_price=float(stop_loss_price)
+                    if stop_loss_price is not None
+                    else None,
+                    fallback_stop_distance=float(fallback_stop_distance)
+                    if fallback_stop_distance is not None
+                    else None,
                 )
             except Exception:
                 unit_quote = None
-            if unit_quote is not None and unit_quote.sizing_available and (unit_quote.risk_per_unit or 0.0) > 0:
+            if (
+                unit_quote is not None
+                and unit_quote.sizing_available
+                and (unit_quote.risk_per_unit or 0.0) > 0
+            ):
                 risk_amount = float(unit_quote.risk_per_unit or 0.0) * size
                 risk_precision = unit_quote.precision.value
                 risk_mode = unit_quote.mode.value
@@ -1373,9 +1661,15 @@ class StrategyService:
         if risk_amount is not None and account_equity > 0:
             risk_percent = (risk_amount / account_equity) * 100.0
         partial_fill = broker_order_status is BrokerOrderStatus.PARTIALLY_FILLED
-        incomplete = risk_state == "filled" and (not fill_price_confirmed or not filled_size_confirmed or risk_amount is None)
+        incomplete = risk_state == "filled" and (
+            not fill_price_confirmed or not filled_size_confirmed or risk_amount is None
+        )
         truth_confidence = cls._risk_truth_confidence(
-            stage="filled" if risk_state == "filled" else "submitted" if risk_state == "submitted" else "estimated",
+            stage="filled"
+            if risk_state == "filled"
+            else "submitted"
+            if risk_state == "submitted"
+            else "estimated",
             source=source,
             precision=risk_precision,
             fill_confirmed=fill_price_confirmed and filled_size_confirmed,
@@ -1385,11 +1679,20 @@ class StrategyService:
         return {
             "risk_currency": risk_currency,
             "estimated_allocation_risk_amount": estimated_amount,
-            "estimated_allocation_risk_percent": allocation.get("allocated_risk_percent") or intent.allocated_risk_percent,
-            "submitted_executable_risk_amount": risk_amount if risk_state in {"submitted", "filled"} else None,
-            "submitted_executable_risk_percent": risk_percent if risk_state in {"submitted", "filled"} else None,
+            "estimated_allocation_risk_percent": allocation.get(
+                "allocated_risk_percent"
+            )
+            or intent.allocated_risk_percent,
+            "submitted_executable_risk_amount": risk_amount
+            if risk_state in {"submitted", "filled"}
+            else None,
+            "submitted_executable_risk_percent": risk_percent
+            if risk_state in {"submitted", "filled"}
+            else None,
             "fill_derived_risk_amount": risk_amount if risk_state == "filled" else None,
-            "fill_derived_risk_percent": risk_percent if risk_state == "filled" else None,
+            "fill_derived_risk_percent": risk_percent
+            if risk_state == "filled"
+            else None,
             "submitted_size": size if risk_state in {"submitted", "filled"} else None,
             "filled_size": size if risk_state == "filled" else None,
             "reservation_owner": reservation_owner,
@@ -1423,7 +1726,9 @@ class StrategyService:
             raise ValueError(
                 f"Entry execution requires an APPROVED trade intent; got {intent.state} for intent {intent.id}."
             )
-        late_block = StrategyService._entry_execution_policy_block(session=trade_service.session, engine=engine)
+        late_block = StrategyService._entry_execution_policy_block(
+            session=trade_service.session, engine=engine
+        )
         if late_block is not None:
             code, reason, details = late_block
             trade_service.transition_execution(
@@ -1452,9 +1757,11 @@ class StrategyService:
                 },
             )
             raise ValueError(reason)
-        conflicting_active = trade_service.find_active_trade_intent_for_instrument_excluding(
-            signal.instrument,
-            exclude_intent_id=intent.id,
+        conflicting_active = (
+            trade_service.find_active_trade_intent_for_instrument_excluding(
+                signal.instrument,
+                exclude_intent_id=intent.id,
+            )
         )
         if conflicting_active is not None:
             raise ValueError(
@@ -1469,9 +1776,13 @@ class StrategyService:
             phase="entry_execution",
         )
         executable_size = intent.allocated_size or signal.size
-        size_validation = engine.broker.normalize_order_size(signal.instrument, executable_size)
+        size_validation = engine.broker.normalize_order_size(
+            signal.instrument, executable_size
+        )
         if not size_validation.accepted:
-            risk_reconciliation = StrategyService._build_risk_reconciliation(intent=intent)
+            risk_reconciliation = StrategyService._build_risk_reconciliation(
+                intent=intent
+            )
             trade_service.transition_execution(
                 execution,
                 status=ExecutionStatus.FAILED,
@@ -1491,7 +1802,7 @@ class StrategyService:
                         "min_deal_size": size_validation.min_deal_size,
                         "size_step": size_validation.size_step,
                         "notes": size_validation.notes,
-                    }
+                    },
                 },
             )
             trade_service.transition_trade_intent(
@@ -1541,7 +1852,7 @@ class StrategyService:
                         "reallocation_required": True,
                         "approved_size": executable_size,
                         "normalized_size": size_validation.normalized_size,
-                    }
+                    },
                 },
             )
             trade_service.transition_trade_intent(
@@ -1601,8 +1912,13 @@ class StrategyService:
             submitted_at=utc_now(),
             client_request_id=execution.client_request_id,
             intended_risk_amount=intent.estimated_risk_amount,
-            submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
-            risk_truth_confidence=str(submitted_risk_tracking.get("risk_truth_confidence") or "SUBMITTED_EXECUTABLE_ESTIMATE"),
+            submitted_risk_amount=submitted_risk_tracking.get(
+                "submitted_executable_risk_amount"
+            ),
+            risk_truth_confidence=str(
+                submitted_risk_tracking.get("risk_truth_confidence")
+                or "SUBMITTED_EXECUTABLE_ESTIMATE"
+            ),
             reason="Entry order submitted",
             details={
                 "market_status_execution_check": status.model_dump(mode="json"),
@@ -1614,8 +1930,13 @@ class StrategyService:
             intent,
             state=TradeIntentState.SUBMITTED,
             execution_client_request_id=execution.client_request_id,
-            submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
-            risk_truth_confidence=str(submitted_risk_tracking.get("risk_truth_confidence") or "SUBMITTED_EXECUTABLE_ESTIMATE"),
+            submitted_risk_amount=submitted_risk_tracking.get(
+                "submitted_executable_risk_amount"
+            ),
+            risk_truth_confidence=str(
+                submitted_risk_tracking.get("risk_truth_confidence")
+                or "SUBMITTED_EXECUTABLE_ESTIMATE"
+            ),
             submitted_at=execution.submitted_at,
             details={
                 **StrategyService._allocation_outcome_update(
@@ -1632,7 +1953,9 @@ class StrategyService:
         try:
             order = engine.broker.place_order(order_request)
         except Exception as exc:
-            get_health_service().update_broker_state(connected=False, latency_ms=(perf_counter() - started_at) * 1000)
+            get_health_service().update_broker_state(
+                connected=False, latency_ms=(perf_counter() - started_at) * 1000
+            )
             get_health_service().record_order_failure()
             logger.error(
                 "Entry order failed",
@@ -1657,8 +1980,13 @@ class StrategyService:
                 trade_intent_id=intent.id,
                 client_request_id=execution.client_request_id,
                 intended_risk_amount=intent.estimated_risk_amount,
-                submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
-                risk_truth_confidence=str(submitted_risk_tracking.get("risk_truth_confidence") or "SUBMITTED_EXECUTABLE_ESTIMATE"),
+                submitted_risk_amount=submitted_risk_tracking.get(
+                    "submitted_executable_risk_amount"
+                ),
+                risk_truth_confidence=str(
+                    submitted_risk_tracking.get("risk_truth_confidence")
+                    or "SUBMITTED_EXECUTABLE_ESTIMATE"
+                ),
                 error_message=str(exc),
                 reason="Entry order submission failed",
                 requires_manual_review=False,
@@ -1669,8 +1997,13 @@ class StrategyService:
                 state=TradeIntentState.FAILED,
                 decision_reason_code="broker_submission_failed",
                 decision_reason="Entry order submission failed.",
-                submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
-                risk_truth_confidence=str(submitted_risk_tracking.get("risk_truth_confidence") or "SUBMITTED_EXECUTABLE_ESTIMATE"),
+                submitted_risk_amount=submitted_risk_tracking.get(
+                    "submitted_executable_risk_amount"
+                ),
+                risk_truth_confidence=str(
+                    submitted_risk_tracking.get("risk_truth_confidence")
+                    or "SUBMITTED_EXECUTABLE_ESTIMATE"
+                ),
                 details={
                     "error_message": str(exc),
                     **StrategyService._allocation_outcome_update(
@@ -1685,7 +2018,9 @@ class StrategyService:
                 },
             )
             raise
-        get_health_service().update_broker_state(connected=True, latency_ms=(perf_counter() - started_at) * 1000)
+        get_health_service().update_broker_state(
+            connected=True, latency_ms=(perf_counter() - started_at) * 1000
+        )
         StrategyService._record_order_health(order.status)
 
         StrategyService._transition_execution_from_broker_result(
@@ -1697,8 +2032,18 @@ class StrategyService:
             completed_reason="Entry fill received",
         )
         filled_size = order.filled_size or order.size
-        if order.status in {BrokerOrderStatus.REJECTED, BrokerOrderStatus.FAILED, BrokerOrderStatus.CANCELLED} or filled_size <= 0:
-            raise RuntimeError(f"Entry order for {signal.instrument} did not produce an open fill.")
+        if (
+            order.status
+            in {
+                BrokerOrderStatus.REJECTED,
+                BrokerOrderStatus.FAILED,
+                BrokerOrderStatus.CANCELLED,
+            }
+            or filled_size <= 0
+        ):
+            raise RuntimeError(
+                f"Entry order for {signal.instrument} did not produce an open fill."
+            )
         fill_risk_tracking = StrategyService._estimate_execution_risk_snapshot(
             broker=engine.broker,
             intent=intent,
@@ -1707,8 +2052,12 @@ class StrategyService:
             risk_state="filled",
             reservation_owner="POSITION",
             broker_order_status=order.status,
-            fill_price_confirmed=(order.average_fill_price is not None or order.price is not None),
-            filled_size_confirmed=(order.filled_size is not None or order.size is not None),
+            fill_price_confirmed=(
+                order.average_fill_price is not None or order.price is not None
+            ),
+            filled_size_confirmed=(
+                order.filled_size is not None or order.size is not None
+            ),
         )
         fill_risk_reconciliation = StrategyService._build_risk_reconciliation(
             intent=intent,
@@ -1739,12 +2088,16 @@ class StrategyService:
                 or intent.estimated_risk_amount
                 or 0.0
             ),
-            risk_truth_confidence=str(fill_risk_tracking.get("risk_truth_confidence") or "INCOMPLETE_DEGRADED"),
+            risk_truth_confidence=str(
+                fill_risk_tracking.get("risk_truth_confidence") or "INCOMPLETE_DEGRADED"
+            ),
             current_price=order.average_fill_price or order.price,
             unrealized_pnl=0.0,
             reason=f"{signal.strategy_name} entry approved",
         )
-        persisted_position = trade_service.record_broker_position(engine.current_position)
+        persisted_position = trade_service.record_broker_position(
+            engine.current_position
+        )
         if order.status is BrokerOrderStatus.PARTIALLY_FILLED:
             residual_size = max(size_validation.normalized_size - filled_size, 0.0)
             engine.runtime_mode = "EXITS_ONLY"
@@ -1755,13 +2108,21 @@ class StrategyService:
                 client_request_id=execution.client_request_id,
                 local_position_id=persisted_position.id,
                 broker_reference=persisted_position.broker_reference,
-                completed_at=persisted_position.broker_open_confirmed_at or persisted_position.open_time,
+                completed_at=persisted_position.broker_open_confirmed_at
+                or persisted_position.open_time,
                 average_fill_price=persisted_position.open_price,
                 filled_size=persisted_position.size,
                 intended_risk_amount=intent.estimated_risk_amount,
-                submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
-                fill_derived_risk_amount=fill_risk_tracking.get("fill_derived_risk_amount"),
-                risk_truth_confidence=str(fill_risk_tracking.get("risk_truth_confidence") or "INCOMPLETE_DEGRADED"),
+                submitted_risk_amount=submitted_risk_tracking.get(
+                    "submitted_executable_risk_amount"
+                ),
+                fill_derived_risk_amount=fill_risk_tracking.get(
+                    "fill_derived_risk_amount"
+                ),
+                risk_truth_confidence=str(
+                    fill_risk_tracking.get("risk_truth_confidence")
+                    or "INCOMPLETE_DEGRADED"
+                ),
                 reason="Entry partially filled; runtime restricted to exits only pending review.",
                 requires_manual_review=True,
                 details={
@@ -1779,12 +2140,20 @@ class StrategyService:
                 state=TradeIntentState.PARTIALLY_FILLED,
                 broker_reference=persisted_position.broker_reference,
                 position_id=persisted_position.id,
-                submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
-                fill_derived_risk_amount=fill_risk_tracking.get("fill_derived_risk_amount"),
-                risk_truth_confidence=str(fill_risk_tracking.get("risk_truth_confidence") or "INCOMPLETE_DEGRADED"),
+                submitted_risk_amount=submitted_risk_tracking.get(
+                    "submitted_executable_risk_amount"
+                ),
+                fill_derived_risk_amount=fill_risk_tracking.get(
+                    "fill_derived_risk_amount"
+                ),
+                risk_truth_confidence=str(
+                    fill_risk_tracking.get("risk_truth_confidence")
+                    or "INCOMPLETE_DEGRADED"
+                ),
                 average_fill_price=persisted_position.open_price,
                 filled_size=persisted_position.size,
-                completed_at=persisted_position.broker_open_confirmed_at or persisted_position.open_time,
+                completed_at=persisted_position.broker_open_confirmed_at
+                or persisted_position.open_time,
                 opened_at=persisted_position.open_time,
                 details={
                     **StrategyService._allocation_outcome_update(
@@ -1840,27 +2209,46 @@ class StrategyService:
                 client_request_id=execution.client_request_id,
                 local_position_id=persisted_position.id,
                 broker_reference=persisted_position.broker_reference,
-                completed_at=persisted_position.broker_open_confirmed_at or persisted_position.open_time,
+                completed_at=persisted_position.broker_open_confirmed_at
+                or persisted_position.open_time,
                 average_fill_price=persisted_position.open_price,
                 filled_size=persisted_position.size,
                 intended_risk_amount=intent.estimated_risk_amount,
-                submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
-                fill_derived_risk_amount=fill_risk_tracking.get("fill_derived_risk_amount"),
-                risk_truth_confidence=str(fill_risk_tracking.get("risk_truth_confidence") or "INCOMPLETE_DEGRADED"),
+                submitted_risk_amount=submitted_risk_tracking.get(
+                    "submitted_executable_risk_amount"
+                ),
+                fill_derived_risk_amount=fill_risk_tracking.get(
+                    "fill_derived_risk_amount"
+                ),
+                risk_truth_confidence=str(
+                    fill_risk_tracking.get("risk_truth_confidence")
+                    or "INCOMPLETE_DEGRADED"
+                ),
                 reason="Position opened",
-                details={"risk_tracking": fill_risk_tracking, "risk_reconciliation": fill_risk_reconciliation},
+                details={
+                    "risk_tracking": fill_risk_tracking,
+                    "risk_reconciliation": fill_risk_reconciliation,
+                },
             )
             trade_service.transition_trade_intent(
                 intent,
                 state=TradeIntentState.POSITION_OPENED,
                 broker_reference=persisted_position.broker_reference,
                 position_id=persisted_position.id,
-                submitted_risk_amount=submitted_risk_tracking.get("submitted_executable_risk_amount"),
-                fill_derived_risk_amount=fill_risk_tracking.get("fill_derived_risk_amount"),
-                risk_truth_confidence=str(fill_risk_tracking.get("risk_truth_confidence") or "INCOMPLETE_DEGRADED"),
+                submitted_risk_amount=submitted_risk_tracking.get(
+                    "submitted_executable_risk_amount"
+                ),
+                fill_derived_risk_amount=fill_risk_tracking.get(
+                    "fill_derived_risk_amount"
+                ),
+                risk_truth_confidence=str(
+                    fill_risk_tracking.get("risk_truth_confidence")
+                    or "INCOMPLETE_DEGRADED"
+                ),
                 average_fill_price=persisted_position.open_price,
                 filled_size=persisted_position.size,
-                completed_at=persisted_position.broker_open_confirmed_at or persisted_position.open_time,
+                completed_at=persisted_position.broker_open_confirmed_at
+                or persisted_position.open_time,
                 opened_at=persisted_position.open_time,
                 details={
                     **StrategyService._allocation_outcome_update(
@@ -1884,13 +2272,21 @@ class StrategyService:
                     ),
                 },
             )
-        if bool((fill_risk_reconciliation.get("flags") or {}).get("material_execution_drift")):
+        if bool(
+            (fill_risk_reconciliation.get("flags") or {}).get(
+                "material_execution_drift"
+            )
+        ):
             domain_event_service.record_event(
                 event_type="allocation.execution_drift_detected",
                 category="allocation",
                 severity=(
                     "error"
-                    if bool((fill_risk_reconciliation.get("flags") or {}).get("critical_execution_drift"))
+                    if bool(
+                        (fill_risk_reconciliation.get("flags") or {}).get(
+                            "critical_execution_drift"
+                        )
+                    )
                     else "warning"
                 ),
                 source="strategy_service.execute_entry_signal",
@@ -1906,7 +2302,9 @@ class StrategyService:
                     "risk_reconciliation": fill_risk_reconciliation,
                 },
             )
-        engine.strategy.on_position_opened(direction=signal.direction, entry_price=order.price)
+        engine.strategy.on_position_opened(
+            direction=signal.direction, entry_price=order.price
+        )
         engine.current_position = clone_position(persisted_position)
         return clone_position(persisted_position)
 
@@ -1929,7 +2327,9 @@ class StrategyService:
                 f"Exit execution requires an open linked trade intent; got {intent.state} for intent {intent.id}."
             )
         if engine.current_position is None:
-            raise ValueError(f"No active engine position for {signal.strategy_name} on {signal.instrument}.")
+            raise ValueError(
+                f"No active engine position for {signal.strategy_name} on {signal.instrument}."
+            )
         status = StrategyService._assert_market_status_allows_execution(
             engine=engine,
             instrument=signal.instrument,
@@ -1965,7 +2365,9 @@ class StrategyService:
                 client_request_id=execution.client_request_id,
             )
         except Exception as exc:
-            get_health_service().update_broker_state(connected=False, latency_ms=(perf_counter() - started_at) * 1000)
+            get_health_service().update_broker_state(
+                connected=False, latency_ms=(perf_counter() - started_at) * 1000
+            )
             get_health_service().record_order_failure()
             logger.error(
                 "Close order failed",
@@ -2001,7 +2403,9 @@ class StrategyService:
                 details={"error_message": str(exc)},
             )
             raise
-        get_health_service().update_broker_state(connected=True, latency_ms=(perf_counter() - started_at) * 1000)
+        get_health_service().update_broker_state(
+            connected=True, latency_ms=(perf_counter() - started_at) * 1000
+        )
         StrategyService._record_order_health(closed_order.status)
 
         StrategyService._transition_execution_from_broker_result(
@@ -2029,7 +2433,9 @@ class StrategyService:
                 close_reason="Close did not complete fully.",
                 completed_at=closed_order.executed_at,
             )
-            raise RuntimeError(f"Close order for {signal.instrument} did not complete fully.")
+            raise RuntimeError(
+                f"Close order for {signal.instrument} did not complete fully."
+            )
         pnl = StrategyService._calculate_open_pnl(
             direction=engine.current_position.direction,
             open_price=engine.current_position.open_price,
@@ -2055,7 +2461,9 @@ class StrategyService:
             account_type=engine.current_position.account_type,
         )
         engine.current_position.is_open = False
-        engine.current_position.close_price = closed_order.average_fill_price or closed_order.price
+        engine.current_position.close_price = (
+            closed_order.average_fill_price or closed_order.price
+        )
         engine.current_position.close_time = closed_order.executed_at
         engine.current_position.pnl = pnl
         engine.strategy.on_position_closed()
@@ -2174,7 +2582,8 @@ class StrategyService:
                 TradeIntentState.PARTIALLY_FILLED
                 if order.status is BrokerOrderStatus.PARTIALLY_FILLED
                 else TradeIntentState.FAILED
-                if order.status in {BrokerOrderStatus.REJECTED, BrokerOrderStatus.FAILED}
+                if order.status
+                in {BrokerOrderStatus.REJECTED, BrokerOrderStatus.FAILED}
                 else TradeIntentState.CANCELLED
                 if order.status is BrokerOrderStatus.CANCELLED
                 else TradeIntentState.FILLED
@@ -2190,7 +2599,8 @@ class StrategyService:
                         "fill_partial"
                         if order.status is BrokerOrderStatus.PARTIALLY_FILLED
                         else "broker_order_failed"
-                        if order.status in {BrokerOrderStatus.REJECTED, BrokerOrderStatus.FAILED}
+                        if order.status
+                        in {BrokerOrderStatus.REJECTED, BrokerOrderStatus.FAILED}
                         else "broker_order_cancelled"
                         if order.status is BrokerOrderStatus.CANCELLED
                         else "fill_complete"
@@ -2198,7 +2608,12 @@ class StrategyService:
                     final_status=intent_state.value,
                     hard_risk_passed=True,
                     execution_submitted=True,
-                    execution_blocked=order.status in {BrokerOrderStatus.REJECTED, BrokerOrderStatus.FAILED, BrokerOrderStatus.CANCELLED},
+                    execution_blocked=order.status
+                    in {
+                        BrokerOrderStatus.REJECTED,
+                        BrokerOrderStatus.FAILED,
+                        BrokerOrderStatus.CANCELLED,
+                    },
                     fill_status=fill_status.value,
                 ),
                 **intent_broker_reference_kwargs,
@@ -2211,11 +2626,17 @@ class StrategyService:
 
     @staticmethod
     def _entry_action_key(signal: EntrySignal) -> str:
-        return f"entry:{signal.strategy_name}:{signal.instrument}:{signal.direction.value}"
+        return (
+            f"entry:{signal.strategy_name}:{signal.instrument}:{signal.direction.value}"
+        )
 
     @staticmethod
     def _close_action_key(signal: ExitSignal) -> str:
-        position_ref = signal.position.broker_reference if signal.position is not None else "unknown"
+        position_ref = (
+            signal.position.broker_reference
+            if signal.position is not None
+            else "unknown"
+        )
         return f"close:{signal.strategy_name}:{signal.instrument}:{position_ref}"
 
     @classmethod
@@ -2242,8 +2663,17 @@ class StrategyService:
             phase=phase,
             action_key=action_key,
         )
-        if reusable_execution is not None and reusable_execution.status in cls.RETRYABLE_EXECUTION_STATUSES:
-            duplicate_attempt_count = int((reusable_execution.details or {}).get("duplicate_attempt_count") or 0) + 1
+        if (
+            reusable_execution is not None
+            and reusable_execution.status in cls.RETRYABLE_EXECUTION_STATUSES
+        ):
+            duplicate_attempt_count = (
+                int(
+                    (reusable_execution.details or {}).get("duplicate_attempt_count")
+                    or 0
+                )
+                + 1
+            )
             duplicate_details = {
                 **details,
                 "duplicate_action_detected": True,
@@ -2251,7 +2681,10 @@ class StrategyService:
                 "last_duplicate_detected_at": utc_now().isoformat(),
                 "last_duplicate_status": reusable_execution.status,
             }
-            if phase == ExecutionPhase.CLOSE.value and reusable_execution.status not in cls.SAFE_CLOSE_RETRY_STATUSES:
+            if (
+                phase == ExecutionPhase.CLOSE.value
+                and reusable_execution.status not in cls.SAFE_CLOSE_RETRY_STATUSES
+            ):
                 domain_event_service.record_event(
                     event_type="execution.retry_suppressed",
                     category="execution",
@@ -2293,7 +2726,9 @@ class StrategyService:
                 True,
             )
 
-        client_request_id = cls._generate_client_request_id("ent" if phase == ExecutionPhase.ENTRY.value else "cls")
+        client_request_id = cls._generate_client_request_id(
+            "ent" if phase == ExecutionPhase.ENTRY.value else "cls"
+        )
         return (
             trade_service.create_execution(
                 Execution(
@@ -2316,7 +2751,9 @@ class StrategyService:
         )
 
     @staticmethod
-    def _resolve_price_snapshot(instrument: str, fallback_price: float | None = None) -> dict[str, object]:
+    def _resolve_price_snapshot(
+        instrument: str, fallback_price: float | None = None
+    ) -> dict[str, object]:
         from app.services.ig_streaming_service import get_ig_streaming_service
 
         streamed_price = get_ig_streaming_service().get_last_price(instrument)
@@ -2335,7 +2772,9 @@ class StrategyService:
             if updated_at is None:
                 status = "STALE" if error else "CACHED"
             else:
-                age_seconds = (datetime.now(UTC) - updated_at.astimezone(UTC)).total_seconds()
+                age_seconds = (
+                    datetime.now(UTC) - updated_at.astimezone(UTC)
+                ).total_seconds()
                 status = "STALE" if error or age_seconds > 10 else "POLLED"
             return {
                 "price": last_price,
@@ -2354,7 +2793,12 @@ class StrategyService:
 
         instrument_engines = runtime_manager.get_engines_for_instrument(instrument)
         if not instrument_engines:
-            return {"price": None, "status": "STOPPED", "error": None, "updated_at": None}
+            return {
+                "price": None,
+                "status": "STOPPED",
+                "error": None,
+                "updated_at": None,
+            }
         return {
             "price": None,
             "status": "ERROR",

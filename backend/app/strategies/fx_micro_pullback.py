@@ -95,7 +95,11 @@ class FxMicroPullbackStrategy(Strategy):
     def should_exit_trade(self) -> bool:
         if not self._has_enough_data():
             return False
-        if self._entry_direction is None or self._entry_price is None or self.last_price is None:
+        if (
+            self._entry_direction is None
+            or self._entry_price is None
+            or self.last_price is None
+        ):
             return False
 
         fast_ema = self._ema(self.fast_window)
@@ -128,10 +132,14 @@ class FxMicroPullbackStrategy(Strategy):
 
     def entry_direction(self) -> OrderDirection:
         if self._entry_direction is None:
-            raise ValueError("No entry direction available. Evaluate entry signal first.")
+            raise ValueError(
+                "No entry direction available. Evaluate entry signal first."
+            )
         return self._entry_direction
 
-    def on_position_opened(self, *, direction: OrderDirection, entry_price: float) -> None:
+    def on_position_opened(
+        self, *, direction: OrderDirection, entry_price: float
+    ) -> None:
         self._entry_direction = direction
         self._entry_price = entry_price
 
@@ -143,7 +151,9 @@ class FxMicroPullbackStrategy(Strategy):
         if not self._has_enough_data():
             return {}
         hints: dict[str, Any] = {
-            "expected_reward_risk": round(self.take_profit_threshold / max(self.max_adverse_threshold, 1e-9), 4),
+            "expected_reward_risk": round(
+                self.take_profit_threshold / max(self.max_adverse_threshold, 1e-9), 4
+            ),
             "volatility_estimate": round(abs(self._recent_momentum()), 8),
         }
         if self._entry_direction is OrderDirection.BUY:
@@ -206,13 +216,18 @@ class FxMicroPullbackStrategy(Strategy):
             "last_price": self.last_price,
             "last_bid": self.last_bid,
             "last_ask": self.last_ask,
-            "entry_direction": self._entry_direction.value if self._entry_direction else None,
+            "entry_direction": self._entry_direction.value
+            if self._entry_direction
+            else None,
             "entry_price": self._entry_price,
         }
 
     def restore_state_snapshot(self, snapshot: dict[str, Any]) -> None:
         prices = snapshot.get("prices") or []
-        self.prices = deque((float(price) for price in prices), maxlen=self.slow_window + self.momentum_window + 5)
+        self.prices = deque(
+            (float(price) for price in prices),
+            maxlen=self.slow_window + self.momentum_window + 5,
+        )
         self.last_price = snapshot.get("last_price")
         self.last_bid = snapshot.get("last_bid")
         self.last_ask = snapshot.get("last_ask")

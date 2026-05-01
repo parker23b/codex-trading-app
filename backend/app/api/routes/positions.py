@@ -54,10 +54,15 @@ def _serialize_position(position: Position) -> PositionResponse:
         risk_percent=position.risk_percent,
         reason=position.reason,
         manual_override=position.manual_override,
-        time_in_trade_seconds=max(int((now - position.open_time.astimezone(UTC)).total_seconds()), 0),
+        time_in_trade_seconds=max(
+            int((now - position.open_time.astimezone(UTC)).total_seconds()), 0
+        ),
     )
 
 
 @router.get("/positions", response_model=list[PositionResponse])
 def list_positions(session: Session = Depends(get_session)) -> list[PositionResponse]:
-    return [_serialize_position(position) for position in TradeService(session).list_positions()]
+    return [
+        _serialize_position(position)
+        for position in TradeService(session).list_positions()
+    ]

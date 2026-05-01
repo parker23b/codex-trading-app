@@ -79,7 +79,9 @@ class Strategy(ABC):
     def entry_direction(self) -> OrderDirection:
         raise NotImplementedError
 
-    def on_position_opened(self, *, direction: OrderDirection, entry_price: float) -> None:
+    def on_position_opened(
+        self, *, direction: OrderDirection, entry_price: float
+    ) -> None:
         """
         Optional lifecycle hook invoked after the broker confirms a fill.
 

@@ -9,7 +9,9 @@ from app.models.watchlist import WatchlistEntry, WatchlistStatus, WatchlistTier
 from app.services.coverage_service import CoverageService
 
 
-def test_coverage_service_summarizes_watchlist_and_promotion_state(session, monkeypatch):
+def test_coverage_service_summarizes_watchlist_and_promotion_state(
+    session, monkeypatch
+):
     session.add(
         WatchlistEntry(
             instrument="CS.D.EURUSD.CFD.IP",
@@ -86,7 +88,9 @@ def test_coverage_service_summarizes_watchlist_and_promotion_state(session, monk
     session.commit()
 
     service = CoverageService(session)
-    service.watchlist_service.settings.ig_streaming_seed_instruments = ["CS.D.EURUSD.CFD.IP"]
+    service.watchlist_service.settings.ig_streaming_seed_instruments = [
+        "CS.D.EURUSD.CFD.IP"
+    ]
     service.watchlist_service.settings.tier2_seed_instruments = ["COM.D.XAUUSD.CFD.IP"]
     monkeypatch.setattr(
         "app.services.coverage_service.get_market_status_service",
@@ -112,12 +116,23 @@ def test_coverage_service_summarizes_watchlist_and_promotion_state(session, monk
     )
     summary = service.get_summary()
 
-    assert summary["streaming"]["active_instruments"][0]["instrument"] == "CS.D.EURUSD.CFD.IP"
-    assert summary["streaming"]["execution_readiness"][0]["instrument"] == "CS.D.EURUSD.CFD.IP"
-    assert summary["tier2"]["active_candidates"][0]["instrument"] == "COM.D.XAUUSD.CFD.IP"
+    assert (
+        summary["streaming"]["active_instruments"][0]["instrument"]
+        == "CS.D.EURUSD.CFD.IP"
+    )
+    assert (
+        summary["streaming"]["execution_readiness"][0]["instrument"]
+        == "CS.D.EURUSD.CFD.IP"
+    )
+    assert (
+        summary["tier2"]["active_candidates"][0]["instrument"] == "COM.D.XAUUSD.CFD.IP"
+    )
     assert summary["promotions"]["pending_count"] == 1
     assert summary["trade_allocator"]["selected_count"] == 1
     assert summary["trade_allocator"]["rejected_count"] == 1
     assert summary["trade_allocator"]["reason_counts"]["selected"] == 1
     assert summary["trade_allocator"]["reason_counts"]["direction_conflict"] == 1
-    assert summary["trade_allocator"]["recent_decisions"][0]["reason_code"] == "direction_conflict"
+    assert (
+        summary["trade_allocator"]["recent_decisions"][0]["reason_code"]
+        == "direction_conflict"
+    )

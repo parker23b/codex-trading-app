@@ -26,16 +26,24 @@ class OperationalTelemetryService:
         stream_health = get_ig_streaming_service().get_health()
         operational_state = self.operational_state_service.get_summary()
         runtimes = self.runtime_state_service.list_runtimes()
-        active_runtimes = [runtime for runtime in runtimes if runtime.status == "RUNNING"]
-        heartbeat_stale_after_seconds = self.settings.system_health_heartbeat_interval_seconds * 3
-        price_stale_after_seconds = max(self.settings.runtime_price_stale_after_seconds, self.settings.market_data_poll_interval_seconds * 3)
+        active_runtimes = [
+            runtime for runtime in runtimes if runtime.status == "RUNNING"
+        ]
+        heartbeat_stale_after_seconds = (
+            self.settings.system_health_heartbeat_interval_seconds * 3
+        )
+        price_stale_after_seconds = max(
+            self.settings.runtime_price_stale_after_seconds,
+            self.settings.market_data_poll_interval_seconds * 3,
+        )
 
         stale_runtime_count = len(
             [
                 runtime
                 for runtime in active_runtimes
                 if runtime.last_heartbeat_at is None
-                or (now - self._as_utc(runtime.last_heartbeat_at)).total_seconds() > heartbeat_stale_after_seconds
+                or (now - self._as_utc(runtime.last_heartbeat_at)).total_seconds()
+                > heartbeat_stale_after_seconds
             ]
         )
         stale_price_runtime_count = len(
@@ -43,7 +51,8 @@ class OperationalTelemetryService:
                 runtime
                 for runtime in active_runtimes
                 if runtime.last_price_seen_at is None
-                or (now - self._as_utc(runtime.last_price_seen_at)).total_seconds() > price_stale_after_seconds
+                or (now - self._as_utc(runtime.last_price_seen_at)).total_seconds()
+                > price_stale_after_seconds
             ]
         )
         return {
@@ -53,13 +62,16 @@ class OperationalTelemetryService:
             "last_price_update": details.last_price_update,
             "last_price_age_ms": self._age_ms(details.last_price_update, now),
             "last_reconciliation": details.last_reconciliation,
-            "last_reconciliation_age_ms": self._age_ms(details.last_reconciliation, now),
+            "last_reconciliation_age_ms": self._age_ms(
+                details.last_reconciliation, now
+            ),
             "stream_connected": operational_state.feed_source_state.value == "LIVE",
             "stream_last_tick_at": stream_health.last_tick_at,
             "stream_last_tick_age_ms": self._age_ms(stream_health.last_tick_at, now),
             "subscribed_instrument_count": len(stream_health.subscribed_instruments),
             "desired_instrument_count": len(stream_health.desired_instruments),
-            "broker_connected": operational_state.broker_connectivity_state.value == "CONNECTED",
+            "broker_connected": operational_state.broker_connectivity_state.value
+            == "CONNECTED",
             "feed_source_state": operational_state.feed_source_state.value,
             "feed_health_state": operational_state.feed_health_state.value,
             "broker_connectivity_state": operational_state.broker_connectivity_state.value,
@@ -84,7 +96,11 @@ class OperationalTelemetryService:
     def _age_ms(value: datetime | None, now: datetime) -> float | None:
         if value is None:
             return None
-        normalized = value.astimezone(UTC) if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        normalized = (
+            value.astimezone(UTC)
+            if value.tzinfo is not None
+            else value.replace(tzinfo=UTC)
+        )
         return round((now - normalized).total_seconds() * 1000, 2)
 
     @staticmethod

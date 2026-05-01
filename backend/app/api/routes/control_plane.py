@@ -9,7 +9,9 @@ from app.models.strategy_governance import GovernanceApprovalState
 from app.services.control_plane_service import ControlPlaneService
 from app.services.domain_event_service import domain_event_service
 from app.services.operator_control_service import OperatorControlService
-from app.services.strategy_deployment_manager_service import StrategyDeploymentManagerService
+from app.services.strategy_deployment_manager_service import (
+    StrategyDeploymentManagerService,
+)
 from app.services.strategy_governance_service import StrategyGovernanceService
 
 router = APIRouter()
@@ -63,12 +65,16 @@ class OperatorControlUpdateRequest(BaseModel):
 
 
 @router.get("/control-plane/summary", response_model=ControlPlaneSummaryResponse)
-def get_control_plane_summary(session: Session = Depends(get_session)) -> ControlPlaneSummaryResponse:
+def get_control_plane_summary(
+    session: Session = Depends(get_session),
+) -> ControlPlaneSummaryResponse:
     return ControlPlaneSummaryResponse(**ControlPlaneService(session).get_summary())
 
 
 @router.get("/control-plane/operator-state", response_model=OperatorControlResponse)
-def get_operator_control_state(session: Session = Depends(get_session)) -> OperatorControlResponse:
+def get_operator_control_state(
+    session: Session = Depends(get_session),
+) -> OperatorControlResponse:
     return OperatorControlResponse(**OperatorControlService(session).get_summary())
 
 
@@ -106,7 +112,9 @@ def get_control_plane_strategy_detail(
     try:
         return ControlPlaneService(session).get_family_detail(strategy_name)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
 
 
 @router.post("/control-plane/reconcile")
@@ -149,7 +157,9 @@ def update_strategy_governance(
         GovernanceApprovalState.APPROVED.value,
         GovernanceApprovalState.DISABLED.value,
     }:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid approval_state.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid approval_state."
+        )
     try:
         record = StrategyGovernanceService(session).upsert_strategy(
             strategy_name=strategy_name,
@@ -163,7 +173,9 @@ def update_strategy_governance(
             notes=payload.notes,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
     domain_event_service.record_event(
         event_type="operator.governance_updated",
         category="operator",

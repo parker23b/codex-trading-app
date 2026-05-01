@@ -16,7 +16,14 @@ from app.models.promotion_request import PromotionRequest
 from app.models.runtime import StrategyRuntimeState
 from app.models.strategy_deployment import StrategyDeployment
 from app.models.strategy_governance import StrategyFamilyGovernance
-from app.models.trade import AllocationCycle, Execution, Position, ReconciliationEvent, Trade, TradeIntent
+from app.models.trade import (
+    AllocationCycle,
+    Execution,
+    Position,
+    ReconciliationEvent,
+    Trade,
+    TradeIntent,
+)
 from app.models.watchlist import OperatorShortlistEntry, WatchlistEntry
 from app.services.domain_event_service import domain_event_service
 from app.services.health_service import get_health_service
@@ -61,12 +68,18 @@ def broker() -> FakeBroker:
 
 
 @pytest.fixture(autouse=True)
-def patch_external_boundaries(monkeypatch: pytest.MonkeyPatch, broker: FakeBroker) -> None:
+def patch_external_boundaries(
+    monkeypatch: pytest.MonkeyPatch, broker: FakeBroker
+) -> None:
     monkeypatch.setattr("app.core.runtime.get_broker", lambda: broker)
     monkeypatch.setattr("app.core.broker_factory.get_broker", lambda: broker)
     monkeypatch.setattr("app.services.market_status_service.get_broker", lambda: broker)
-    monkeypatch.setattr("app.services.reconciliation_service.get_broker", lambda: broker)
-    monkeypatch.setattr("app.services.runtime_recovery_service.get_broker", lambda: broker)
+    monkeypatch.setattr(
+        "app.services.reconciliation_service.get_broker", lambda: broker
+    )
+    monkeypatch.setattr(
+        "app.services.runtime_recovery_service.get_broker", lambda: broker
+    )
     monkeypatch.setattr(domain_event_service, "record_event", lambda **_: None)
 
 

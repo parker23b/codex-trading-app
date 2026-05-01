@@ -94,7 +94,9 @@ class IGBroker(Broker):
         self._verify_ssl = verify_ssl
         self._ca_bundle_path = ca_bundle_path
         self._market_cache_ttl_seconds = get_settings().ig_market_cache_ttl_seconds
-        self._market_cache_stale_ttl_seconds = get_settings().ig_market_cache_stale_ttl_seconds
+        self._market_cache_stale_ttl_seconds = (
+            get_settings().ig_market_cache_stale_ttl_seconds
+        )
         self._positions: dict[str, BrokerPosition] = {}
         self._last_prices: dict[str, float] = {}
         self._market_details_cache: dict[str, CachedMarketDetails] = {}
@@ -119,7 +121,9 @@ class IGBroker(Broker):
             return self._simulate_place_order(order, submitted_at=submitted_at)
 
         self._ensure_authenticated()
-        market_payload = self._request("GET", f"/markets/{order.instrument}", version="4")
+        market_payload = self._request(
+            "GET", f"/markets/{order.instrument}", version="4"
+        )
         market_details = self._parse_market_details(order.instrument, market_payload)
         self._market_details_cache[order.instrument] = CachedMarketDetails(
             details=market_details,
@@ -127,7 +131,10 @@ class IGBroker(Broker):
         )
         account_summary = self.get_account_summary()
         order_currency = self._resolve_order_currency(market_payload)
-        if market_details.min_deal_size is not None and order.size < market_details.min_deal_size:
+        if (
+            market_details.min_deal_size is not None
+            and order.size < market_details.min_deal_size
+        ):
             raise IGBrokerError(
                 f"Requested size {order.size} is below IG minimum deal size {market_details.min_deal_size} "
                 f"for {order.instrument}."
@@ -243,24 +250,47 @@ class IGBroker(Broker):
             )
 
         self._ensure_authenticated()
-        open_position = self._positions.get(broker_reference) if broker_reference is not None else None
+        open_position = (
+            self._positions.get(broker_reference)
+            if broker_reference is not None
+            else None
+        )
         if open_position is None:
             remote_positions = self.get_positions()
             if broker_reference is not None:
                 open_position = next(
-                    (position for position in remote_positions if position.broker_reference == broker_reference),
+                    (
+                        position
+                        for position in remote_positions
+                        if position.broker_reference == broker_reference
+                    ),
                     None,
                 )
             if open_position is None:
-                open_position = next((position for position in remote_positions if position.instrument == instrument), None)
+                open_position = next(
+                    (
+                        position
+                        for position in remote_positions
+                        if position.instrument == instrument
+                    ),
+                    None,
+                )
         if open_position is None:
             raise IGBrokerError(
                 f"No broker position found for instrument '{instrument}'"
-                + (f" and broker reference '{broker_reference}'." if broker_reference else ".")
+                + (
+                    f" and broker reference '{broker_reference}'."
+                    if broker_reference
+                    else "."
+                )
             )
 
         deal_id = open_position.broker_reference
-        opposite_direction = OrderDirection.SELL if open_position.direction is OrderDirection.BUY else OrderDirection.BUY
+        opposite_direction = (
+            OrderDirection.SELL
+            if open_position.direction is OrderDirection.BUY
+            else OrderDirection.BUY
+        )
         payload = {
             "dealId": deal_id,
             "direction": opposite_direction.value,
@@ -290,7 +320,9 @@ class IGBroker(Broker):
         )
         deal_reference = response.get("dealReference")
         if not deal_reference:
-            raise IGBrokerError("IG close-position request did not return a dealReference.")
+            raise IGBrokerError(
+                "IG close-position request did not return a dealReference."
+            )
 
         confirmation = self._wait_for_deal_confirmation(deal_reference)
         executed_price = float(confirmation.get("level") or open_position.open_price)
@@ -331,10 +363,17 @@ class IGBroker(Broker):
             direction_value = position_data.get("direction")
             if direction_value not in {"BUY", "SELL"}:
                 continue
-            instrument = market_data.get("epic") or position_data.get("epic") or position_data.get("dealId")
+            instrument = (
+                market_data.get("epic")
+                or position_data.get("epic")
+                or position_data.get("dealId")
+            )
             if not instrument:
                 continue
-            opened_at = self._parse_ig_timestamp(position_data.get("createdDateUTC")) or now_utc()
+            opened_at = (
+                self._parse_ig_timestamp(position_data.get("createdDateUTC"))
+                or now_utc()
+            )
             deal_id = position_data.get("dealId") or position_data.get("dealReference")
             if not deal_id:
                 deal_id = f"ig-{instrument}-{len(positions) + 1}"
@@ -348,7 +387,9 @@ class IGBroker(Broker):
                     opened_at=opened_at,
                 )
             )
-        self._positions = {position.broker_reference: position for position in positions}
+        self._positions = {
+            position.broker_reference: position for position in positions
+        }
         return positions
 
     def get_latest_price(self, instrument: str) -> float:
@@ -365,12 +406,21 @@ class IGBroker(Broker):
         elif instrument in self._last_prices:
             price = self._last_prices[instrument]
         else:
-            matching_position = next((position for position in self._positions.values() if position.instrument == instrument), None)
+            matching_position = next(
+                (
+                    position
+                    for position in self._positions.values()
+                    if position.instrument == instrument
+                ),
+                None,
+            )
             if matching_position is not None:
                 price = matching_position.open_price
 
         if price is None:
-            raise IGBrokerError(f"IG market snapshot for '{instrument}' did not include a usable price.")
+            raise IGBrokerError(
+                f"IG market snapshot for '{instrument}' did not include a usable price."
+            )
 
         self._last_prices[instrument] = price
         return price
@@ -389,7 +439,9 @@ class IGBroker(Broker):
         self._ensure_authenticated()
         safe_points = max(10, min(int(num_points), 500))
         resolution = resolution or self._price_resolution(timeframe)
-        payload = self._request("GET", f"/prices/{instrument}/{resolution}/{safe_points}", version="3")
+        payload = self._request(
+            "GET", f"/prices/{instrument}/{resolution}/{safe_points}", version="3"
+        )
         candles: list[dict[str, object]] = []
         for item in payload.get("prices", []):
             opened = self._mid_price(item.get("openPrice") or {})
@@ -397,7 +449,13 @@ class IGBroker(Broker):
             low = self._mid_price(item.get("lowPrice") or {})
             close = self._mid_price(item.get("closePrice") or {})
             timestamp = item.get("snapshotTimeUTC") or item.get("snapshotTime")
-            if opened is None or high is None or low is None or close is None or not timestamp:
+            if (
+                opened is None
+                or high is None
+                or low is None
+                or close is None
+                or not timestamp
+            ):
                 continue
             parsed_at = self._parse_ig_timestamp(str(timestamp)) or now_utc()
             candles.append(
@@ -428,7 +486,9 @@ class IGBroker(Broker):
         if self._session is None:
             raise IGBrokerError("IG session was not established for streaming.")
         if not self._session.current_account_id:
-            raise IGBrokerError("IG session did not expose an active account id for streaming.")
+            raise IGBrokerError(
+                "IG session did not expose an active account id for streaming."
+            )
         if not self._session.lightstreamer_endpoint:
             raise IGBrokerError("IG session did not expose a Lightstreamer endpoint.")
         return IGStreamingCredentials(
@@ -438,7 +498,9 @@ class IGBroker(Broker):
             lightstreamer_endpoint=self._session.lightstreamer_endpoint,
         )
 
-    def _load_market_details(self, instrument: str, *, use_cache: bool) -> BrokerMarketDetails:
+    def _load_market_details(
+        self, instrument: str, *, use_cache: bool
+    ) -> BrokerMarketDetails:
         cached = self._market_details_cache.get(instrument)
         if use_cache and cached is not None and self._is_cache_fresh(cached):
             return cached.details
@@ -447,7 +509,11 @@ class IGBroker(Broker):
         try:
             payload = self._request("GET", f"/markets/{instrument}", version="4")
         except IGBrokerError as exc:
-            if cached is not None and self._is_cache_still_usable(cached) and self._should_fallback_to_stale_market_details(exc):
+            if (
+                cached is not None
+                and self._is_cache_still_usable(cached)
+                and self._should_fallback_to_stale_market_details(exc)
+            ):
                 logger.warning(
                     "Using stale IG market cache after upstream error",
                     extra={"instrument": instrument, "error": str(exc)},
@@ -455,7 +521,9 @@ class IGBroker(Broker):
                 return cached.details
             raise
         details = self._parse_market_details(instrument, payload)
-        self._market_details_cache[instrument] = CachedMarketDetails(details=details, fetched_at=time.monotonic())
+        self._market_details_cache[instrument] = CachedMarketDetails(
+            details=details, fetched_at=time.monotonic()
+        )
         return details
 
     def get_account_summary(self) -> BrokerAccountSummary:
@@ -477,7 +545,11 @@ class IGBroker(Broker):
             raise IGBrokerError("IG accounts response did not include any accounts.")
 
         balance_info = selected_account.get("balance", {})
-        balance = self._coerce_float(balance_info.get("balance")) or self._coerce_float(selected_account.get("balance")) or 0.0
+        balance = (
+            self._coerce_float(balance_info.get("balance"))
+            or self._coerce_float(selected_account.get("balance"))
+            or 0.0
+        )
         available = (
             self._coerce_float(balance_info.get("available"))
             or self._coerce_float(balance_info.get("availableToDeal"))
@@ -490,10 +562,14 @@ class IGBroker(Broker):
             or self._coerce_float(selected_account.get("profitLoss"))
             or 0.0
         )
-        equity = self._coerce_float(balance_info.get("equity")) or (balance + profit_loss)
+        equity = self._coerce_float(balance_info.get("equity")) or (
+            balance + profit_loss
+        )
 
         return BrokerAccountSummary(
-            account_id=selected_account.get("accountId") or self._session.current_account_id or "UNKNOWN",
+            account_id=selected_account.get("accountId")
+            or self._session.current_account_id
+            or "UNKNOWN",
             balance=balance,
             available=available,
             profit_loss=profit_loss,
@@ -526,7 +602,9 @@ class IGBroker(Broker):
                 details={"broker": "IG"},
             )
         price_increment = self._coerce_float(sizing_metadata.get("price_increment"))
-        value_per_increment = self._coerce_float(sizing_metadata.get("value_per_increment"))
+        value_per_increment = self._coerce_float(
+            sizing_metadata.get("value_per_increment")
+        )
         if (
             price_increment is None
             or price_increment <= 0
@@ -590,12 +668,16 @@ class IGBroker(Broker):
             },
         )
 
-    def normalize_order_size(self, instrument: str, requested_size: float) -> BrokerSizeNormalization:
+    def normalize_order_size(
+        self, instrument: str, requested_size: float
+    ) -> BrokerSizeNormalization:
         details = self.get_market_details(instrument)
         notes: list[str] = []
         normalized_size = max(float(requested_size), 0.0)
         if details.size_step is not None and details.size_step > 0:
-            normalized_size = floor(normalized_size / details.size_step) * details.size_step
+            normalized_size = (
+                floor(normalized_size / details.size_step) * details.size_step
+            )
             notes.append("rounded_down_to_size_step")
         normalized_size = round(normalized_size, 8)
         if normalized_size <= 0:
@@ -608,10 +690,16 @@ class IGBroker(Broker):
                 reason="Broker size normalization rounded the requested size to zero.",
                 min_deal_size=details.min_deal_size,
                 size_step=details.size_step,
-                details={"broker": "IG", "size_unit": details.metadata.get("size_unit")},
+                details={
+                    "broker": "IG",
+                    "size_unit": details.metadata.get("size_unit"),
+                },
                 notes=notes,
             )
-        if details.min_deal_size is not None and normalized_size < details.min_deal_size:
+        if (
+            details.min_deal_size is not None
+            and normalized_size < details.min_deal_size
+        ):
             return BrokerSizeNormalization(
                 instrument=instrument,
                 requested_size=requested_size,
@@ -621,7 +709,10 @@ class IGBroker(Broker):
                 reason="Computed size is below broker minimum deal size.",
                 min_deal_size=details.min_deal_size,
                 size_step=details.size_step,
-                details={"broker": "IG", "size_unit": details.metadata.get("size_unit")},
+                details={
+                    "broker": "IG",
+                    "size_unit": details.metadata.get("size_unit"),
+                },
                 notes=notes,
             )
         return BrokerSizeNormalization(
@@ -637,7 +728,9 @@ class IGBroker(Broker):
             notes=notes,
         )
 
-    def _simulate_place_order(self, order: OrderRequest, *, submitted_at: datetime | None = None) -> BrokerOrderResult:
+    def _simulate_place_order(
+        self, order: OrderRequest, *, submitted_at: datetime | None = None
+    ) -> BrokerOrderResult:
         logger.info(
             "Stub order placed via IG broker",
             extra={
@@ -685,7 +778,11 @@ class IGBroker(Broker):
             position = self._positions.pop(broker_reference, None)
         if position is None:
             position_key = next(
-                (key for key, value in self._positions.items() if value.instrument == instrument),
+                (
+                    key
+                    for key, value in self._positions.items()
+                    if value.instrument == instrument
+                ),
                 None,
             )
             if position_key is not None:
@@ -739,9 +836,13 @@ class IGBroker(Broker):
         cst = response_headers.get("CST")
         security_token = response_headers.get("X-SECURITY-TOKEN")
         if not cst or not security_token:
-            raise IGBrokerError("IG login succeeded but did not return CST and X-SECURITY-TOKEN headers.")
+            raise IGBrokerError(
+                "IG login succeeded but did not return CST and X-SECURITY-TOKEN headers."
+            )
 
-        current_account_id = response_body.get("currentAccountId") or response_body.get("accountId")
+        current_account_id = response_body.get("currentAccountId") or response_body.get(
+            "accountId"
+        )
         self._session = IGSession(
             cst=cst,
             security_token=security_token,
@@ -771,7 +872,9 @@ class IGBroker(Broker):
         cst = response_headers.get("CST")
         security_token = response_headers.get("X-SECURITY-TOKEN")
         if not cst or not security_token:
-            raise IGBrokerError("IG account switch succeeded but refreshed session tokens were not returned.")
+            raise IGBrokerError(
+                "IG account switch succeeded but refreshed session tokens were not returned."
+            )
         self._session = IGSession(
             cst=cst,
             security_token=security_token,
@@ -795,7 +898,9 @@ class IGBroker(Broker):
         last_response: dict[str, Any] | None = None
         for _ in range(10):
             try:
-                response = self._request("GET", f"/confirms/{deal_reference}", version="1")
+                response = self._request(
+                    "GET", f"/confirms/{deal_reference}", version="1"
+                )
             except IGBrokerError as exc:
                 if "status 404" in str(exc):
                     time.sleep(0.4)
@@ -811,9 +916,13 @@ class IGBroker(Broker):
                     f"IG rejected deal {deal_reference}: {reason}. Confirmation: {json.dumps(response, default=str)}"
                 )
             time.sleep(0.4)
-        raise IGBrokerError(f"Timed out waiting for IG confirmation for deal {deal_reference}: {last_response}")
+        raise IGBrokerError(
+            f"Timed out waiting for IG confirmation for deal {deal_reference}: {last_response}"
+        )
 
-    def _parse_market_details(self, instrument: str, payload: dict[str, Any]) -> BrokerMarketDetails:
+    def _parse_market_details(
+        self, instrument: str, payload: dict[str, Any]
+    ) -> BrokerMarketDetails:
         instrument_data = payload.get("instrument", {})
         snapshot = payload.get("snapshot", {})
         dealing_rules = payload.get("dealingRules", {})
@@ -822,8 +931,13 @@ class IGBroker(Broker):
         high = self._coerce_float(snapshot.get("high"))
         low = self._coerce_float(snapshot.get("low"))
         market_status = snapshot.get("marketStatus")
-        market_order_preference = str(dealing_rules.get("marketOrderPreference") or "").upper()
-        tradable = market_status in {"TRADEABLE", "TRADEABLE_ONLINE"} and market_order_preference != "NOT_AVAILABLE"
+        market_order_preference = str(
+            dealing_rules.get("marketOrderPreference") or ""
+        ).upper()
+        tradable = (
+            market_status in {"TRADEABLE", "TRADEABLE_ONLINE"}
+            and market_order_preference != "NOT_AVAILABLE"
+        )
         min_deal_size = self._extract_rule_value(dealing_rules.get("minDealSize"))
         size_step = self._coerce_float(instrument_data.get("lotSize"))
         min_normal_stop_or_limit_distance = self._extract_rule_value(
@@ -834,7 +948,9 @@ class IGBroker(Broker):
         one_pip_size = self._extract_numeric_prefix(one_pip_means)
         scaling_factor = self._coerce_float(instrument_data.get("scalingFactor"))
         currencies = instrument_data.get("currencies") or []
-        default_currency = next((currency for currency in currencies if currency.get("isDefault")), {})
+        default_currency = next(
+            (currency for currency in currencies if currency.get("isDefault")), {}
+        )
         quote_currency = default_currency.get("code") or next(
             (currency.get("code") for currency in currencies if currency.get("code")),
             None,
@@ -864,17 +980,25 @@ class IGBroker(Broker):
             min_normal_stop_or_limit_distance=min_normal_stop_or_limit_distance,
             market_order_preference=market_order_preference or None,
             base_currency=base_currency,
-            quote_currency=quote_currency.upper() if isinstance(quote_currency, str) else None,
+            quote_currency=quote_currency.upper()
+            if isinstance(quote_currency, str)
+            else None,
             metadata={
                 "provider": "IG",
                 "size_unit": str(instrument_data.get("unit") or "") or None,
                 "ig_sizing": {
                     "instrument_type": str(instrument_data.get("type") or "") or None,
                     "size_unit": str(instrument_data.get("unit") or "") or None,
-                    "contract_size": self._coerce_float(instrument_data.get("contractSize")),
-                    "value_per_increment": self._coerce_float(instrument_data.get("valueOfOnePip")),
+                    "contract_size": self._coerce_float(
+                        instrument_data.get("contractSize")
+                    ),
+                    "value_per_increment": self._coerce_float(
+                        instrument_data.get("valueOfOnePip")
+                    ),
                     "scaling_factor": scaling_factor,
-                    "one_pip_means": str(one_pip_means) if one_pip_means is not None else None,
+                    "one_pip_means": str(one_pip_means)
+                    if one_pip_means is not None
+                    else None,
                     "price_increment": one_pip_size,
                 },
             },
@@ -1003,17 +1127,27 @@ class IGBroker(Broker):
             ) as response:
                 response_text = response.read().decode("utf-8")
                 response_body = json.loads(response_text) if response_text else {}
-                response_headers = {key: value for key, value in response.headers.items()}
+                response_headers = {
+                    key: value for key, value in response.headers.items()
+                }
                 return response_body, response_headers
         except HTTPError as exc:
             response_text = exc.read().decode("utf-8", errors="replace")
             logger.error(
                 "IG request failed",
-                extra={"status_code": exc.code, "path": path, "body": response_text[:500]},
+                extra={
+                    "status_code": exc.code,
+                    "path": path,
+                    "body": response_text[:500],
+                },
             )
-            raise IGBrokerError(f"IG request failed with status {exc.code}: {response_text}") from exc
+            raise IGBrokerError(
+                f"IG request failed with status {exc.code}: {response_text}"
+            ) from exc
         except URLError as exc:
-            logger.error("IG network error", extra={"path": path, "reason": str(exc.reason)})
+            logger.error(
+                "IG network error", extra={"path": path, "reason": str(exc.reason)}
+            )
             raise IGBrokerError(f"Unable to reach IG API: {exc.reason}") from exc
 
     def _validate_auth_config(self) -> None:
@@ -1060,7 +1194,9 @@ class IGBroker(Broker):
 
     def _build_ssl_context(self) -> ssl.SSLContext:
         if not self._verify_ssl:
-            logger.warning("IG SSL verification disabled", extra={"base_url": self._base_url})
+            logger.warning(
+                "IG SSL verification disabled", extra={"base_url": self._base_url}
+            )
             return ssl._create_unverified_context()
         if self._ca_bundle_path:
             return ssl.create_default_context(cafile=self._ca_bundle_path)
@@ -1091,7 +1227,9 @@ class IGBroker(Broker):
         return (time.monotonic() - cached.fetched_at) <= self._market_cache_ttl_seconds
 
     def _is_cache_still_usable(self, cached: CachedMarketDetails) -> bool:
-        return (time.monotonic() - cached.fetched_at) <= self._market_cache_stale_ttl_seconds
+        return (
+            time.monotonic() - cached.fetched_at
+        ) <= self._market_cache_stale_ttl_seconds
 
     @staticmethod
     def _should_fallback_to_stale_market_details(error: IGBrokerError) -> bool:

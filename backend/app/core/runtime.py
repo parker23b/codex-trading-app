@@ -11,7 +11,11 @@ from app.core.signals import EntrySignal, ExitSignal
 from app.core.trading_engine import TradingEngine
 from app.models.trade import Position, clone_position
 from app.strategies.base import PriceUpdate
-from app.strategies.registry import ResolvedStrategyProfile, StrategyMetadata, strategy_registry
+from app.strategies.registry import (
+    ResolvedStrategyProfile,
+    StrategyMetadata,
+    strategy_registry,
+)
 
 logger = get_logger(__name__)
 
@@ -70,7 +74,9 @@ class StrategyRuntimeManager:
         """
         key = self.make_key(strategy_name, instrument)
         if key in self.engines:
-            raise ValueError(f"Strategy '{strategy_name}' is already running for instrument '{instrument}'.")
+            raise ValueError(
+                f"Strategy '{strategy_name}' is already running for instrument '{instrument}'."
+            )
         if startup_source == "direct":
             logger.warning(
                 "Runtime started directly without service-layer startup safeguards",
@@ -84,8 +90,14 @@ class StrategyRuntimeManager:
                 },
             )
 
-        resolved_profile = self.resolve_profile(strategy_name, profile_name=profile_name, strategy_parameters=strategy_parameters)
-        strategy = strategy_registry.create(strategy_name, parameters=resolved_profile.constructor_kwargs)
+        resolved_profile = self.resolve_profile(
+            strategy_name,
+            profile_name=profile_name,
+            strategy_parameters=strategy_parameters,
+        )
+        strategy = strategy_registry.create(
+            strategy_name, parameters=resolved_profile.constructor_kwargs
+        )
         if strategy_snapshot:
             strategy.restore_state_snapshot(strategy_snapshot)
         engine = TradingEngine(
@@ -120,7 +132,9 @@ class StrategyRuntimeManager:
         profile_name: str | None = None,
         strategy_parameters: dict[str, object] | None = None,
     ) -> ResolvedStrategyProfile:
-        resolved_profile = strategy_registry.resolve_profile(strategy_name, profile_name)
+        resolved_profile = strategy_registry.resolve_profile(
+            strategy_name, profile_name
+        )
         if not strategy_parameters:
             return resolved_profile
         parameter_values = dict(resolved_profile.parameter_values)
@@ -147,7 +161,9 @@ class StrategyRuntimeManager:
         if instrument is None and strategy_name is None:
             raise ValueError("Either instrument or strategy_name must be provided.")
 
-        matching_keys = self.find_engine_keys(strategy_name=strategy_name, instrument=instrument)
+        matching_keys = self.find_engine_keys(
+            strategy_name=strategy_name, instrument=instrument
+        )
         if not matching_keys:
             parts: list[str] = []
             if strategy_name is not None:
@@ -164,7 +180,10 @@ class StrategyRuntimeManager:
             stopped_engines.append(engine)
             logger.info(
                 "Runtime stopped",
-                extra={"strategy": engine.strategy.name, "instrument": engine.instrument},
+                extra={
+                    "strategy": engine.strategy.name,
+                    "instrument": engine.instrument,
+                },
             )
 
         if instrument is not None and not self.get_engines_for_instrument(instrument):
@@ -220,14 +239,18 @@ class StrategyRuntimeManager:
     def get_engine(self, strategy_name: str, instrument: str) -> TradingEngine | None:
         return self.engines.get(self.make_key(strategy_name, instrument))
 
-    def get_engines_for_strategy(self, strategy_name: str) -> list[tuple[RuntimeKey, TradingEngine]]:
+    def get_engines_for_strategy(
+        self, strategy_name: str
+    ) -> list[tuple[RuntimeKey, TradingEngine]]:
         return [
             (key, engine)
             for key, engine in self.engines.items()
             if key[0] == strategy_name
         ]
 
-    def get_engines_for_instrument(self, instrument: str) -> list[tuple[RuntimeKey, TradingEngine]]:
+    def get_engines_for_instrument(
+        self, instrument: str
+    ) -> list[tuple[RuntimeKey, TradingEngine]]:
         return [
             (key, engine)
             for key, engine in self.engines.items()

@@ -25,7 +25,9 @@ try:
         Subscription,
         SubscriptionListener,
     )
-except ImportError:  # pragma: no cover - exercised only when optional runtime dependency is missing
+except (
+    ImportError
+):  # pragma: no cover - exercised only when optional runtime dependency is missing
     ClientListener = object  # type: ignore[assignment]
     LightstreamerClient = None  # type: ignore[assignment]
     Subscription = None  # type: ignore[assignment]
@@ -81,7 +83,9 @@ class _StreamClientListener(ClientListener):
     def onServerError(self, code: int, message: str) -> None:  # noqa: N802 - SDK callback shape
         self._service._health.last_error = f"{code}: {message}"
         get_health_service().set_stream_connected(False)
-        logger.error("IG Lightstreamer server error", extra={"code": code, "message": message})
+        logger.error(
+            "IG Lightstreamer server error", extra={"code": code, "message": message}
+        )
 
 
 class _PriceSubscriptionListener(SubscriptionListener):
@@ -89,10 +93,16 @@ class _PriceSubscriptionListener(SubscriptionListener):
         self._service = service
 
     def onSubscription(self) -> None:  # noqa: N802 - SDK callback shape
-        logger.info("IG Lightstreamer price subscription active", extra={"count": len(self._service._subscribed_instruments)})
+        logger.info(
+            "IG Lightstreamer price subscription active",
+            extra={"count": len(self._service._subscribed_instruments)},
+        )
 
     def onSubscriptionError(self, code: int, message: str) -> None:  # noqa: N802 - SDK callback shape
-        logger.error("IG Lightstreamer subscription failed", extra={"code": code, "message": message})
+        logger.error(
+            "IG Lightstreamer subscription failed",
+            extra={"code": code, "message": message},
+        )
 
     def onUnsubscription(self) -> None:  # noqa: N802 - SDK callback shape
         logger.info("IG Lightstreamer price subscription removed")
@@ -127,10 +137,16 @@ class _MarketSubscriptionListener(SubscriptionListener):
         self._service = service
 
     def onSubscription(self) -> None:  # noqa: N802 - SDK callback shape
-        logger.info("IG Lightstreamer market subscription active", extra={"count": len(self._service._subscribed_instruments)})
+        logger.info(
+            "IG Lightstreamer market subscription active",
+            extra={"count": len(self._service._subscribed_instruments)},
+        )
 
     def onSubscriptionError(self, code: int, message: str) -> None:  # noqa: N802 - SDK callback shape
-        logger.error("IG Lightstreamer market subscription failed", extra={"code": code, "message": message})
+        logger.error(
+            "IG Lightstreamer market subscription failed",
+            extra={"code": code, "message": message},
+        )
 
     def onUnsubscription(self) -> None:  # noqa: N802 - SDK callback shape
         logger.info("IG Lightstreamer market subscription removed")
@@ -188,14 +204,18 @@ class IGStreamingService:
         if not isinstance(self._broker, IGBroker):
             self._health.enabled = False
             self._health.last_error = "Active broker is not an IG broker."
-            logger.warning("IG streaming requested, but active broker is not an IG broker.")
+            logger.warning(
+                "IG streaming requested, but active broker is not an IG broker."
+            )
             return False
         if LightstreamerClient is None or Subscription is None:
             self._health.enabled = False
             self._health.dependency_ready = False
             self._health.last_error = "lightstreamer-client-lib is not installed."
             if not self._missing_dependency_logged:
-                logger.warning("IG streaming disabled because lightstreamer-client-lib is not installed.")
+                logger.warning(
+                    "IG streaming disabled because lightstreamer-client-lib is not installed."
+                )
                 self._missing_dependency_logged = True
             return False
         self._health.enabled = True
@@ -234,7 +254,9 @@ class IGStreamingService:
             while True:
                 try:
                     await self._reconcile_subscription()
-                    await self._drain_price_queue(timeout=self.settings.ig_streaming_watch_interval_seconds)
+                    await self._drain_price_queue(
+                        timeout=self.settings.ig_streaming_watch_interval_seconds
+                    )
                 except asyncio.CancelledError:
                     raise
                 except IGBrokerError as exc:
@@ -249,11 +271,20 @@ class IGStreamingService:
                             "event_title": "Streaming loop broker error",
                         },
                     )
-                    await asyncio.sleep(self.settings.ig_streaming_watch_interval_seconds)
-                except Exception as exc:  # pragma: no cover - defensive runtime protection
+                    await asyncio.sleep(
+                        self.settings.ig_streaming_watch_interval_seconds
+                    )
+                except (
+                    Exception
+                ) as exc:  # pragma: no cover - defensive runtime protection
                     self._health.last_error = str(exc)
-                    logger.exception("IG streaming loop failed unexpectedly", extra={"error": str(exc)})
-                    await asyncio.sleep(self.settings.ig_streaming_watch_interval_seconds)
+                    logger.exception(
+                        "IG streaming loop failed unexpectedly",
+                        extra={"error": str(exc)},
+                    )
+                    await asyncio.sleep(
+                        self.settings.ig_streaming_watch_interval_seconds
+                    )
         finally:
             self._teardown_client()
 
@@ -275,7 +306,9 @@ class IGStreamingService:
         self._health.capped_instruments = streaming_plan.capped_instruments
         if not desired_instruments:
             if self._subscription is not None:
-                logger.info("No active instruments remain; closing IG price subscription.")
+                logger.info(
+                    "No active instruments remain; closing IG price subscription."
+                )
             self._unsubscribe_price_stream()
             return
 
@@ -351,18 +384,26 @@ class IGStreamingService:
         self._credentials = credentials
         self._client = LightstreamerClient(credentials.lightstreamer_endpoint, None)
         self._client.connectionDetails.setUser(credentials.account_id)
-        self._client.connectionDetails.setPassword(f"CST-{credentials.cst}|XST-{credentials.security_token}")
+        self._client.connectionDetails.setPassword(
+            f"CST-{credentials.cst}|XST-{credentials.security_token}"
+        )
         self._client_listener = _StreamClientListener(self)
         self._client.addListener(self._client_listener)
         self._client.connect()
         logger.info(
             "IG Lightstreamer client connected",
-            extra={"account_id": credentials.account_id, "endpoint": credentials.lightstreamer_endpoint},
+            extra={
+                "account_id": credentials.account_id,
+                "endpoint": credentials.lightstreamer_endpoint,
+            },
         )
 
     def _resubscribe(self, instruments: tuple[str, ...]) -> None:
         self._unsubscribe_price_stream()
-        items = [f"PRICE:{self._credentials.account_id}:{instrument}" for instrument in instruments]
+        items = [
+            f"PRICE:{self._credentials.account_id}:{instrument}"
+            for instrument in instruments
+        ]
         subscription = Subscription("MERGE", items, PRICE_FIELDS)
         subscription.setDataAdapter("Pricing")
         subscription.setRequestedSnapshot("yes")
@@ -389,19 +430,28 @@ class IGStreamingService:
             if instrument in instruments
         }
         self._health.subscribed_instruments = instruments
-        logger.info("IG Lightstreamer subscriptions requested", extra={"instruments": list(instruments)})
+        logger.info(
+            "IG Lightstreamer subscriptions requested",
+            extra={"instruments": list(instruments)},
+        )
 
     def _unsubscribe_price_stream(self) -> None:
         if self._client is not None and self._subscription is not None:
             try:
                 self._client.unsubscribe(self._subscription)
             except Exception as exc:  # pragma: no cover - defensive cleanup path
-                logger.warning("Failed to unsubscribe IG price stream cleanly", extra={"error": str(exc)})
+                logger.warning(
+                    "Failed to unsubscribe IG price stream cleanly",
+                    extra={"error": str(exc)},
+                )
         if self._client is not None and self._market_subscription is not None:
             try:
                 self._client.unsubscribe(self._market_subscription)
             except Exception as exc:  # pragma: no cover - defensive cleanup path
-                logger.warning("Failed to unsubscribe IG market stream cleanly", extra={"error": str(exc)})
+                logger.warning(
+                    "Failed to unsubscribe IG market stream cleanly",
+                    extra={"error": str(exc)},
+                )
         self._subscription = None
         self._subscription_listener = None
         self._market_subscription = None
@@ -418,7 +468,10 @@ class IGStreamingService:
             try:
                 self._client.disconnect()
             except Exception as exc:  # pragma: no cover - defensive cleanup path
-                logger.warning("Failed to disconnect IG Lightstreamer client cleanly", extra={"error": str(exc)})
+                logger.warning(
+                    "Failed to disconnect IG Lightstreamer client cleanly",
+                    extra={"error": str(exc)},
+                )
         self._client = None
         self._client_listener = None
         self._credentials = None
@@ -463,7 +516,9 @@ class IGStreamingService:
         subscription.setRequestedMaxFrequency(requested_frequency)
 
     def _churn_amount(self, desired_instruments: tuple[str, ...]) -> int:
-        return len(set(desired_instruments).symmetric_difference(self._subscribed_instruments))
+        return len(
+            set(desired_instruments).symmetric_difference(self._subscribed_instruments)
+        )
 
     def _has_churn_capacity(self, churn_amount: int) -> bool:
         if churn_amount <= 0:
@@ -482,9 +537,14 @@ class IGStreamingService:
 
     def _prune_churn_events(self) -> None:
         cutoff = datetime.now(UTC).timestamp() - 60.0
-        while self._subscription_churn_events and self._subscription_churn_events[0].timestamp() < cutoff:
+        while (
+            self._subscription_churn_events
+            and self._subscription_churn_events[0].timestamp() < cutoff
+        ):
             self._subscription_churn_events.popleft()
-        self._health.subscription_churn_last_minute = len(self._subscription_churn_events)
+        self._health.subscription_churn_last_minute = len(
+            self._subscription_churn_events
+        )
 
 
 _streaming_service: IGStreamingService | None = None

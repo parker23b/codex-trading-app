@@ -69,12 +69,16 @@ class StrategyRegistry:
         self._screening_strategies: dict[str, Callable[[], ScreeningStrategy]] = {}
         self._screening_metadata: dict[str, ScreeningStrategyMetadata] = {}
 
-    def register(self, metadata: StrategyMetadata, factory: Callable[..., Strategy]) -> None:
+    def register(
+        self, metadata: StrategyMetadata, factory: Callable[..., Strategy]
+    ) -> None:
         name = metadata.name
         self._strategies[name] = factory
         self._metadata[name] = metadata
 
-    def create(self, name: str, *, parameters: dict[str, Any] | None = None) -> Strategy:
+    def create(
+        self, name: str, *, parameters: dict[str, Any] | None = None
+    ) -> Strategy:
         if name not in self._strategies:
             raise ValueError(f"Strategy '{name}' is not registered.")
         return self._strategies[name](**(parameters or {}))
@@ -87,16 +91,23 @@ class StrategyRegistry:
             raise ValueError(f"Strategy '{name}' is not registered.")
         return self._metadata[name]
 
-    def resolve_profile(self, strategy_name: str, profile_name: str | None = None) -> ResolvedStrategyProfile:
+    def resolve_profile(
+        self, strategy_name: str, profile_name: str | None = None
+    ) -> ResolvedStrategyProfile:
         metadata = self.get_metadata(strategy_name)
         available_profiles = {
-            profile.name: profile
-            for profile in metadata.parameter_profiles
+            profile.name: profile for profile in metadata.parameter_profiles
         }
-        target_profile_name = profile_name or (metadata.parameter_profiles[0].name if metadata.parameter_profiles else "default")
+        target_profile_name = profile_name or (
+            metadata.parameter_profiles[0].name
+            if metadata.parameter_profiles
+            else "default"
+        )
         profile = available_profiles.get(target_profile_name)
         if profile is None:
-            raise ValueError(f"Profile '{target_profile_name}' is not approved for strategy '{strategy_name}'.")
+            raise ValueError(
+                f"Profile '{target_profile_name}' is not approved for strategy '{strategy_name}'."
+            )
         constructor_kwargs: dict[str, Any] = {}
         resolved_values: dict[str, float] = {}
         for definition in metadata.parameters:
@@ -140,21 +151,38 @@ strategy_registry.register(
         risk_per_trade=0.8,
         family_name="mean_reversion",
         parameters=(
-            StrategyParameterDefinition(key="window_size", label="Window", value=20, step=1),
-            StrategyParameterDefinition(key="entry_threshold", label="Entry Threshold", value=0.0015, step=0.0001),
-            StrategyParameterDefinition(key="exit_threshold", label="Exit Threshold", value=0.0004, step=0.0001),
+            StrategyParameterDefinition(
+                key="window_size", label="Window", value=20, step=1
+            ),
+            StrategyParameterDefinition(
+                key="entry_threshold",
+                label="Entry Threshold",
+                value=0.0015,
+                step=0.0001,
+            ),
+            StrategyParameterDefinition(
+                key="exit_threshold", label="Exit Threshold", value=0.0004, step=0.0001
+            ),
         ),
         supported_asset_classes=("FOREX", "INDICES"),
         parameter_profiles=(
             StrategyParameterProfile(
                 name="default",
                 description="Baseline production profile.",
-                parameter_values={"window_size": 20, "entry_threshold": 0.0015, "exit_threshold": 0.0004},
+                parameter_values={
+                    "window_size": 20,
+                    "entry_threshold": 0.0015,
+                    "exit_threshold": 0.0004,
+                },
             ),
             StrategyParameterProfile(
                 name="fast",
                 description="Faster-reacting governed profile.",
-                parameter_values={"window_size": 12, "entry_threshold": 0.001, "exit_threshold": 0.00025},
+                parameter_values={
+                    "window_size": 12,
+                    "entry_threshold": 0.001,
+                    "exit_threshold": 0.00025,
+                },
             ),
         ),
     ),
@@ -169,8 +197,15 @@ strategy_registry.register(
         risk_per_trade=1.1,
         family_name="breakout",
         parameters=(
-            StrategyParameterDefinition(key="breakout_window", label="Breakout Window", value=15, step=1),
-            StrategyParameterDefinition(key="volatility_floor", label="Volatility Floor", value=0.003, step=0.0001),
+            StrategyParameterDefinition(
+                key="breakout_window", label="Breakout Window", value=15, step=1
+            ),
+            StrategyParameterDefinition(
+                key="volatility_floor",
+                label="Volatility Floor",
+                value=0.003,
+                step=0.0001,
+            ),
         ),
         supported_asset_classes=("FOREX", "INDICES", "COMMODITIES"),
         parameter_profiles=(
@@ -192,8 +227,15 @@ strategy_registry.register(
         risk_per_trade=0.7,
         family_name="trend",
         parameters=(
-            StrategyParameterDefinition(key="trend_window", label="Trend Window", value=34, step=1),
-            StrategyParameterDefinition(key="pullback_threshold", label="Pullback Threshold", value=0.0015, step=0.0001),
+            StrategyParameterDefinition(
+                key="trend_window", label="Trend Window", value=34, step=1
+            ),
+            StrategyParameterDefinition(
+                key="pullback_threshold",
+                label="Pullback Threshold",
+                value=0.0015,
+                step=0.0001,
+            ),
         ),
         supported_asset_classes=("FOREX", "INDICES"),
         parameter_profiles=(
@@ -215,11 +257,27 @@ strategy_registry.register(
         risk_per_trade=0.4,
         family_name="fx_pullback",
         parameters=(
-            StrategyParameterDefinition(key="fast_window", label="Fast EMA", value=8, step=1),
-            StrategyParameterDefinition(key="slow_window", label="Slow EMA", value=21, step=1),
-            StrategyParameterDefinition(key="trend_threshold", label="Trend Filter", value=0.00015, step=0.00001),
-            StrategyParameterDefinition(key="max_spread_threshold", label="Max Spread", value=0.00012, step=0.00001),
-            StrategyParameterDefinition(key="pullback_threshold", label="Pullback Depth", value=0.00035, step=0.00001),
+            StrategyParameterDefinition(
+                key="fast_window", label="Fast EMA", value=8, step=1
+            ),
+            StrategyParameterDefinition(
+                key="slow_window", label="Slow EMA", value=21, step=1
+            ),
+            StrategyParameterDefinition(
+                key="trend_threshold", label="Trend Filter", value=0.00015, step=0.00001
+            ),
+            StrategyParameterDefinition(
+                key="max_spread_threshold",
+                label="Max Spread",
+                value=0.00012,
+                step=0.00001,
+            ),
+            StrategyParameterDefinition(
+                key="pullback_threshold",
+                label="Pullback Depth",
+                value=0.00035,
+                step=0.00001,
+            ),
         ),
         supported_asset_classes=("FOREX",),
         parameter_profiles=(
@@ -247,10 +305,24 @@ strategy_registry.register(
         risk_per_trade=0.5,
         family_name="fx_pullback",
         parameters=(
-            StrategyParameterDefinition(key="htf_fast_window", label="HTF Fast SMA", value=20, step=1),
-            StrategyParameterDefinition(key="htf_slow_window", label="HTF Slow SMA", value=50, step=1),
-            StrategyParameterDefinition(key="pullback_threshold", label="Pullback Depth", value=0.0015, step=0.0001),
-            StrategyParameterDefinition(key="max_spread_threshold", label="Max Spread", value=0.00012, step=0.00001),
+            StrategyParameterDefinition(
+                key="htf_fast_window", label="HTF Fast SMA", value=20, step=1
+            ),
+            StrategyParameterDefinition(
+                key="htf_slow_window", label="HTF Slow SMA", value=50, step=1
+            ),
+            StrategyParameterDefinition(
+                key="pullback_threshold",
+                label="Pullback Depth",
+                value=0.0015,
+                step=0.0001,
+            ),
+            StrategyParameterDefinition(
+                key="max_spread_threshold",
+                label="Max Spread",
+                value=0.00012,
+                step=0.00001,
+            ),
         ),
         supported_asset_classes=("FOREX",),
         parameter_profiles=(
@@ -277,16 +349,26 @@ strategy_registry.register(
         risk_per_trade=0.1,
         family_name="ops_validation",
         parameters=(
-            StrategyParameterDefinition(key="warmup_ticks", label="Warmup Ticks", value=3, step=1),
-            StrategyParameterDefinition(key="hold_seconds", label="Hold Seconds", value=3, step=0.5),
-            StrategyParameterDefinition(key="lookback_ticks", label="Lookback Ticks", value=3, step=1),
+            StrategyParameterDefinition(
+                key="warmup_ticks", label="Warmup Ticks", value=3, step=1
+            ),
+            StrategyParameterDefinition(
+                key="hold_seconds", label="Hold Seconds", value=3, step=0.5
+            ),
+            StrategyParameterDefinition(
+                key="lookback_ticks", label="Lookback Ticks", value=3, step=1
+            ),
         ),
         supported_asset_classes=("FOREX",),
         parameter_profiles=(
             StrategyParameterProfile(
                 name="default",
                 description="Flow validation profile.",
-                parameter_values={"warmup_ticks": 3, "hold_seconds": 3, "lookback_ticks": 3},
+                parameter_values={
+                    "warmup_ticks": 3,
+                    "hold_seconds": 3,
+                    "lookback_ticks": 3,
+                },
             ),
         ),
     ),
@@ -301,8 +383,12 @@ strategy_registry.register(
         risk_per_trade=0.1,
         family_name="ops_validation",
         parameters=(
-            StrategyParameterDefinition(key="warmup_ticks", label="Warmup Ticks", value=2, step=1),
-            StrategyParameterDefinition(key="hold_minutes", label="Hold Minutes", value=0.5, step=0.5),
+            StrategyParameterDefinition(
+                key="warmup_ticks", label="Warmup Ticks", value=2, step=1
+            ),
+            StrategyParameterDefinition(
+                key="hold_minutes", label="Hold Minutes", value=0.5, step=0.5
+            ),
         ),
         supported_asset_classes=("FOREX",),
         parameter_profiles=(

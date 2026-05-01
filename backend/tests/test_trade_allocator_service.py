@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from app.core.broker import BrokerMarketDetails, OrderDirection
@@ -61,14 +61,18 @@ def test_trade_allocator_rejects_stale_entry_candidates(session, broker, fixed_n
         broker=broker,
     )
 
-    decisions = allocator.allocate([candidate], received_at=fixed_now + timedelta(seconds=20))
+    decisions = allocator.allocate(
+        [candidate], received_at=fixed_now + timedelta(seconds=20)
+    )
 
     assert len(decisions) == 1
     assert decisions[0].selected is False
     assert decisions[0].reason_code == "stale_signal"
 
 
-def test_trade_allocator_keeps_highest_scoring_duplicate_and_conflict(session, broker, fixed_now):
+def test_trade_allocator_keeps_highest_scoring_duplicate_and_conflict(
+    session, broker, fixed_now
+):
     allocator = TradeAllocatorService(session)
     instrument = "CS.D.EURUSD.MINI.IP"
     broker.market_details_by_instrument[instrument] = BrokerMarketDetails(
@@ -113,7 +117,9 @@ def test_trade_allocator_keeps_highest_scoring_duplicate_and_conflict(session, b
         broker=broker,
     )
 
-    decisions = allocator.allocate([weak_buy, strong_buy, sell_conflict], received_at=fixed_now)
+    decisions = allocator.allocate(
+        [weak_buy, strong_buy, sell_conflict], received_at=fixed_now
+    )
 
     selected = [decision for decision in decisions if decision.selected]
     rejected = {decision.reason_code for decision in decisions if not decision.selected}
@@ -122,7 +128,9 @@ def test_trade_allocator_keeps_highest_scoring_duplicate_and_conflict(session, b
     assert rejected == {"weaker_duplicate", "direction_conflict"}
 
 
-def test_trade_allocator_respects_cycle_and_open_risk_capacity(session, broker, fixed_now):
+def test_trade_allocator_respects_cycle_and_open_risk_capacity(
+    session, broker, fixed_now
+):
     allocator = TradeAllocatorService(session)
     allocator.settings.trade_allocator_max_decisions_per_cycle = 1
     allocator.settings.runtime_max_open_risk_percent = 1.0
@@ -192,13 +200,19 @@ def test_trade_allocator_respects_cycle_and_open_risk_capacity(session, broker, 
     decisions = allocator.allocate([high_score, risk_blocked], received_at=fixed_now)
 
     selected = [decision for decision in decisions if decision.selected]
-    rejected = {decision.candidate.strategy_name: decision.reason_code for decision in decisions if not decision.selected}
+    rejected = {
+        decision.candidate.strategy_name: decision.reason_code
+        for decision in decisions
+        if not decision.selected
+    }
     assert len(selected) == 1
     assert selected[0].candidate.strategy_name == "breakout_guard"
     assert rejected["carry_drift"] in {"cycle_capacity", "open_risk_capacity"}
 
 
-def test_trade_allocator_rejects_instrument_when_exposure_limit_already_used(session, broker, fixed_now):
+def test_trade_allocator_rejects_instrument_when_exposure_limit_already_used(
+    session, broker, fixed_now
+):
     allocator = TradeAllocatorService(session)
     allocator.settings.trade_allocator_max_open_positions_per_instrument = 1
     instrument = "CS.D.EURUSD.MINI.IP"

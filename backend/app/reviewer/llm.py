@@ -19,7 +19,9 @@ class ReviewLLMResponse:
 
 
 class ReviewLLMClient:
-    def generate(self, request: ReviewLLMRequest) -> ReviewLLMResponse | None:  # pragma: no cover - interface only
+    def generate(
+        self, request: ReviewLLMRequest
+    ) -> ReviewLLMResponse | None:  # pragma: no cover - interface only
         raise NotImplementedError
 
 

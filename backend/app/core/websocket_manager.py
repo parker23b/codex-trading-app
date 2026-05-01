@@ -8,4 +8,3 @@ class WebSocketManager:
 
     async def broadcast(self, event_type: str, payload: dict) -> None:
         _ = (event_type, payload)
-

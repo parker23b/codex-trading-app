@@ -24,7 +24,9 @@ class PromotionRequestService:
         tradable: bool | None,
         requested_frequency: str | None,
     ) -> PromotionRequest:
-        existing = self._find_active_request(instrument=instrument, source=source, requested_at=requested_at)
+        existing = self._find_active_request(
+            instrument=instrument, source=source, requested_at=requested_at
+        )
         if existing is None:
             request = PromotionRequest(
                 instrument=instrument,

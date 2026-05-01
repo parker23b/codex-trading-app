@@ -10,7 +10,9 @@ from app.strategies.base import PriceUpdate, Strategy
 class CarryDriftStrategy(Strategy):
     name = "carry_drift"
 
-    def __init__(self, trend_window: int = 12, pullback_threshold: float = 0.0015) -> None:
+    def __init__(
+        self, trend_window: int = 12, pullback_threshold: float = 0.0015
+    ) -> None:
         self.trend_window = trend_window
         self.pullback_threshold = pullback_threshold
         self.prices: deque[float] = deque(maxlen=trend_window)
@@ -52,11 +54,15 @@ class CarryDriftStrategy(Strategy):
     def export_state_snapshot(self) -> dict[str, Any]:
         return {
             "prices": list(self.prices),
-            "entry_direction": self._entry_direction.value if self._entry_direction else None,
+            "entry_direction": self._entry_direction.value
+            if self._entry_direction
+            else None,
         }
 
     def restore_state_snapshot(self, snapshot: dict[str, Any]) -> None:
         prices = snapshot.get("prices") or []
-        self.prices = deque((float(price) for price in prices), maxlen=self.trend_window)
+        self.prices = deque(
+            (float(price) for price in prices), maxlen=self.trend_window
+        )
         direction = snapshot.get("entry_direction")
         self._entry_direction = OrderDirection(direction) if direction else None

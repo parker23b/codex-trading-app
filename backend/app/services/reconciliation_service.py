@@ -3,7 +3,14 @@ from __future__ import annotations
 from app.core.broker_factory import get_broker
 from app.core.logging import get_logger
 from app.core.runtime import runtime_manager
-from app.models.trade import Position, Trade, TradeIntent, TradeIntentState, clone_position, utc_now
+from app.models.trade import (
+    Position,
+    Trade,
+    TradeIntent,
+    TradeIntentState,
+    clone_position,
+    utc_now,
+)
 from app.strategies.registry import strategy_registry
 from app.services.domain_event_service import domain_event_service
 from app.services.health_service import get_health_service
@@ -46,39 +53,55 @@ class ReconciliationService:
         local_by_instrument: dict[str, list[Position]] = {}
         for position in local_positions:
             local_by_instrument.setdefault(position.instrument, []).append(position)
-        remote_by_broker_reference = {position.broker_reference: position for position in remote_positions}
+        remote_by_broker_reference = {
+            position.broker_reference: position for position in remote_positions
+        }
 
         for remote_position in remote_positions:
             instrument = remote_position.instrument
             runtime_engines = runtime_manager.get_engines_for_instrument(instrument)
-            local_position = local_by_broker_reference.get(remote_position.broker_reference)
+            local_position = local_by_broker_reference.get(
+                remote_position.broker_reference
+            )
             matching_engine = next(
                 (
                     engine
                     for _, engine in runtime_engines
                     if engine.current_position is not None
-                    and engine.current_position.broker_reference == remote_position.broker_reference
+                    and engine.current_position.broker_reference
+                    == remote_position.broker_reference
                 ),
                 None,
             )
-            if local_position is None and matching_engine is None and len(runtime_engines) == 1:
-                local_position = next(iter(local_by_instrument.get(instrument, [])), None)
+            if (
+                local_position is None
+                and matching_engine is None
+                and len(runtime_engines) == 1
+            ):
+                local_position = next(
+                    iter(local_by_instrument.get(instrument, [])), None
+                )
 
             if local_position is not None:
-                mapped_engine = runtime_manager.get_engine(local_position.strategy_name, instrument)
+                mapped_engine = runtime_manager.get_engine(
+                    local_position.strategy_name, instrument
+                )
                 if mapped_engine is not None:
                     matching_engine = mapped_engine
 
             strategy_name = (
                 local_position.strategy_name
                 if local_position
-                else (matching_engine.strategy.name if matching_engine else "broker_sync")
+                else (
+                    matching_engine.strategy.name if matching_engine else "broker_sync"
+                )
             )
             family_name = (
                 local_position.family_name
                 if local_position is not None
                 else (
-                    strategy_registry.get_metadata(strategy_name).family_name or strategy_name
+                    strategy_registry.get_metadata(strategy_name).family_name
+                    or strategy_name
                     if strategy_name != "broker_sync"
                     else "broker_sync"
                 )
@@ -86,12 +109,19 @@ class ReconciliationService:
             persisted_id = local_position.id if local_position else None
             if persisted_id is None:
                 runtime_position = local_by_runtime_key.get((strategy_name, instrument))
-                if runtime_position is not None and runtime_position.broker_reference is None:
+                if (
+                    runtime_position is not None
+                    and runtime_position.broker_reference is None
+                ):
                     persisted_id = runtime_position.id
-            runtime_manager.last_prices.setdefault(instrument, remote_position.open_price)
+            runtime_manager.last_prices.setdefault(
+                instrument, remote_position.open_price
+            )
             synced_position = Position(
                 id=persisted_id,
-                trade_intent_id=local_position.trade_intent_id if local_position is not None else None,
+                trade_intent_id=local_position.trade_intent_id
+                if local_position is not None
+                else None,
                 strategy_name=strategy_name,
                 family_name=family_name,
                 broker_reference=remote_position.broker_reference,
@@ -100,7 +130,8 @@ class ReconciliationService:
                 size=remote_position.size,
                 open_price=remote_position.open_price,
                 open_time=remote_position.opened_at,
-                current_price=runtime_manager.get_last_price(instrument) or remote_position.open_price,
+                current_price=runtime_manager.get_last_price(instrument)
+                or remote_position.open_price,
                 unrealized_pnl=0.0,
                 risk_percent=local_position.risk_percent if local_position else None,
                 risk_truth_confidence=(
@@ -108,8 +139,12 @@ class ReconciliationService:
                     if local_position is not None
                     else "BROKER_CONFIRMED_AVERAGE_FILL_ESTIMATED"
                 ),
-                reason=local_position.reason if local_position else "Reconciled from broker",
-                manual_override=local_position.manual_override if local_position else False,
+                reason=local_position.reason
+                if local_position
+                else "Reconciled from broker",
+                manual_override=local_position.manual_override
+                if local_position
+                else False,
                 account_type=self.broker.account_type.value,
                 is_open=True,
                 broker_sync_status="CONFIRMED",
@@ -117,7 +152,9 @@ class ReconciliationService:
                 last_reconciled_at=utc_now(),
             )
             is_adopted = local_position is None
-            needs_update = is_adopted or self._position_needs_reconciliation(local_position, synced_position)
+            needs_update = is_adopted or self._position_needs_reconciliation(
+                local_position, synced_position
+            )
             persisted = self.trade_service.record_broker_position(synced_position)
             intent = self._resolve_reconciled_trade_intent(
                 local_position=local_position,
@@ -137,7 +174,9 @@ class ReconciliationService:
                     "open_price": remote_position.open_price,
                 }
                 self.trade_service.record_reconciliation_event(
-                    event_type="POSITION_SYNCED_FROM_BROKER" if local_position is not None else "POSITION_ADOPTED_FROM_BROKER",
+                    event_type="POSITION_SYNCED_FROM_BROKER"
+                    if local_position is not None
+                    else "POSITION_ADOPTED_FROM_BROKER",
                     trade_intent_id=intent.id if intent is not None else None,
                     strategy_name=strategy_name,
                     instrument=instrument,
@@ -186,14 +225,20 @@ class ReconciliationService:
                     instrument=matching_engine.instrument,
                     status="RUNNING",
                     recovery_state="RUNNING",
-                    last_price_seen=runtime_manager.get_last_price(instrument) or remote_position.open_price,
-                    last_price_seen_at=runtime_manager.get_last_price_updated_at(instrument),
+                    last_price_seen=runtime_manager.get_last_price(instrument)
+                    or remote_position.open_price,
+                    last_price_seen_at=runtime_manager.get_last_price_updated_at(
+                        instrument
+                    ),
                     current_position=persisted,
                     current_position_broker_reference=persisted.broker_reference,
                 )
 
         for local_position in local_positions:
-            if local_position.broker_reference and local_position.broker_reference in remote_by_broker_reference:
+            if (
+                local_position.broker_reference
+                and local_position.broker_reference in remote_by_broker_reference
+            ):
                 continue
             if local_position.broker_reference is None and any(
                 remote_position.instrument == local_position.instrument
@@ -220,7 +265,8 @@ class ReconciliationService:
                     direction=local_position.direction,
                     size=local_position.size,
                     open_price=local_position.open_price,
-                    close_price=local_position.current_price or local_position.open_price,
+                    close_price=local_position.current_price
+                    or local_position.open_price,
                     open_time=local_position.open_time,
                     close_time=local_position.close_time or utc_now(),
                     pnl=local_position.unrealized_pnl or local_position.pnl or 0.0,
@@ -248,7 +294,8 @@ class ReconciliationService:
             details = {
                 "trade_intent_id": intent.id if intent is not None else None,
                 "had_broker_reference": local_position.broker_reference is not None,
-                "close_price": local_position.current_price or local_position.open_price,
+                "close_price": local_position.current_price
+                or local_position.open_price,
                 "forced_trade_id": forced_trade.id,
             }
             self.trade_service.record_reconciliation_event(
@@ -291,12 +338,19 @@ class ReconciliationService:
                     "correction": "closed_local_position",
                 },
             )
-            runtime_engine = runtime_manager.get_engine(local_position.strategy_name, local_position.instrument)
-            if runtime_engine is not None and runtime_engine.current_position is not None and (
-                runtime_engine.current_position.broker_reference == local_position.broker_reference
-                or (
-                    runtime_engine.current_position.broker_reference is None
-                    and local_position.broker_reference is None
+            runtime_engine = runtime_manager.get_engine(
+                local_position.strategy_name, local_position.instrument
+            )
+            if (
+                runtime_engine is not None
+                and runtime_engine.current_position is not None
+                and (
+                    runtime_engine.current_position.broker_reference
+                    == local_position.broker_reference
+                    or (
+                        runtime_engine.current_position.broker_reference is None
+                        and local_position.broker_reference is None
+                    )
                 )
             ):
                 runtime_engine.current_position = None
@@ -309,7 +363,9 @@ class ReconciliationService:
                 )
 
         changed_count = adopted_count + corrected_count + unmatched_local_count
-        get_health_service().record_reconciliation(mismatches=changed_count, when=utc_now())
+        get_health_service().record_reconciliation(
+            mismatches=changed_count, when=utc_now()
+        )
         log_level = logger.info if changed_count else logger.debug
         log_level(
             "Broker reconciliation complete",
@@ -325,7 +381,9 @@ class ReconciliationService:
         return self.trade_service.list_positions()
 
     @staticmethod
-    def _position_needs_reconciliation(local_position: Position | None, remote_position: Position) -> bool:
+    def _position_needs_reconciliation(
+        local_position: Position | None, remote_position: Position
+    ) -> bool:
         if local_position is None:
             return True
         return any(
@@ -359,13 +417,16 @@ class ReconciliationService:
                     broker_reference=persisted_position.broker_reference,
                     position_id=persisted_position.id,
                     risk_truth_confidence=(
-                        persisted_position.risk_truth_confidence or "BROKER_CONFIRMED_AVERAGE_FILL_ESTIMATED"
+                        persisted_position.risk_truth_confidence
+                        or "BROKER_CONFIRMED_AVERAGE_FILL_ESTIMATED"
                     ),
                     average_fill_price=persisted_position.open_price,
                     filled_size=persisted_position.size,
                     opened_at=persisted_position.open_time,
                     decision_reason_code=(
-                        "UNPLANNED_POSITION_DETECTED" if is_adopted else intent.decision_reason_code
+                        "UNPLANNED_POSITION_DETECTED"
+                        if is_adopted
+                        else intent.decision_reason_code
                     ),
                     decision_reason=(
                         "Broker position was adopted without an existing internal decision chain."
@@ -377,7 +438,11 @@ class ReconciliationService:
         strategy_name = (
             local_position.strategy_name
             if local_position is not None
-            else (matching_engine.strategy.name if matching_engine is not None else "broker_sync")
+            else (
+                matching_engine.strategy.name
+                if matching_engine is not None
+                else "broker_sync"
+            )
         )
         intent = self.trade_service.create_trade_intent(
             TradeIntent(
@@ -385,7 +450,8 @@ class ReconciliationService:
                 family_name=(
                     persisted_position.family_name
                     or (
-                        strategy_registry.get_metadata(strategy_name).family_name or strategy_name
+                        strategy_registry.get_metadata(strategy_name).family_name
+                        or strategy_name
                         if strategy_name != "broker_sync"
                         else "broker_sync"
                     )
@@ -403,7 +469,8 @@ class ReconciliationService:
                 proposed_risk_percent=persisted_position.risk_percent,
                 allocated_risk_percent=persisted_position.risk_percent,
                 risk_truth_confidence=(
-                    persisted_position.risk_truth_confidence or "BROKER_CONFIRMED_AVERAGE_FILL_ESTIMATED"
+                    persisted_position.risk_truth_confidence
+                    or "BROKER_CONFIRMED_AVERAGE_FILL_ESTIMATED"
                 ),
                 observed_price=persisted_position.open_price,
                 average_fill_price=persisted_position.open_price,
@@ -411,7 +478,9 @@ class ReconciliationService:
                 broker_reference=persisted_position.broker_reference,
                 position_id=persisted_position.id,
                 decision_reason_code=(
-                    "UNPLANNED_POSITION_DETECTED" if is_adopted else "RECOVERED_POSITION_LINK"
+                    "UNPLANNED_POSITION_DETECTED"
+                    if is_adopted
+                    else "RECOVERED_POSITION_LINK"
                 ),
                 decision_reason=(
                     "Broker position was adopted without an existing internal decision chain."
@@ -424,7 +493,9 @@ class ReconciliationService:
         )
         return intent
 
-    def _resolve_forced_close_trade_intent(self, local_position: Position) -> TradeIntent | None:
+    def _resolve_forced_close_trade_intent(
+        self, local_position: Position
+    ) -> TradeIntent | None:
         if local_position.trade_intent_id is not None:
             intent = self.trade_service.get_trade_intent(local_position.trade_intent_id)
             if intent is not None:

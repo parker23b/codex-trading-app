@@ -36,7 +36,9 @@ class StrategyDeployment(SQLModel, table=True):
     control_mode: str = Field(default="AUTO", index=True)
     suitability_score: float | None = None
     suitability_reason: str | None = None
-    selected_profile_parameters: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    selected_profile_parameters: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON)
+    )
     profile_selected_at: datetime | None = None
     profile_change_reason: str | None = None
     blocked_reason: str | None = None
@@ -48,6 +50,8 @@ class StrategyDeployment(SQLModel, table=True):
     operator_intervention_state: str | None = None
     open_risk_management_state: str = Field(default="NO_OPEN_RISK", index=True)
     open_risk_management_reason: str | None = None
-    deployment_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    deployment_metadata: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON)
+    )
     created_at: datetime = Field(default_factory=utc_now, nullable=False)
     updated_at: datetime = Field(default_factory=utc_now, nullable=False)

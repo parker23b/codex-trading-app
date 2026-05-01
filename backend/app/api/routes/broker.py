@@ -23,7 +23,9 @@ def list_broker_positions() -> list[BrokerPositionResponse]:
     try:
         positions = BrokerService().list_remote_positions()
     except IGBrokerError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+        ) from exc
 
     return [
         BrokerPositionResponse(

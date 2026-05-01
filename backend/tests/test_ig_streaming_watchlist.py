@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 
 from app.services.ig_streaming_service import IGStreamingService
 from app.services.watchlist_service import StreamingPlan
@@ -38,8 +37,16 @@ def test_reconcile_subscription_uses_watchlist_plan(monkeypatch):
             },
         )(),
     )
-    monkeypatch.setattr(service, "_reset_client", lambda credentials: setattr(service, "_credentials", credentials))
-    monkeypatch.setattr(service, "_resubscribe", lambda instruments: observed.setdefault("instruments", instruments))
+    monkeypatch.setattr(
+        service,
+        "_reset_client",
+        lambda credentials: setattr(service, "_credentials", credentials),
+    )
+    monkeypatch.setattr(
+        service,
+        "_resubscribe",
+        lambda instruments: observed.setdefault("instruments", instruments),
+    )
 
     asyncio.run(service._reconcile_subscription())
 
@@ -76,11 +83,22 @@ def test_reconcile_subscription_respects_churn_budget(monkeypatch):
             },
         )(),
     )
-    monkeypatch.setattr(service, "_reset_client", lambda credentials: setattr(service, "_credentials", credentials))
+    monkeypatch.setattr(
+        service,
+        "_reset_client",
+        lambda credentials: setattr(service, "_credentials", credentials),
+    )
     called = {"count": 0}
-    monkeypatch.setattr(service, "_resubscribe", lambda instruments: called.__setitem__("count", called["count"] + 1))
+    monkeypatch.setattr(
+        service,
+        "_resubscribe",
+        lambda instruments: called.__setitem__("count", called["count"] + 1),
+    )
 
     asyncio.run(service._reconcile_subscription())
 
     assert called["count"] == 0
-    assert service.get_health().last_error == "Subscription churn limit reached; keeping current streamed watchlist."
+    assert (
+        service.get_health().last_error
+        == "Subscription churn limit reached; keeping current streamed watchlist."
+    )

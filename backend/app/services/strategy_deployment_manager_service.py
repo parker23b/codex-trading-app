@@ -9,12 +9,18 @@ from app.core.config import get_settings
 from app.core.runtime import runtime_manager
 from app.models.runtime import StrategyRuntimeState
 from app.models.strategy_deployment import StrategyDeployment, StrategyDeploymentState
-from app.models.strategy_governance import GovernanceApprovalState, StrategyFamilyGovernance
+from app.models.strategy_governance import (
+    GovernanceApprovalState,
+    StrategyFamilyGovernance,
+)
 from app.models.trade import Position
 from app.services.domain_event_service import domain_event_service
 from app.services.health_service import get_health_service
 from app.services.operator_control_service import OperatorControlService
-from app.services.operational_state_service import OpenRiskManagementState, OperationalStateService
+from app.services.operational_state_service import (
+    OpenRiskManagementState,
+    OperationalStateService,
+)
 from app.services.regime_suitability_service import RegimeSuitabilityService
 from app.services.strategy_governance_service import StrategyGovernanceService
 from app.services.strategy_service import StrategyService
@@ -52,8 +58,18 @@ class StrategyDeploymentManagerService:
         }
         for governance in governance_records:
             metadata = strategy_registry.get_metadata(governance.strategy_name)
-            deployment = self._get_or_create_deployment(governance=governance, now=current_time)
-            target_state, selected_profile, selected_parameters, selected_instrument, selected_asset_class, reason, score = self._evaluate_target_state(
+            deployment = self._get_or_create_deployment(
+                governance=governance, now=current_time
+            )
+            (
+                target_state,
+                selected_profile,
+                selected_parameters,
+                selected_instrument,
+                selected_asset_class,
+                reason,
+                score,
+            ) = self._evaluate_target_state(
                 governance=governance,
                 metadata=metadata,
             )
@@ -62,12 +78,12 @@ class StrategyDeploymentManagerService:
             open_risk_management_reason: str | None = None
 
             if target_state == StrategyDeploymentState.AUTO_DEPLOYED.value:
-                manual_runtime = self._get_running_manual_runtime(governance.strategy_name)
+                manual_runtime = self._get_running_manual_runtime(
+                    governance.strategy_name
+                )
                 if manual_runtime is not None:
                     target_state = StrategyDeploymentState.BLOCKED.value
-                    reason = (
-                        f"Manual runtime is active on {manual_runtime.instrument}, so autonomous deployment is blocked."
-                    )
+                    reason = f"Manual runtime is active on {manual_runtime.instrument}, so autonomous deployment is blocked."
                     selected_instrument = manual_runtime.instrument
                     selected_asset_class = selected_asset_class or None
                 else:
@@ -80,8 +96,14 @@ class StrategyDeploymentManagerService:
                         strategy_parameters=selected_parameters,
                     )
                     if selected_instrument is not None:
-                        selected_engine = runtime_manager.get_engine(governance.strategy_name, selected_instrument)
-                        if selected_engine is not None and getattr(selected_engine, "runtime_mode", "NORMAL") == "NORMAL":
+                        selected_engine = runtime_manager.get_engine(
+                            governance.strategy_name, selected_instrument
+                        )
+                        if (
+                            selected_engine is not None
+                            and getattr(selected_engine, "runtime_mode", "NORMAL")
+                            == "NORMAL"
+                        ):
                             self.strategy_service.set_runtime_mode(
                                 strategy_name=governance.strategy_name,
                                 instrument=selected_instrument,
@@ -105,17 +127,21 @@ class StrategyDeploymentManagerService:
                             },
                             created_at=current_time,
                         )
-                open_risk_management_state, open_risk_management_reason = self._assess_open_risk_management(
-                    strategy_name=governance.strategy_name,
-                    open_positions=open_positions,
+                open_risk_management_state, open_risk_management_reason = (
+                    self._assess_open_risk_management(
+                        strategy_name=governance.strategy_name,
+                        open_positions=open_positions,
+                    )
                 )
             else:
-                open_risk_management_state, open_risk_management_reason = self._handle_non_auto_runtime_transition(
-                    strategy_name=governance.strategy_name,
-                    deployment=deployment,
-                    open_positions=open_positions,
-                    target_state=target_state,
-                    target_reason=reason,
+                open_risk_management_state, open_risk_management_reason = (
+                    self._handle_non_auto_runtime_transition(
+                        strategy_name=governance.strategy_name,
+                        deployment=deployment,
+                        open_positions=open_positions,
+                        target_state=target_state,
+                        target_reason=reason,
+                    )
                 )
 
             previous_state = deployment.state
@@ -129,23 +155,40 @@ class StrategyDeploymentManagerService:
             if selected_profile is not None and selected_profile != previous_profile:
                 deployment.profile_selected_at = current_time
                 deployment.profile_change_reason = reason
-            deployment.suitability_reason = reason if target_state in {
-                StrategyDeploymentState.AUTO_DEPLOYED.value,
-                StrategyDeploymentState.AUTO_DEPLOYABLE.value,
-                StrategyDeploymentState.AUTO_PAUSED.value,
-            } else None
-            deployment.blocked_reason = reason if target_state in {
-                StrategyDeploymentState.NOT_APPROVED.value,
-                StrategyDeploymentState.BLOCKED.value,
-                StrategyDeploymentState.EMERGENCY_STOPPED.value,
-            } else None
-            deployment.degraded_reason = reason if target_state == StrategyDeploymentState.DEGRADED.value else None
+            deployment.suitability_reason = (
+                reason
+                if target_state
+                in {
+                    StrategyDeploymentState.AUTO_DEPLOYED.value,
+                    StrategyDeploymentState.AUTO_DEPLOYABLE.value,
+                    StrategyDeploymentState.AUTO_PAUSED.value,
+                }
+                else None
+            )
+            deployment.blocked_reason = (
+                reason
+                if target_state
+                in {
+                    StrategyDeploymentState.NOT_APPROVED.value,
+                    StrategyDeploymentState.BLOCKED.value,
+                    StrategyDeploymentState.EMERGENCY_STOPPED.value,
+                }
+                else None
+            )
+            deployment.degraded_reason = (
+                reason
+                if target_state == StrategyDeploymentState.DEGRADED.value
+                else None
+            )
             deployment.last_evaluated_at = current_time
             deployment.open_risk_management_state = open_risk_management_state
             deployment.open_risk_management_reason = open_risk_management_reason
             if target_state != previous_state:
                 deployment.last_state_changed_at = current_time
-            if target_state == StrategyDeploymentState.AUTO_DEPLOYED.value and previous_state != target_state:
+            if (
+                target_state == StrategyDeploymentState.AUTO_DEPLOYED.value
+                and previous_state != target_state
+            ):
                 deployment.last_deployed_at = current_time
             deployment.updated_at = current_time
             self.session.add(deployment)
@@ -186,7 +229,9 @@ class StrategyDeploymentManagerService:
 
     def list_deployments(self) -> list[StrategyDeployment]:
         self.governance_service.ensure_defaults()
-        statement = select(StrategyDeployment).order_by(StrategyDeployment.strategy_name)
+        statement = select(StrategyDeployment).order_by(
+            StrategyDeployment.strategy_name
+        )
         return list(self.session.exec(statement))
 
     def _evaluate_target_state(
@@ -194,11 +239,19 @@ class StrategyDeploymentManagerService:
         *,
         governance: StrategyFamilyGovernance,
         metadata: StrategyMetadata,
-    ) -> tuple[str, str | None, dict[str, object], str | None, str | None, str, float | None]:
+    ) -> tuple[
+        str, str | None, dict[str, object], str | None, str | None, str, float | None
+    ]:
         health_status = str(get_health_service().get_health_report()["status"])
-        resolved_profile = self._select_profile(governance=governance, metadata=metadata)
-        selected_profile = resolved_profile.profile_name if resolved_profile is not None else None
-        selected_parameters = resolved_profile.parameter_values if resolved_profile is not None else {}
+        resolved_profile = self._select_profile(
+            governance=governance, metadata=metadata
+        )
+        selected_profile = (
+            resolved_profile.profile_name if resolved_profile is not None else None
+        )
+        selected_parameters = (
+            resolved_profile.parameter_values if resolved_profile is not None else {}
+        )
         if governance.approval_state != GovernanceApprovalState.APPROVED.value:
             return (
                 StrategyDeploymentState.NOT_APPROVED.value,
@@ -219,7 +272,10 @@ class StrategyDeploymentManagerService:
                 "Operator emergency stop is active for this strategy family.",
                 None,
             )
-        if not governance.autonomous_operation_allowed or not self.operator_control_service.get_effective_autonomous_control_enabled():
+        if (
+            not governance.autonomous_operation_allowed
+            or not self.operator_control_service.get_effective_autonomous_control_enabled()
+        ):
             return (
                 StrategyDeploymentState.APPROVED.value,
                 selected_profile,
@@ -264,7 +320,10 @@ class StrategyDeploymentManagerService:
                 "Operational health is critical, so autonomous deployment is blocked.",
                 candidate.score,
             )
-        if not candidate.market_status.market_open or not candidate.market_status.tradable:
+        if (
+            not candidate.market_status.market_open
+            or not candidate.market_status.tradable
+        ):
             return (
                 StrategyDeploymentState.AUTO_PAUSED.value,
                 selected_profile,
@@ -301,7 +360,9 @@ class StrategyDeploymentManagerService:
         now: datetime,
     ) -> StrategyDeployment:
         deployment_key = f"{governance.strategy_name}:auto"
-        statement = select(StrategyDeployment).where(StrategyDeployment.deployment_key == deployment_key)
+        statement = select(StrategyDeployment).where(
+            StrategyDeployment.deployment_key == deployment_key
+        )
         deployment = self.session.exec(statement).first()
         if deployment is not None:
             return deployment
@@ -326,13 +387,19 @@ class StrategyDeploymentManagerService:
         governance: StrategyFamilyGovernance,
         metadata: StrategyMetadata,
     ):
-        available_profiles = [profile.name for profile in metadata.parameter_profiles] or ["default"]
+        available_profiles = [
+            profile.name for profile in metadata.parameter_profiles
+        ] or ["default"]
         for profile_name in governance.approved_profile_names:
             if profile_name in available_profiles:
                 return strategy_registry.resolve_profile(metadata.name, profile_name)
-        return strategy_registry.resolve_profile(metadata.name, available_profiles[0] if available_profiles else None)
+        return strategy_registry.resolve_profile(
+            metadata.name, available_profiles[0] if available_profiles else None
+        )
 
-    def _get_running_manual_runtime(self, strategy_name: str) -> StrategyRuntimeState | None:
+    def _get_running_manual_runtime(
+        self, strategy_name: str
+    ) -> StrategyRuntimeState | None:
         statement = (
             select(StrategyRuntimeState)
             .where(StrategyRuntimeState.strategy_name == strategy_name)
@@ -341,7 +408,9 @@ class StrategyDeploymentManagerService:
         )
         return self.session.exec(statement).first()
 
-    def _get_running_auto_runtimes(self, strategy_name: str) -> list[StrategyRuntimeState]:
+    def _get_running_auto_runtimes(
+        self, strategy_name: str
+    ) -> list[StrategyRuntimeState]:
         statement = (
             select(StrategyRuntimeState)
             .where(StrategyRuntimeState.strategy_name == strategy_name)
@@ -366,8 +435,12 @@ class StrategyDeploymentManagerService:
         restart_reason: str | None = None
         for runtime in running_auto_runtimes:
             if runtime.instrument != instrument:
-                restart_reason = f"Instrument changed from {runtime.instrument} to {instrument}."
-                if self._instrument_has_open_risk(runtime.instrument, open_positions=open_positions):
+                restart_reason = (
+                    f"Instrument changed from {runtime.instrument} to {instrument}."
+                )
+                if self._instrument_has_open_risk(
+                    runtime.instrument, open_positions=open_positions
+                ):
                     self.strategy_service.set_runtime_mode(
                         strategy_name=strategy_name,
                         instrument=runtime.instrument,
@@ -377,10 +450,17 @@ class StrategyDeploymentManagerService:
                         ),
                     )
                 else:
-                    self.strategy_service.stop_strategy(strategy_name=strategy_name, instrument=runtime.instrument)
-            elif runtime.active_profile_name != profile_name or (runtime.parameters or {}) != strategy_parameters:
+                    self.strategy_service.stop_strategy(
+                        strategy_name=strategy_name, instrument=runtime.instrument
+                    )
+            elif (
+                runtime.active_profile_name != profile_name
+                or (runtime.parameters or {}) != strategy_parameters
+            ):
                 restart_reason = f"Profile changed from {runtime.active_profile_name or 'unassigned'} to {profile_name or 'default'}."
-                self.strategy_service.stop_strategy(strategy_name=strategy_name, instrument=runtime.instrument)
+                self.strategy_service.stop_strategy(
+                    strategy_name=strategy_name, instrument=runtime.instrument
+                )
         if runtime_manager.get_engine(strategy_name, instrument) is None:
             self.strategy_service.start_strategy(
                 strategy_name=strategy_name,
@@ -392,17 +472,26 @@ class StrategyDeploymentManagerService:
                 strategy_parameters=strategy_parameters,
             )
             if restart_reason is None:
-                restart_reason = f"Runtime started with profile {profile_name or 'default'}."
+                restart_reason = (
+                    f"Runtime started with profile {profile_name or 'default'}."
+                )
         return restart_reason
 
     @staticmethod
-    def _instrument_has_open_risk(instrument: str, *, open_positions: list[Position]) -> bool:
+    def _instrument_has_open_risk(
+        instrument: str, *, open_positions: list[Position]
+    ) -> bool:
         return any(position.instrument == instrument for position in open_positions)
 
     def _stop_auto_runtimes(self, strategy_name: str) -> None:
         for runtime in self._get_running_auto_runtimes(strategy_name):
-            if runtime_manager.get_engine(strategy_name, runtime.instrument) is not None:
-                self.strategy_service.stop_strategy(strategy_name=strategy_name, instrument=runtime.instrument)
+            if (
+                runtime_manager.get_engine(strategy_name, runtime.instrument)
+                is not None
+            ):
+                self.strategy_service.stop_strategy(
+                    strategy_name=strategy_name, instrument=runtime.instrument
+                )
 
     def _list_open_positions(self, strategy_name: str) -> list[Position]:
         statement = select(Position).where(
@@ -434,28 +523,46 @@ class StrategyDeploymentManagerService:
         blocked_instruments: list[tuple[str, str | None]] = []
 
         for instrument in open_instruments:
-            operational_state = self.operational_state_service.get_summary_for_instrument(instrument)
-            if not operational_state.exit_eligible or instrument not in runtime_by_instrument:
-                blocked_instruments.append((instrument, operational_state.exit_block_reason))
+            operational_state = (
+                self.operational_state_service.get_summary_for_instrument(instrument)
+            )
+            if (
+                not operational_state.exit_eligible
+                or instrument not in runtime_by_instrument
+            ):
+                blocked_instruments.append(
+                    (instrument, operational_state.exit_block_reason)
+                )
 
         if not blocked_instruments and runtime_by_instrument:
-            reason = (
-                f"{len(open_positions)} open position(s) remain; runtime retained in EXITS_ONLY while deployment is {target_state}."
-            )
+            reason = f"{len(open_positions)} open position(s) remain; runtime retained in EXITS_ONLY while deployment is {target_state}."
             for runtime in running_auto_runtimes:
-                if runtime.instrument in open_instruments and runtime_manager.get_engine(strategy_name, runtime.instrument) is not None:
+                if (
+                    runtime.instrument in open_instruments
+                    and runtime_manager.get_engine(strategy_name, runtime.instrument)
+                    is not None
+                ):
                     self.strategy_service.set_runtime_mode(
                         strategy_name=strategy_name,
                         instrument=runtime.instrument,
                         runtime_mode="EXITS_ONLY",
                         recovery_reason=reason,
                     )
-                elif runtime_manager.get_engine(strategy_name, runtime.instrument) is not None:
-                    self.strategy_service.stop_strategy(strategy_name=strategy_name, instrument=runtime.instrument)
+                elif (
+                    runtime_manager.get_engine(strategy_name, runtime.instrument)
+                    is not None
+                ):
+                    self.strategy_service.stop_strategy(
+                        strategy_name=strategy_name, instrument=runtime.instrument
+                    )
             return (OpenRiskManagementState.EXITS_ONLY.value, reason)
 
         self._stop_auto_runtimes(strategy_name)
-        exit_block_reason = blocked_instruments[0][1] if blocked_instruments else "no_exit_capable_runtime"
+        exit_block_reason = (
+            blocked_instruments[0][1]
+            if blocked_instruments
+            else "no_exit_capable_runtime"
+        )
         reason = (
             f"{len(open_positions)} open position(s) remain while exits are not operationally eligible; "
             f"deployment moved to {target_state} ({exit_block_reason})."
@@ -506,9 +613,13 @@ class StrategyDeploymentManagerService:
             if runtime is None:
                 uncovered_instruments.append(instrument)
                 continue
-            operational_state = self.operational_state_service.get_summary_for_instrument(instrument)
+            operational_state = (
+                self.operational_state_service.get_summary_for_instrument(instrument)
+            )
             if not operational_state.exit_eligible:
-                blocked_instruments.append((instrument, operational_state.exit_block_reason))
+                blocked_instruments.append(
+                    (instrument, operational_state.exit_block_reason)
+                )
                 continue
             if runtime.runtime_mode == "EXITS_ONLY":
                 exits_only_instruments.append(instrument)

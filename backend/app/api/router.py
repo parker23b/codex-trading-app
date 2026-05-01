@@ -1,6 +1,25 @@
 from fastapi import APIRouter
 
-from app.api.routes import allocation, aimee, ai_reviewer, broker, charts, control_plane, coverage, dashboard, events, executions, health, market_status, markets, positions, strategies, system, testing, trades
+from app.api.routes import (
+    allocation,
+    aimee,
+    ai_reviewer,
+    broker,
+    charts,
+    control_plane,
+    coverage,
+    dashboard,
+    events,
+    executions,
+    health,
+    market_status,
+    markets,
+    positions,
+    strategies,
+    system,
+    testing,
+    trades,
+)
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])

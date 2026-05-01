@@ -4,7 +4,10 @@ from datetime import UTC, datetime
 
 from sqlmodel import Session, select
 
-from app.models.strategy_governance import GovernanceApprovalState, StrategyFamilyGovernance
+from app.models.strategy_governance import (
+    GovernanceApprovalState,
+    StrategyFamilyGovernance,
+)
 from app.strategies.registry import strategy_registry
 
 
@@ -18,7 +21,9 @@ class StrategyGovernanceService:
         for metadata in strategy_registry.list_metadata():
             record = self.get_strategy(metadata.name)
             if record is None:
-                profile_names = [profile.name for profile in metadata.parameter_profiles] or ["default"]
+                profile_names = [
+                    profile.name for profile in metadata.parameter_profiles
+                ] or ["default"]
                 record = StrategyFamilyGovernance(
                     strategy_name=metadata.name,
                     approval_state=GovernanceApprovalState.APPROVED.value,
@@ -37,11 +42,18 @@ class StrategyGovernanceService:
                 if self._should_promote_legacy_default_autonomy(record):
                     record.autonomous_operation_allowed = True
                     changed = True
-                if not record.approved_asset_classes and metadata.supported_asset_classes:
-                    record.approved_asset_classes = list(metadata.supported_asset_classes)
+                if (
+                    not record.approved_asset_classes
+                    and metadata.supported_asset_classes
+                ):
+                    record.approved_asset_classes = list(
+                        metadata.supported_asset_classes
+                    )
                     changed = True
                 if not record.approved_profile_names:
-                    record.approved_profile_names = [profile.name for profile in metadata.parameter_profiles] or ["default"]
+                    record.approved_profile_names = [
+                        profile.name for profile in metadata.parameter_profiles
+                    ] or ["default"]
                     changed = True
                 if changed:
                     record.updated_at = now
@@ -52,23 +64,34 @@ class StrategyGovernanceService:
         return records
 
     @staticmethod
-    def _should_promote_legacy_default_autonomy(record: StrategyFamilyGovernance) -> bool:
+    def _should_promote_legacy_default_autonomy(
+        record: StrategyFamilyGovernance,
+    ) -> bool:
         if record.autonomous_operation_allowed:
             return False
-        if record.emergency_stop or record.approval_state != GovernanceApprovalState.APPROVED.value:
+        if (
+            record.emergency_stop
+            or record.approval_state != GovernanceApprovalState.APPROVED.value
+        ):
             return False
         # Heuristic: records that still look untouched since default seeding should inherit
         # the new autonomy-allowed default, while explicitly edited records stay as-is.
-        same_timestamp = abs((record.updated_at - record.created_at).total_seconds()) < 1
+        same_timestamp = (
+            abs((record.updated_at - record.created_at).total_seconds()) < 1
+        )
         return same_timestamp and not record.notes and not record.approved_instruments
 
     def list_strategies(self) -> list[StrategyFamilyGovernance]:
         self.ensure_defaults()
-        statement = select(StrategyFamilyGovernance).order_by(StrategyFamilyGovernance.strategy_name)
+        statement = select(StrategyFamilyGovernance).order_by(
+            StrategyFamilyGovernance.strategy_name
+        )
         return list(self.session.exec(statement))
 
     def get_strategy(self, strategy_name: str) -> StrategyFamilyGovernance | None:
-        statement = select(StrategyFamilyGovernance).where(StrategyFamilyGovernance.strategy_name == strategy_name)
+        statement = select(StrategyFamilyGovernance).where(
+            StrategyFamilyGovernance.strategy_name == strategy_name
+        )
         return self.session.exec(statement).first()
 
     def upsert_strategy(
@@ -95,7 +118,9 @@ class StrategyGovernanceService:
         if emergency_stop is not None:
             record.emergency_stop = emergency_stop
         if approved_asset_classes is not None:
-            record.approved_asset_classes = [value.upper() for value in approved_asset_classes]
+            record.approved_asset_classes = [
+                value.upper() for value in approved_asset_classes
+            ]
         if approved_instruments is not None:
             record.approved_instruments = approved_instruments
         if approved_profile_names is not None:

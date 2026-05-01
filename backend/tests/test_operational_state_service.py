@@ -58,14 +58,18 @@ def test_operational_state_live_stream_allows_entries(session, monkeypatch):
     assert summary.entry_block_reason is None
 
 
-def test_operational_state_fallback_blocks_entries_but_keeps_exits(session, monkeypatch):
+def test_operational_state_fallback_blocks_entries_but_keeps_exits(
+    session, monkeypatch
+):
     now = datetime.now(UTC)
     health_service = get_health_service()
     health_service.update_broker_state(connected=True, latency_ms=5.0)
     health_service.record_price_update(now)
     monkeypatch.setattr(
         "app.services.operational_state_service.get_operational_streaming_service",
-        lambda: _StubStreamingService(connected=False, last_tick_at=now - timedelta(seconds=30)),
+        lambda: _StubStreamingService(
+            connected=False, last_tick_at=now - timedelta(seconds=30)
+        ),
     )
 
     summary = OperationalStateService(session).get_summary()
@@ -97,7 +101,9 @@ def test_operational_state_stale_prices_block_entries_and_exits(session, monkeyp
     assert summary.exit_block_reason == "stale_price_data"
 
 
-def test_operational_state_broker_disconnect_blocks_entries_and_exits(session, monkeypatch):
+def test_operational_state_broker_disconnect_blocks_entries_and_exits(
+    session, monkeypatch
+):
     now = datetime.now(UTC)
     health_service = get_health_service()
     health_service.update_broker_state(connected=False, latency_ms=None)
@@ -116,7 +122,9 @@ def test_operational_state_broker_disconnect_blocks_entries_and_exits(session, m
     assert summary.exit_block_reason == "broker_disconnected"
 
 
-def test_operational_state_disconnected_feed_blocks_entries_and_exits(session, monkeypatch):
+def test_operational_state_disconnected_feed_blocks_entries_and_exits(
+    session, monkeypatch
+):
     health_service = get_health_service()
     health_service.update_broker_state(connected=True, latency_ms=5.0)
     monkeypatch.setattr(
@@ -134,13 +142,17 @@ def test_operational_state_disconnected_feed_blocks_entries_and_exits(session, m
     assert summary.exit_block_reason == "data_disconnected"
 
 
-def test_operational_state_instrument_summary_uses_instrument_specific_freshness(session, monkeypatch):
+def test_operational_state_instrument_summary_uses_instrument_specific_freshness(
+    session, monkeypatch
+):
     now = datetime.now(UTC)
     stale_at = now - timedelta(seconds=30)
     health_service = get_health_service()
     health_service.update_broker_state(connected=True, latency_ms=5.0)
     health_service.record_price_update(now, stream_connected=True)
-    runtime_manager.load_cached_price("IX.D.FTSE.DAILY.IP", price=100.0, updated_at=stale_at)
+    runtime_manager.load_cached_price(
+        "IX.D.FTSE.DAILY.IP", price=100.0, updated_at=stale_at
+    )
     monkeypatch.setattr(
         "app.services.operational_state_service.get_operational_streaming_service",
         lambda: _StubStreamingService(
@@ -150,7 +162,9 @@ def test_operational_state_instrument_summary_uses_instrument_specific_freshness
         ),
     )
 
-    summary = OperationalStateService(session).get_summary_for_instrument("IX.D.FTSE.DAILY.IP")
+    summary = OperationalStateService(session).get_summary_for_instrument(
+        "IX.D.FTSE.DAILY.IP"
+    )
 
     assert summary.feed_source_state == "STALE"
     assert summary.entry_eligible is False

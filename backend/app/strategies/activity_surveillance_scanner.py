@@ -37,8 +37,17 @@ class ActivitySurveillanceScanner(ScreeningStrategy):
         details = snapshot.market_details
         score = 0.45
         score += 0.2 if details.tradable else 0.0
-        score += 0.1 if (details.market_status or "").upper() in {"TRADEABLE", "TRADEABLE_ONLINE"} else 0.0
+        score += (
+            0.1
+            if (details.market_status or "").upper()
+            in {"TRADEABLE", "TRADEABLE_ONLINE"}
+            else 0.0
+        )
         score += min(abs(details.percentage_change or 0.0) / 2.0, 0.2)
-        if details.bid is not None and details.offer is not None and details.offer > details.bid:
+        if (
+            details.bid is not None
+            and details.offer is not None
+            and details.offer > details.bid
+        ):
             score += 0.05
         return round(min(score, 1.0), 4)

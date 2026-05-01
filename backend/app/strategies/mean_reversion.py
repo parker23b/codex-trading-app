@@ -10,7 +10,12 @@ from app.strategies.base import PriceUpdate, Strategy
 class MeanReversionStrategy(Strategy):
     name = "mean_reversion"
 
-    def __init__(self, window_size: int = 20, entry_threshold: float = 0.0015, exit_threshold: float = 0.0004):
+    def __init__(
+        self,
+        window_size: int = 20,
+        entry_threshold: float = 0.0015,
+        exit_threshold: float = 0.0004,
+    ):
         self.window_size = window_size
         self.entry_threshold = entry_threshold
         self.exit_threshold = exit_threshold
@@ -43,7 +48,9 @@ class MeanReversionStrategy(Strategy):
 
     def entry_direction(self) -> OrderDirection:
         if self._entry_direction is None:
-            raise ValueError("No entry direction available. Evaluate entry signal first.")
+            raise ValueError(
+                "No entry direction available. Evaluate entry signal first."
+            )
         return self._entry_direction
 
     def _has_enough_data(self) -> bool:
@@ -58,7 +65,9 @@ class MeanReversionStrategy(Strategy):
         return {
             "prices": list(self.prices),
             "last_price": self.last_price,
-            "entry_direction": self._entry_direction.value if self._entry_direction else None,
+            "entry_direction": self._entry_direction.value
+            if self._entry_direction
+            else None,
         }
 
     def restore_state_snapshot(self, snapshot: dict[str, Any]) -> None:

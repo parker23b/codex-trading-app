@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from app.core.broker import Broker, OrderDirection
+from app.core.broker import Broker
 from app.core.logging import get_logger
 from app.core.signals import EntrySignal, ExitSignal, SignalKind
 from app.models.trade import Position
@@ -45,7 +45,9 @@ class TradingEngine:
         self.last_heartbeat_at = datetime.now(UTC)
         logger.info("Strategy engine stopped", extra={"instrument": self.instrument})
 
-    def process_price_update(self, update: PriceUpdate) -> EntrySignal | ExitSignal | None:
+    def process_price_update(
+        self, update: PriceUpdate
+    ) -> EntrySignal | ExitSignal | None:
         if not self.active:
             return None
         signal_time = update.received_at or datetime.now(UTC)
@@ -64,7 +66,11 @@ class TradingEngine:
         )
         self.strategy.on_price_update(update)
 
-        if self.runtime_mode != "EXITS_ONLY" and self.current_position is None and self.strategy.should_enter_trade():
+        if (
+            self.runtime_mode != "EXITS_ONLY"
+            and self.current_position is None
+            and self.strategy.should_enter_trade()
+        ):
             direction = self.strategy.entry_direction()
             logger.info(
                 "Strategy entry candidate emitted",
@@ -149,7 +155,9 @@ class TradingEngine:
             elif key == "take_profit_price":
                 signal.take_profit_price = float(value) if value is not None else None
             elif key == "expected_reward_risk":
-                signal.expected_reward_risk = float(value) if value is not None else None
+                signal.expected_reward_risk = (
+                    float(value) if value is not None else None
+                )
             elif key == "volatility_estimate":
                 signal.volatility_estimate = float(value) if value is not None else None
             elif key == "thesis":

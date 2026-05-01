@@ -62,12 +62,16 @@ def list_trades(
     date_to: datetime | None = Query(default=None),
     session: Session = Depends(get_session),
 ) -> list[TradeResponse]:
-    trades = TradeService(session).list_trades(strategy_name=strategy, date_from=date_from, date_to=date_to)
+    trades = TradeService(session).list_trades(
+        strategy_name=strategy, date_from=date_from, date_to=date_to
+    )
     return [_serialize_trade(trade) for trade in trades]
 
 
 @router.get("/positions")
-def list_positions_compat(session: Session = Depends(get_session)) -> list[dict[str, object]]:
+def list_positions_compat(
+    session: Session = Depends(get_session),
+) -> list[dict[str, object]]:
     positions = TradeService(session).list_positions()
     now = datetime.now(UTC)
     return [
@@ -92,7 +96,9 @@ def list_positions_compat(session: Session = Depends(get_session)) -> list[dict[
             "risk_truth_confidence": position.risk_truth_confidence,
             "reason": position.reason,
             "manual_override": position.manual_override,
-            "time_in_trade_seconds": max(int((now - position.open_time.astimezone(UTC)).total_seconds()), 0),
+            "time_in_trade_seconds": max(
+                int((now - position.open_time.astimezone(UTC)).total_seconds()), 0
+            ),
         }
         for position in positions
     ]

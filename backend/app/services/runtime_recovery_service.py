@@ -7,7 +7,13 @@ from sqlmodel import Session
 from app.core.broker_factory import get_broker
 from app.core.logging import get_logger
 from app.core.runtime import runtime_manager
-from app.models.trade import Position, TradeIntent, TradeIntentState, clone_position, utc_now
+from app.models.trade import (
+    Position,
+    TradeIntent,
+    TradeIntentState,
+    clone_position,
+    utc_now,
+)
 from app.strategies.registry import strategy_registry
 from app.services.domain_event_service import domain_event_service
 from app.services.runtime_state_service import RuntimeStateService
@@ -26,7 +32,10 @@ class RuntimeRecoveryService:
     def recover(self) -> list[dict[str, str]]:
         runtimes = self.runtime_state_service.list_active_runtimes()
         local_positions = self.trade_service.list_all_open_positions()
-        local_by_key = {(position.strategy_name, position.instrument): position for position in local_positions}
+        local_by_key = {
+            (position.strategy_name, position.instrument): position
+            for position in local_positions
+        }
         local_by_broker_reference = {
             position.broker_reference: position
             for position in local_positions
@@ -50,7 +59,9 @@ class RuntimeRecoveryService:
                 },
             )
 
-        remote_by_broker_reference = {position.broker_reference: position for position in remote_positions}
+        remote_by_broker_reference = {
+            position.broker_reference: position for position in remote_positions
+        }
         outcomes: list[dict[str, str]] = []
 
         for runtime in runtimes:
@@ -78,9 +89,15 @@ class RuntimeRecoveryService:
                 )
                 continue
 
-            local_position = self._resolve_local_position(runtime=runtime, local_by_key=local_by_key, local_by_broker_reference=local_by_broker_reference)
+            local_position = self._resolve_local_position(
+                runtime=runtime,
+                local_by_key=local_by_key,
+                local_by_broker_reference=local_by_broker_reference,
+            )
             remote_position = (
-                remote_by_broker_reference.get(runtime.current_position_broker_reference)
+                remote_by_broker_reference.get(
+                    runtime.current_position_broker_reference
+                )
                 if runtime.current_position_broker_reference
                 else None
             )
@@ -88,12 +105,18 @@ class RuntimeRecoveryService:
             if broker_error is not None:
                 self.trade_service.record_reconciliation_event(
                     event_type="RUNTIME_RECOVERY_REQUIRED",
-                    trade_intent_id=local_position.trade_intent_id if local_position is not None else None,
+                    trade_intent_id=local_position.trade_intent_id
+                    if local_position is not None
+                    else None,
                     strategy_name=runtime.strategy_name,
                     instrument=runtime.instrument,
                     broker_reference=runtime.current_position_broker_reference,
-                    local_position_id=local_position.id if local_position is not None else None,
-                    details={"reason": f"Broker positions unavailable during startup recovery: {broker_error}"},
+                    local_position_id=local_position.id
+                    if local_position is not None
+                    else None,
+                    details={
+                        "reason": f"Broker positions unavailable during startup recovery: {broker_error}"
+                    },
                 )
                 self.runtime_state_service.mark_recovery_state(
                     strategy_name=runtime.strategy_name,
@@ -126,12 +149,18 @@ class RuntimeRecoveryService:
             if runtime.current_position_broker_reference and remote_position is None:
                 self.trade_service.record_reconciliation_event(
                     event_type="RUNTIME_RECOVERY_REQUIRED",
-                    trade_intent_id=local_position.trade_intent_id if local_position is not None else None,
+                    trade_intent_id=local_position.trade_intent_id
+                    if local_position is not None
+                    else None,
                     strategy_name=runtime.strategy_name,
                     instrument=runtime.instrument,
                     broker_reference=runtime.current_position_broker_reference,
-                    local_position_id=local_position.id if local_position is not None else None,
-                    details={"reason": "Persisted runtime references an open position that the broker did not confirm."},
+                    local_position_id=local_position.id
+                    if local_position is not None
+                    else None,
+                    details={
+                        "reason": "Persisted runtime references an open position that the broker did not confirm."
+                    },
                 )
                 self.runtime_state_service.mark_recovery_state(
                     strategy_name=runtime.strategy_name,
@@ -185,10 +214,16 @@ class RuntimeRecoveryService:
 
             current_position = local_position
             if current_position is None and remote_position is not None:
-                current_position = self._position_from_remote(runtime.strategy_name, remote_position)
-                recovery_intent = self._resolve_recovered_trade_intent(runtime=runtime, position=current_position)
+                current_position = self._position_from_remote(
+                    runtime.strategy_name, remote_position
+                )
+                recovery_intent = self._resolve_recovered_trade_intent(
+                    runtime=runtime, position=current_position
+                )
                 current_position.trade_intent_id = recovery_intent.id
-                current_position = self.trade_service.record_broker_position(current_position)
+                current_position = self.trade_service.record_broker_position(
+                    current_position
+                )
                 self.trade_service.transition_trade_intent(
                     recovery_intent,
                     state=TradeIntentState.RECOVERED_POSITION_ATTACHED,
@@ -200,9 +235,12 @@ class RuntimeRecoveryService:
                 )
             elif current_position is not None and (
                 current_position.trade_intent_id is None
-                or self.trade_service.get_trade_intent(current_position.trade_intent_id) is None
+                or self.trade_service.get_trade_intent(current_position.trade_intent_id)
+                is None
             ):
-                recovery_intent = self._resolve_recovered_trade_intent(runtime=runtime, position=current_position)
+                recovery_intent = self._resolve_recovered_trade_intent(
+                    runtime=runtime, position=current_position
+                )
                 current_position.trade_intent_id = recovery_intent.id
                 current_position = self.trade_service.upsert_position(current_position)
                 self.trade_service.transition_trade_intent(
@@ -243,7 +281,9 @@ class RuntimeRecoveryService:
                 last_price_seen_at=runtime.last_price_seen_at,
                 current_position=clone_position(current_position),
                 current_position_broker_reference=(
-                    current_position.broker_reference if current_position is not None else None
+                    current_position.broker_reference
+                    if current_position is not None
+                    else None
                 ),
             )
             outcomes.append(
@@ -263,7 +303,9 @@ class RuntimeRecoveryService:
                 runtime_id=engine.runtime_id,
                 strategy_name=runtime.strategy_name,
                 instrument=runtime.instrument,
-                position_id=current_position.id if current_position is not None else None,
+                position_id=current_position.id
+                if current_position is not None
+                else None,
                 payload_json={
                     "recovered": True,
                     "has_position": current_position is not None,
@@ -290,12 +332,16 @@ class RuntimeRecoveryService:
         local_by_broker_reference: dict[str, Position],
     ) -> Position | None:
         if runtime.current_position_broker_reference:
-            position = local_by_broker_reference.get(runtime.current_position_broker_reference)
+            position = local_by_broker_reference.get(
+                runtime.current_position_broker_reference
+            )
             if position is not None:
                 return position
         return local_by_key.get((runtime.strategy_name, runtime.instrument))
 
-    def _resolve_recovered_trade_intent(self, *, runtime, position: Position) -> TradeIntent:
+    def _resolve_recovered_trade_intent(
+        self, *, runtime, position: Position
+    ) -> TradeIntent:
         if position.trade_intent_id is not None:
             existing = self.trade_service.get_trade_intent(position.trade_intent_id)
             if existing is not None:
@@ -312,7 +358,10 @@ class RuntimeRecoveryService:
         return self.trade_service.create_trade_intent(
             TradeIntent(
                 strategy_name=runtime.strategy_name,
-                family_name=strategy_registry.get_metadata(runtime.strategy_name).family_name or runtime.strategy_name,
+                family_name=strategy_registry.get_metadata(
+                    runtime.strategy_name
+                ).family_name
+                or runtime.strategy_name,
                 instrument=runtime.instrument,
                 direction=position.direction,
                 state=TradeIntentState.RECOVERED_POSITION_ATTACHED.value,
@@ -321,7 +370,8 @@ class RuntimeRecoveryService:
                 allocated_size=position.size,
                 proposed_risk_percent=position.risk_percent,
                 allocated_risk_percent=position.risk_percent,
-                risk_truth_confidence=position.risk_truth_confidence or "BROKER_CONFIRMED_AVERAGE_FILL_ESTIMATED",
+                risk_truth_confidence=position.risk_truth_confidence
+                or "BROKER_CONFIRMED_AVERAGE_FILL_ESTIMATED",
                 observed_price=position.open_price,
                 average_fill_price=position.open_price,
                 filled_size=position.size,
@@ -335,7 +385,9 @@ class RuntimeRecoveryService:
 
     def _position_from_remote(self, strategy_name: str, remote_position) -> Position:
         now = datetime.now(UTC)
-        family_name = strategy_registry.get_metadata(strategy_name).family_name or strategy_name
+        family_name = (
+            strategy_registry.get_metadata(strategy_name).family_name or strategy_name
+        )
         return Position(
             strategy_name=strategy_name,
             family_name=family_name,
@@ -345,7 +397,8 @@ class RuntimeRecoveryService:
             size=remote_position.size,
             open_price=remote_position.open_price,
             open_time=remote_position.opened_at,
-            current_price=runtime_manager.get_last_price(remote_position.instrument) or remote_position.open_price,
+            current_price=runtime_manager.get_last_price(remote_position.instrument)
+            or remote_position.open_price,
             unrealized_pnl=0.0,
             risk_percent=None,
             risk_truth_confidence="BROKER_CONFIRMED_AVERAGE_FILL_ESTIMATED",

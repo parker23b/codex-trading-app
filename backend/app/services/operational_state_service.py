@@ -78,7 +78,8 @@ class OperationalStateService:
             broker_connected=bool(health_details.broker_connected),
             price_updated_at=health_details.last_price_update,
             stream_tick_at=stream_health.last_tick_at,
-            stream_connected=bool(health_details.stream_connected) and bool(stream_health.connected),
+            stream_connected=bool(health_details.stream_connected)
+            and bool(stream_health.connected),
             now=now,
         )
 
@@ -92,8 +93,11 @@ class OperationalStateService:
                 runtime_manager.get_last_price_updated_at(instrument)
                 or self._get_runtime_last_price_seen_at(instrument)
             ),
-            stream_tick_at=get_operational_streaming_service().get_last_tick_at(instrument),
-            stream_connected=bool(health_details.stream_connected) and bool(stream_health.connected),
+            stream_tick_at=get_operational_streaming_service().get_last_tick_at(
+                instrument
+            ),
+            stream_connected=bool(health_details.stream_connected)
+            and bool(stream_health.connected),
             now=now,
         )
 
@@ -120,13 +124,18 @@ class OperationalStateService:
 
         if feed_source_state is FeedSourceState.LIVE:
             feed_health_state = FeedHealthState.HEALTHY
-        elif feed_source_state in {FeedSourceState.POLLING_FALLBACK, FeedSourceState.STALE}:
+        elif feed_source_state in {
+            FeedSourceState.POLLING_FALLBACK,
+            FeedSourceState.STALE,
+        }:
             feed_health_state = FeedHealthState.DEGRADED
         else:
             feed_health_state = FeedHealthState.FAILED
 
         broker_connectivity_state = (
-            BrokerConnectivityState.CONNECTED if broker_connected else BrokerConnectivityState.DISCONNECTED
+            BrokerConnectivityState.CONNECTED
+            if broker_connected
+            else BrokerConnectivityState.DISCONNECTED
         )
         entry_eligible = (
             broker_connectivity_state is BrokerConnectivityState.CONNECTED
@@ -137,7 +146,8 @@ class OperationalStateService:
         exit_eligible = (
             broker_connectivity_state is BrokerConnectivityState.CONNECTED
             and price_fresh
-            and feed_source_state in {FeedSourceState.LIVE, FeedSourceState.POLLING_FALLBACK}
+            and feed_source_state
+            in {FeedSourceState.LIVE, FeedSourceState.POLLING_FALLBACK}
         )
 
         return OperationalStateSnapshot(
@@ -147,10 +157,14 @@ class OperationalStateService:
             entry_eligible=entry_eligible,
             exit_eligible=exit_eligible,
             entry_eligibility_state=(
-                ExecutionEligibilityState.ALLOWED if entry_eligible else ExecutionEligibilityState.BLOCKED
+                ExecutionEligibilityState.ALLOWED
+                if entry_eligible
+                else ExecutionEligibilityState.BLOCKED
             ),
             exit_eligibility_state=(
-                ExecutionEligibilityState.ALLOWED if exit_eligible else ExecutionEligibilityState.BLOCKED
+                ExecutionEligibilityState.ALLOWED
+                if exit_eligible
+                else ExecutionEligibilityState.BLOCKED
             ),
             entry_block_reason=self._entry_block_reason(
                 broker_connected=broker_connected,
@@ -203,7 +217,11 @@ class OperationalStateService:
     def _is_fresh(self, value: datetime | None, now: datetime) -> bool:
         if value is None:
             return False
-        normalized = value.astimezone(UTC) if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        normalized = (
+            value.astimezone(UTC)
+            if value.tzinfo is not None
+            else value.replace(tzinfo=UTC)
+        )
         age_ms = (now - normalized).total_seconds() * 1000
         return age_ms <= self.settings.max_price_age_ms
 
@@ -222,36 +240,48 @@ class OperationalStateService:
     def _open_risk_management_state(self) -> OpenRiskManagementState:
         if self.session is None:
             return OpenRiskManagementState.NO_OPEN_RISK
-        has_open_positions = self.session.exec(select(Position.id).where(Position.is_open.is_(True)).limit(1)).first()
+        has_open_positions = self.session.exec(
+            select(Position.id).where(Position.is_open.is_(True)).limit(1)
+        ).first()
         if has_open_positions is None:
             return OpenRiskManagementState.NO_OPEN_RISK
         unmanaged = self.session.exec(
-            select(StrategyDeployment.id).where(
-                StrategyDeployment.open_risk_management_state == OpenRiskManagementState.UNMANAGED_OPEN_RISK.value
-            ).limit(1)
+            select(StrategyDeployment.id)
+            .where(
+                StrategyDeployment.open_risk_management_state
+                == OpenRiskManagementState.UNMANAGED_OPEN_RISK.value
+            )
+            .limit(1)
         ).first()
         if unmanaged is not None:
             return OpenRiskManagementState.UNMANAGED_OPEN_RISK
         exits_only_deployment = self.session.exec(
-            select(StrategyDeployment.id).where(
-                StrategyDeployment.open_risk_management_state == OpenRiskManagementState.EXITS_ONLY.value
-            ).limit(1)
+            select(StrategyDeployment.id)
+            .where(
+                StrategyDeployment.open_risk_management_state
+                == OpenRiskManagementState.EXITS_ONLY.value
+            )
+            .limit(1)
         ).first()
         if exits_only_deployment is not None:
             return OpenRiskManagementState.EXITS_ONLY
         exits_only_runtime = self.session.exec(
-            select(StrategyRuntimeState.id).where(
+            select(StrategyRuntimeState.id)
+            .where(
                 StrategyRuntimeState.status == "RUNNING",
                 StrategyRuntimeState.runtime_mode == "EXITS_ONLY",
-            ).limit(1)
+            )
+            .limit(1)
         ).first()
         if exits_only_runtime is not None:
             return OpenRiskManagementState.EXITS_ONLY
         managed_runtime = self.session.exec(
-            select(StrategyRuntimeState.id).where(
+            select(StrategyRuntimeState.id)
+            .where(
                 StrategyRuntimeState.status == "RUNNING",
                 StrategyRuntimeState.current_position_broker_reference.is_not(None),
-            ).limit(1)
+            )
+            .limit(1)
         ).first()
         if managed_runtime is not None:
             return OpenRiskManagementState.MANAGED
@@ -261,22 +291,35 @@ class OperationalStateService:
         if self.session is None:
             return None
         deployment = self.session.exec(
-            select(StrategyDeployment).where(
-                StrategyDeployment.open_risk_management_state == OpenRiskManagementState.UNMANAGED_OPEN_RISK.value
-            ).limit(1)
+            select(StrategyDeployment)
+            .where(
+                StrategyDeployment.open_risk_management_state
+                == OpenRiskManagementState.UNMANAGED_OPEN_RISK.value
+            )
+            .limit(1)
         ).first()
         if deployment is not None:
             return deployment.open_risk_management_reason
         exits_only = self.session.exec(
-            select(StrategyDeployment).where(
-                StrategyDeployment.open_risk_management_state == OpenRiskManagementState.EXITS_ONLY.value
-            ).limit(1)
+            select(StrategyDeployment)
+            .where(
+                StrategyDeployment.open_risk_management_state
+                == OpenRiskManagementState.EXITS_ONLY.value
+            )
+            .limit(1)
         ).first()
         if exits_only is not None:
             return exits_only.open_risk_management_reason
-        if self.session.exec(select(Position.id).where(Position.is_open.is_(True)).limit(1)).first() is not None:
+        if (
+            self.session.exec(
+                select(Position.id).where(Position.is_open.is_(True)).limit(1)
+            ).first()
+            is not None
+        ):
             running_runtime = self.session.exec(
-                select(StrategyRuntimeState.id).where(StrategyRuntimeState.status == "RUNNING").limit(1)
+                select(StrategyRuntimeState.id)
+                .where(StrategyRuntimeState.status == "RUNNING")
+                .limit(1)
             ).first()
             if running_runtime is None:
                 return "Open positions exist without an active runtime managing exits."

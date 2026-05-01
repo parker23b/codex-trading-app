@@ -105,7 +105,9 @@ def test_health_check_returns_503_when_system_is_critical(monkeypatch):
     assert payload == {"status": "critical"}
 
 
-def test_health_service_counts_pending_trade_intents_as_live_operational_demand(session, monkeypatch):
+def test_health_service_counts_pending_trade_intents_as_live_operational_demand(
+    session, monkeypatch
+):
     session.add(
         TradeIntent(
             strategy_name="mean_reversion",

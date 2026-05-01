@@ -43,7 +43,11 @@ class StructuredFormatter(logging.Formatter):
             return base_message
 
         serializable_extra = {
-            key: value if isinstance(value, (str, int, float, bool, type(None), list, tuple, Mapping)) else str(value)
+            key: value
+            if isinstance(
+                value, (str, int, float, bool, type(None), list, tuple, Mapping)
+            )
+            else str(value)
             for key, value in extra.items()
         }
         return f"{base_message} {dumps(serializable_extra, sort_keys=True)}"
@@ -67,7 +71,9 @@ class DomainEventErrorHandler(logging.Handler):
             exception = record.exc_info[1] if record.exc_info else None
             error_type = getattr(record, "error_type", None)
             if not error_type:
-                error_type = type(exception).__name__ if exception is not None else "LoggedError"
+                error_type = (
+                    type(exception).__name__ if exception is not None else "LoggedError"
+                )
             payload = {
                 "logger": record.name,
                 "level": record.levelname.lower(),
@@ -82,7 +88,11 @@ class DomainEventErrorHandler(logging.Handler):
             }
             if extra:
                 payload["log_context"] = {
-                    key: value if isinstance(value, (str, int, float, bool, type(None), list, tuple, Mapping)) else str(value)
+                    key: value
+                    if isinstance(
+                        value, (str, int, float, bool, type(None), list, tuple, Mapping)
+                    )
+                    else str(value)
                     for key, value in extra.items()
                 }
             domain_event_service.record_error(
@@ -94,7 +104,9 @@ class DomainEventErrorHandler(logging.Handler):
                 message=formatted_message,
                 correlation_id=getattr(record, "correlation_id", None),
                 runtime_id=getattr(record, "runtime_id", None),
-                strategy_name=getattr(record, "strategy_name", getattr(record, "strategy", None)),
+                strategy_name=getattr(
+                    record, "strategy_name", getattr(record, "strategy", None)
+                ),
                 instrument=getattr(record, "instrument", None),
                 position_id=getattr(record, "position_id", None),
                 trade_id=getattr(record, "trade_id", None),
@@ -111,7 +123,9 @@ class DomainEventErrorHandler(logging.Handler):
 
 def configure_logging(level: str) -> None:
     handler = logging.StreamHandler()
-    handler.setFormatter(StructuredFormatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
+    handler.setFormatter(
+        StructuredFormatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
+    )
     error_journal_handler = DomainEventErrorHandler(level=logging.ERROR)
 
     root_logger = logging.getLogger()

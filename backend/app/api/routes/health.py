@@ -95,5 +95,9 @@ class OperationalTelemetryResponse(BaseModel):
 
 
 @router.get("/system/telemetry", response_model=OperationalTelemetryResponse)
-def operational_telemetry(session: Session = Depends(get_session)) -> OperationalTelemetryResponse:
-    return OperationalTelemetryResponse(**OperationalTelemetryService(session).get_summary())
+def operational_telemetry(
+    session: Session = Depends(get_session),
+) -> OperationalTelemetryResponse:
+    return OperationalTelemetryResponse(
+        **OperationalTelemetryService(session).get_summary()
+    )
