@@ -1,0 +1,8 @@
+ruff
+pyright
+pytest
+pytest-cov
+vulture
+bandit[toml]
+pip-audit
+pre-commit

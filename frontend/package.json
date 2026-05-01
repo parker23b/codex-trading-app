@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "audit:unused": "knip",
+    "audit:arch": "depcruise app components lib --config .dependency-cruiser.cjs",
+    "audit": "npm run lint && npm run typecheck && npm run audit:unused && npm run audit:arch && npm audit --audit-level=moderate"
   },
   "dependencies": {
     "next": "^15.3.0",
@@ -18,8 +22,10 @@
     "@types/node": "^22.14.1",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
+    "dependency-cruiser": "^17.3.10",
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.2",
+    "knip": "^6.9.0",
     "postcss": "^8.5.9",
     "tailwindcss": "^4.2.2",
     "typescript": "^5.8.2"

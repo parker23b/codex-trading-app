@@ -1,0 +1,11 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "entry": [
+    "app/**/{page,layout,route,template,loading,error,not-found}.{ts,tsx}",
+    "components/**/*.{ts,tsx}",
+    "lib/**/*.{ts,tsx}"
+  ],
+  "project": ["**/*.{ts,tsx,js,jsx}"],
+  "ignore": [".next/**", "node_modules/**"],
+  "ignoreDependencies": ["@types/node"]
+}
