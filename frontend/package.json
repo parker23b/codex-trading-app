@@ -26,8 +26,13 @@
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.2",
     "knip": "^6.9.0",
-    "postcss": "^8.5.9",
+    "postcss": "^8.5.13",
     "tailwindcss": "^4.2.2",
     "typescript": "^5.8.2"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "^8.5.10"
+    }
   }
 }
