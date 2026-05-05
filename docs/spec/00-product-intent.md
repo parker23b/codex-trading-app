@@ -14,7 +14,7 @@ InvestMate is an operator console and backend control system for supervised auto
 
 ## Product requirements
 
-| Spec ID | Requirement | Evidence expected | Safety severity if violated | Current confidence |
+| Spec ID | Requirement | Evidence expected | Safety severity if violated | Current verification confidence |
 | --- | --- | --- | --- | --- |
 | PROD-001 | InvestMate is a supervised autonomous trading operator console, not a retail manual trading terminal. | Product text, backend control-plane services, frontend operator surfaces. | P2 | High |
 | PROD-002A | Autonomous decisions must be observable. | Domain events, dashboard/control-plane/coverage/risk surfaces, risk truth fields. | P1 | Medium |
@@ -27,10 +27,10 @@ InvestMate is an operator console and backend control system for supervised auto
 | PROD-008 | The UI must not imply stronger certainty than backend data supports. Estimated, degraded, stale, fallback, or unknown data must be visibly distinct from exact broker-confirmed truth. | Frontend status/provenance display tests and backend confidence fields. | P1 | Low |
 | PROD-009 | Recovery and reconciliation must preserve auditability for out-of-band broker truth. | Reconciliation/runtime recovery tests proving explicit intent/event records. | P0 | High |
 | PROD-010 | Critical trading behavior requires behavioral tests, not only object construction or happy-path tests. | Test names and assertions around failure modes, stale data, broker errors, and state transitions. | P1 | Medium |
-| PROD-011 | No known open broker position may become unmanaged without explicit operator-visible state, domain-event evidence, and either an exit-capable runtime, recovery path, or manual-review state. | | P0 | |
-| PROD-012 | Material lifecycle transitions for governance, deployment, runtime, intent, execution, position, risk, allocation, reconciliation, and recovery must emit durable domain/audit evidence with enough context to reconstruct why the transition occurred. | | P1 | |
-| PROD-013 | Frontend surfaces must render backend-provided trading truth and may derive presentation summaries only when the derivation is deterministic, local, and does not change certainty, severity, or lifecycle meaning. | | P1 | |
-| PROD-014 | When autonomy cannot act because of health, broker, market-data, governance, or risk constraints, the system must fail closed for entries and expose the blocked/degraded reason to the operator. | | P0 | |
+| PROD-011 | No known open broker position may become unmanaged without explicit operator-visible state, domain-event evidence, and either an exit-capable runtime, recovery path, or manual-review state. | Open-risk management state, recovery/runtime tests, control-plane visibility, and domain-event evidence. | P0 | Medium |
+| PROD-012 | Material lifecycle transitions for governance, deployment, runtime, intent, execution, position, risk, allocation, reconciliation, and recovery must emit durable domain/audit evidence with enough context to reconstruct why the transition occurred. | Domain-event/audit evidence tests across lifecycle, control-plane, recovery, and allocation transitions. | P1 | Medium |
+| PROD-013 | Frontend surfaces must render backend-provided trading truth and may derive presentation summaries only when the derivation is deterministic, local, and does not change certainty, severity, or lifecycle meaning. | Frontend truth/provenance tests and derived-summary parity tests. | P1 | Medium |
+| PROD-014 | When autonomy cannot act because of health, broker, market-data, governance, or risk constraints, the system must fail closed for entries and expose the blocked/degraded reason to the operator. | Fail-closed entry tests plus operator-visible blocked/degraded state in read models and UI. | P0 | Medium |
 
 ## What InvestMate is
 

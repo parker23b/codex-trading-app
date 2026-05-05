@@ -193,7 +193,7 @@ Expected classifications:
 - `GET /allocation/alerts?refresh=true`: active read/refresh or redesign candidate
 - `POST /allocation/alerts/{alert_id}/acknowledge`: mutation
 - `POST /allocation/alerts/{alert_id}/resolve`: mutation
-- `GET /allocation/alerts/unresolved-critical`: passive read
+- `GET /allocation/alerts/unresolved-critical`: active read/refresh if it refreshes persisted alert state; otherwise Needs audit before passive classification
 
 Do not invent certainty. If the actual route behavior differs, mark Needs audit.
 
