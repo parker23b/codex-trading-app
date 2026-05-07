@@ -1114,7 +1114,10 @@ class StrategyService:
                         execution=execution,
                     )
                 except Exception as exc:
-                    if intent.state != TradeIntentState.CLOSED.value:
+                    if intent.state not in {
+                        TradeIntentState.CLOSED.value,
+                        TradeIntentState.CLOSE_REQUESTED.value,
+                    }:
                         trade_service.transition_trade_intent(
                             intent,
                             state=TradeIntentState.FAILED,
@@ -2413,6 +2416,9 @@ class StrategyService:
         if intent.state not in {
             TradeIntentState.PARTIALLY_FILLED.value,
             TradeIntentState.POSITION_OPENED.value,
+            TradeIntentState.CLOSE_REQUESTED.value,
+            TradeIntentState.SUBMITTED.value,
+            TradeIntentState.ACKNOWLEDGED.value,
             TradeIntentState.EXTERNAL_POSITION_ADOPTED.value,
             TradeIntentState.RECOVERED_POSITION_ATTACHED.value,
         }:
@@ -2490,7 +2496,7 @@ class StrategyService:
             )
             trade_service.transition_trade_intent(
                 intent,
-                state=TradeIntentState.FAILED,
+                state=TradeIntentState.CLOSE_REQUESTED,
                 close_reason_code="close_submission_failed",
                 close_reason="Close request failed.",
                 details={"error_message": str(exc)},
@@ -2521,7 +2527,7 @@ class StrategyService:
             )
             trade_service.transition_trade_intent(
                 intent,
-                state=TradeIntentState.FAILED,
+                state=TradeIntentState.CLOSE_REQUESTED,
                 close_reason_code="close_incomplete",
                 close_reason="Close did not complete fully.",
                 completed_at=closed_order.executed_at,

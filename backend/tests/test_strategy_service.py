@@ -1063,8 +1063,20 @@ def test_close_failure_keeps_position_open_and_flags_manual_review(
     )
 
     executions = trade_service.list_executions(limit=10)
+    intent = trade_service.list_trade_intents(limit=1)[0]
+    position = trade_service.list_positions()[0]
+    close_admissible = trade_service.find_close_admissible_trade_intent(
+        strategy_name=STRATEGY,
+        instrument=INSTRUMENT,
+        broker_reference=position.broker_reference,
+        position_id=position.id,
+    )
+
     assert len(trade_service.list_positions()) == 1
     assert len(trade_service.list_trades()) == 0
+    assert intent.state == TradeIntentState.CLOSE_REQUESTED.value
+    assert close_admissible is not None
+    assert close_admissible.id == intent.id
     assert executions[0].status == ExecutionStatus.NEEDS_MANUAL_REVIEW.value
     assert executions[0].requires_manual_review is True
 
@@ -1131,13 +1143,110 @@ def test_partial_close_result_moves_execution_to_manual_review(
     )
 
     executions = trade_service.list_executions(limit=10)
+    intent = trade_service.list_trade_intents(limit=1)[0]
+    position = trade_service.list_positions()[0]
+    close_admissible = trade_service.find_close_admissible_trade_intent(
+        strategy_name=STRATEGY,
+        instrument=INSTRUMENT,
+        broker_reference=position.broker_reference,
+        position_id=position.id,
+    )
+
     assert len(trade_service.list_positions()) == 1
     assert len(trade_service.list_trades()) == 0
+    assert intent.state == TradeIntentState.CLOSE_REQUESTED.value
+    assert close_admissible is not None
+    assert close_admissible.id == intent.id
     assert executions[0].status == ExecutionStatus.NEEDS_MANUAL_REVIEW.value
     assert executions[0].requires_manual_review is True
     assert executions[0].phase == ExecutionPhase.CLOSE.value
     assert executions[0].filled_size == 0.1
     assert executions[0].average_fill_price == 101.0
+
+
+@pytest.mark.parametrize(
+    ("close_status", "reason"),
+    [
+        (BrokerOrderStatus.REJECTED, "Broker rejected close."),
+        (BrokerOrderStatus.AMBIGUOUS, "Close confirmation is ambiguous."),
+    ],
+)
+def test_audit_life_002_incomplete_close_preserves_close_admissible_intent(
+    session, broker, fixed_now, close_status, reason
+):
+    service = StrategyService(session)
+    trade_service = TradeService(session)
+    service.start_strategy(STRATEGY, INSTRUMENT)
+    broker.place_order_outcomes.append(
+        make_order_result(
+            broker_reference="entry-close-admissible",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.5,
+            executed_at=fixed_now + timedelta(seconds=1),
+        )
+    )
+    broker.close_position_outcomes.append(
+        BrokerOrderResult(
+            broker_reference=f"close-{close_status.value.lower()}",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.SELL,
+            size=0.2,
+            price=101.0,
+            executed_at=fixed_now + timedelta(seconds=40),
+            status=close_status,
+            submitted_at=fixed_now + timedelta(seconds=40),
+            acknowledged_at=fixed_now + timedelta(seconds=40),
+            reason=reason,
+            requires_manual_review=True,
+        )
+    )
+
+    service.process_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        100.5,
+        bid=100.49,
+        ask=100.51,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        101.0,
+        bid=100.99,
+        ask=101.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=40),
+    )
+
+    intent = trade_service.list_trade_intents(limit=1)[0]
+    execution = trade_service.list_executions(limit=1)[0]
+    position = trade_service.list_positions()[0]
+    close_admissible = trade_service.find_close_admissible_trade_intent(
+        strategy_name=STRATEGY,
+        instrument=INSTRUMENT,
+        broker_reference=position.broker_reference,
+        position_id=position.id,
+    )
+
+    assert len(trade_service.list_trades()) == 0
+    assert intent.state == TradeIntentState.CLOSE_REQUESTED.value
+    assert close_admissible is not None
+    assert close_admissible.id == intent.id
+    assert execution.status == ExecutionStatus.NEEDS_MANUAL_REVIEW.value
+    assert execution.requires_manual_review is True
 
 
 def test_partial_entry_fill_keeps_position_but_restricts_runtime(

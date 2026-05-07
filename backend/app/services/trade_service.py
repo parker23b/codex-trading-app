@@ -310,6 +310,9 @@ class TradeService:
                 {
                     TradeIntentState.PARTIALLY_FILLED.value,
                     TradeIntentState.POSITION_OPENED.value,
+                    TradeIntentState.CLOSE_REQUESTED.value,
+                    TradeIntentState.SUBMITTED.value,
+                    TradeIntentState.ACKNOWLEDGED.value,
                     TradeIntentState.EXTERNAL_POSITION_ADOPTED.value,
                     TradeIntentState.RECOVERED_POSITION_ATTACHED.value,
                 }
