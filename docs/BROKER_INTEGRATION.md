@@ -1,6 +1,6 @@
 # Broker Integration Guide
 
-This backend is designed so broker-specific code stays behind the shared execution contract in [broker.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/broker.py).
+This backend is designed so broker-specific code stays behind the shared execution contract in [broker.py](../backend/app/core/broker.py).
 
 ## Current Flow
 
@@ -13,10 +13,10 @@ That separation is the reason a new broker can be added without rewriting the tr
 
 ## Files Involved
 
-- [broker.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/broker.py): shared broker contract
-- [broker_factory.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/broker_factory.py): provider selection and construction
-- [ig_broker.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/ig_broker.py): current stub implementation
-- [trading_engine.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/trading_engine.py): broker consumer
+- [broker.py](../backend/app/core/broker.py): shared broker contract
+- [broker_factory.py](../backend/app/core/broker_factory.py): provider selection and construction
+- [ig_broker.py](../backend/app/core/ig_broker.py): current IG implementation
+- [trading_engine.py](../backend/app/core/trading_engine.py): broker consumer
 
 ## Adding A New Broker
 
@@ -46,7 +46,7 @@ Do not leak raw SDK responses or broker-specific payloads outside the adapter.
 
 ### 2. Add configuration
 
-Add provider-specific settings to [config.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/config.py) and document them in `backend/.env.example`.
+Add provider-specific settings to [config.py](../backend/app/core/config.py) and document them in `backend/.env.example`.
 
 Typical settings:
 
@@ -60,7 +60,7 @@ Typical settings:
 
 ### 3. Update the broker factory
 
-Extend [broker_factory.py](/Users/benparker/Documents/repos/codex-trading-app/backend/app/core/broker_factory.py) so the application can choose the correct adapter from configuration.
+Extend [broker_factory.py](../backend/app/core/broker_factory.py) so the application can choose the correct adapter from configuration.
 
 Good pattern:
 

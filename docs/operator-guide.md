@@ -1,0 +1,141 @@
+# Operator Guide
+
+This guide covers local development setup and operator-facing surfaces. It is not a production runbook; InvestMate is not ready for live or demo broker dealing.
+
+## Prerequisites
+
+- Python 3.11 or newer.
+- Node.js and npm compatible with `frontend/package-lock.json`.
+- Network access for dependency installation.
+- Optional IG demo credentials for broker-read checks.
+
+## Backend Setup
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+cp .env.example .env
+uvicorn app.main:app --reload
+```
+
+Default backend behavior:
+
+- uses SQLite at `backend/trading_platform.db`
+- creates tables automatically on startup
+- uses the IG broker adapter in `DEMO` mode
+- keeps `IG_TRADING_ENABLED=false`
+- enables IG streaming by default
+- keeps AIMEE/AI reviewer LLM augmentation disabled by default
+
+Backend URL: [http://localhost:8000](http://localhost:8000)
+
+Useful startup checks without IG credentials:
+
+- [http://localhost:8000/health](http://localhost:8000/health)
+- [http://localhost:8000/system/health](http://localhost:8000/system/health)
+- [http://localhost:8000/control-plane/summary](http://localhost:8000/control-plane/summary)
+- [http://localhost:8000/coverage/summary](http://localhost:8000/coverage/summary)
+- [http://localhost:8000/dashboard](http://localhost:8000/dashboard)
+- [http://localhost:8000/reviews/operator-summary](http://localhost:8000/reviews/operator-summary)
+
+Expected degraded states with blank IG credentials:
+
+- `/health` should return an app-level health response
+- `/system/health` and `/dashboard` can report disconnected broker or stream state
+- `/reviews/operator-summary` can include disabled LLM or degraded stream warnings
+- `/broker/positions` and `/markets/overview?category=forex` return credential-required errors
+- startup can log missing IG settings during recovery
+
+## Frontend Setup
+
+```bash
+cd frontend
+npm install
+cp .env.example .env.local
+npm run dev
+```
+
+Frontend URL: [http://localhost:3000](http://localhost:3000)
+
+## Optional IG Demo Read Connectivity
+
+Update `backend/.env` with demo credentials only when you want broker-read checks:
+
+```env
+BROKER_PROVIDER=IG
+BROKER_MODE=DEMO
+IG_API_KEY=your-demo-api-key
+IG_USERNAME=your-demo-username
+IG_PASSWORD=your-demo-password
+IG_ACCOUNT_ID=your-demo-account-id
+IG_API_BASE_URL=https://demo-api.ig.com/gateway/deal
+IG_TRADING_ENABLED=false
+IG_VERIFY_SSL=true
+IG_CA_BUNDLE_PATH=
+```
+
+Read-only verification progression:
+
+1. Keep `IG_TRADING_ENABLED=false`.
+2. Start the backend.
+3. Verify auth via `GET /broker/positions`.
+4. Verify stream or market health via `GET /health/stream` and `GET /system/health`.
+5. Verify market inspection via `GET /markets/overview?category=forex`.
+
+Do not enable real broker dealing from this repository state. `BROKER_MODE=DEMO` does not make broker-dealing tests safe while readiness blockers remain open.
+
+## Main Surfaces
+
+- `/` - overview dashboard for positions, executions, broker state, stream health, coverage, and control-plane summary.
+- `/live` - live system view with trust rail, anomalies, runtime state, instrument inspection, and operational context.
+- `/risk` - allocation exposure, drift, cycles, intents, and alert workflow.
+- `/control-plane` - autonomous-control state, governance, deployment alignment, and family detail.
+- `/coverage` - Tier 1 streaming, Tier 2 refresh, promotion activity, and operating limits.
+- `/markets` - market-category investigation, catalogue data, shortlist, and strategy-watchlist workflows.
+- `/events` - domain-event console and local test reset control.
+- `/strategies` - strategy registry, runtime state, profile visibility, and manual runtime controls.
+- `/reviewer` - persisted reviewer summaries and review history.
+- AIMEE drawer - persistent assistant-style operational overview and Q&A surface.
+
+## Environment Variables
+
+Backend env file: `backend/.env`.
+
+Most important backend variables:
+
+- `DATABASE_URL` - SQLModel connection string. Relative SQLite paths are normalized against `backend/`.
+- `BROKER_PROVIDER` - current allowed value is `IG`.
+- `BROKER_MODE` - `DEMO` or `LIVE`.
+- `IG_TRADING_ENABLED` - safety switch for broker dealing. Keep this `false`.
+- `IG_STREAMING_ENABLED` - starts the streaming loop when enabled.
+- `MARKET_DATA_POLL_INTERVAL_SECONDS` - market-data loop cadence.
+- `AI_REVIEWER_LLM_ENABLED` - keeps reviewer output deterministic when `false`.
+- `STARTING_ACCOUNT_VALUE` - dashboard baseline value.
+
+Frontend env file: `frontend/.env.local`.
+
+Most important frontend variables:
+
+- `NEXT_PUBLIC_API_BASE_URL` - backend URL for frontend requests.
+- `NEXT_PUBLIC_ENABLE_DEV_FALLBACK` - present in the env example, but current shared client behavior does not actively branch on it.
+
+## Verification Commands
+
+Backend tests:
+
+```bash
+cd backend
+source .venv/bin/activate
+pytest
+```
+
+Frontend static checks:
+
+```bash
+cd frontend
+npm run audit
+```
+
+Current evidence gaps are tracked in [audit-status.md](audit-status.md).
