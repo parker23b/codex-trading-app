@@ -797,6 +797,63 @@ def test_entry_is_blocked_when_spread_exceeds_threshold(session, broker, fixed_n
     assert "spread" in (intents[0].decision_reason or "").lower()
 
 
+def test_audit_broker_003_unknown_market_status_blocks_entry_even_when_tradable(
+    session, broker, fixed_now
+):
+    service = StrategyService(session)
+    trade_service = TradeService(session)
+    broker.market_details_by_instrument[INSTRUMENT] = BrokerMarketDetails(
+        instrument=INSTRUMENT,
+        name=INSTRUMENT,
+        bid=100.49,
+        offer=100.51,
+        high=101.0,
+        low=99.0,
+        percentage_change=0.0,
+        net_change=0.0,
+        market_status=None,
+        update_time=fixed_now.isoformat(),
+        tradable=True,
+    )
+    broker.place_order_outcomes.append(
+        make_order_result(
+            broker_reference="entry-should-not-submit",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.5,
+            executed_at=fixed_now + timedelta(seconds=1),
+        )
+    )
+    service.start_strategy(STRATEGY, INSTRUMENT)
+
+    service.process_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status=None,
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        100.5,
+        bid=100.49,
+        ask=100.51,
+        market_status=None,
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
+
+    assert broker.placed_orders == []
+    assert trade_service.list_executions(limit=10) == []
+    intents = trade_service.list_trade_intents(limit=10)
+    assert intents[0].state == TradeIntentState.REJECTED.value
+    assert intents[0].details["risk_rejection_layer"] == "market_status"
+    assert "unknown" in (intents[0].decision_reason or "").lower()
+
+
 def test_execution_rechecks_market_status_before_order_submission(
     session, broker, fixed_now
 ):
@@ -862,6 +919,101 @@ def test_execution_rechecks_market_status_before_order_submission(
     assert (
         get_health_service().get_health_report()["details"].order_failures_last_5m == 0
     )
+
+
+def test_audit_life_001_acknowledged_only_entry_does_not_create_fill_truth(
+    session, broker, fixed_now
+):
+    service = StrategyService(session)
+    trade_service = TradeService(session)
+    service.start_strategy(STRATEGY, INSTRUMENT)
+    broker.place_order_outcomes.append(
+        BrokerOrderResult(
+            broker_reference="entry-ack-only",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.5,
+            executed_at=fixed_now + timedelta(seconds=1),
+            status=BrokerOrderStatus.ACKNOWLEDGED,
+            requested_size=0.2,
+            filled_size=None,
+            average_fill_price=None,
+            submitted_at=fixed_now + timedelta(seconds=1),
+            acknowledged_at=fixed_now + timedelta(seconds=1),
+            reason="Broker acknowledged submission but no fill confirmation exists.",
+        )
+    )
+
+    service.process_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        100.5,
+        bid=100.49,
+        ask=100.51,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
+
+    intent = trade_service.list_trade_intents(limit=1)[0]
+    execution = trade_service.list_executions(limit=1)[0]
+
+    assert len(trade_service.list_positions()) == 0
+    assert intent.state == TradeIntentState.ACKNOWLEDGED.value
+    assert intent.filled_size is None
+    assert intent.position_id is None
+    assert execution.status == ExecutionStatus.NEEDS_MANUAL_REVIEW.value
+    assert execution.requires_manual_review is True
+    assert execution.filled_size is None
+    assert execution.details["broker_result"]["status"] == "ACKNOWLEDGED"
+
+
+def test_audit_life_001_entry_timeout_preserves_ambiguous_manual_review_state(
+    session, broker, fixed_now
+):
+    service = StrategyService(session)
+    trade_service = TradeService(session)
+    service.start_strategy(STRATEGY, INSTRUMENT)
+    broker.place_order_outcomes.append(TimeoutError("confirmation lookup timed out"))
+
+    service.process_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        100.5,
+        bid=100.49,
+        ask=100.51,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
+
+    intent = trade_service.list_trade_intents(limit=1)[0]
+    execution = trade_service.list_executions(limit=1)[0]
+
+    assert len(trade_service.list_positions()) == 0
+    assert intent.state == TradeIntentState.ACKNOWLEDGED.value
+    assert intent.decision_reason_code == "broker_confirmation_ambiguous"
+    assert execution.status == ExecutionStatus.NEEDS_MANUAL_REVIEW.value
+    assert execution.requires_manual_review is True
+    assert execution.error_code == "BROKER_CONFIRMATION_TIMEOUT"
+    assert execution.details["broker_result"]["status"] == "TIMED_OUT"
 
 
 def test_close_failure_keeps_position_open_and_flags_manual_review(

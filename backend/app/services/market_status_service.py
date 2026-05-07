@@ -15,8 +15,17 @@ from app.services.health_service import get_health_service
 
 logger = get_logger(__name__)
 
-OPEN_MARKET_STATES = {"TRADEABLE", "TRADEABLE_NO_EDIT", "ON_AUCTION", "EDITS_ONLY"}
-BLOCKED_MARKET_STATES = {"CLOSED", "SUSPENDED", "OFFLINE"}
+OPEN_MARKET_STATES = {"TRADEABLE", "TRADEABLE_ONLINE"}
+BLOCKED_MARKET_STATES = {
+    "CLOSED",
+    "DEALING_RESTRICTED",
+    "EDITS_ONLY",
+    "OFFLINE",
+    "ON_AUCTION",
+    "ON_AUCTION_NO_EDITS",
+    "SUSPENDED",
+    "TRADEABLE_NO_EDIT",
+}
 BLOCKED_ORDER_PREFERENCES = {"NOT_AVAILABLE", "LIMIT_ONLY", "STOP_ONLY"}
 
 
@@ -148,13 +157,13 @@ class MarketStatusService:
     @staticmethod
     def _is_market_open(market_status: str | None) -> bool:
         if market_status is None:
-            return True
-        normalized = market_status.upper()
+            return False
+        normalized = market_status.strip().upper()
+        if not normalized:
+            return False
         if normalized in BLOCKED_MARKET_STATES:
             return False
-        if normalized in OPEN_MARKET_STATES:
-            return True
-        return normalized not in BLOCKED_MARKET_STATES
+        return normalized in OPEN_MARKET_STATES
 
     @staticmethod
     def _is_session_valid(now: datetime) -> bool:

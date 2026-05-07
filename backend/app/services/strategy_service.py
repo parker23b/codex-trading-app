@@ -40,6 +40,16 @@ from app.services.trade_service import TradeService
 logger = get_logger(__name__)
 
 
+AMBIGUOUS_BROKER_ORDER_STATUSES = {
+    BrokerOrderStatus.ACKNOWLEDGED,
+    BrokerOrderStatus.PENDING,
+    BrokerOrderStatus.TIMED_OUT,
+    BrokerOrderStatus.RATE_LIMITED,
+    BrokerOrderStatus.UNKNOWN,
+    BrokerOrderStatus.AMBIGUOUS,
+}
+
+
 class StrategyService:
     # Legacy execution statuses are read only so persisted older rows can still
     # participate in retry suppression. New execution rows must start at
@@ -902,6 +912,27 @@ class StrategyService:
                                 if intent.id is not None
                                 else execution
                             )
+                            preserve_ambiguous_broker_state = (
+                                latest_execution is not None
+                                and latest_execution.status
+                                == ExecutionStatus.NEEDS_MANUAL_REVIEW.value
+                                and intent.state
+                                in {
+                                    TradeIntentState.SUBMITTED.value,
+                                    TradeIntentState.ACKNOWLEDGED.value,
+                                    TradeIntentState.PARTIALLY_FILLED.value,
+                                }
+                            )
+                            if preserve_ambiguous_broker_state:
+                                logger.exception(
+                                    "Entry execution needs manual review",
+                                    extra={
+                                        "strategy": engine.strategy.name,
+                                        "instrument": engine.instrument,
+                                        "error": str(exc),
+                                    },
+                                )
+                                continue
                             execution_stage = "execution_failed"
                             fill_status = None
                             if (
@@ -1974,6 +2005,64 @@ class StrategyService:
                     "execution_id": execution.id,
                 },
             )
+            if isinstance(exc, TimeoutError):
+                broker_result = {
+                    "status": BrokerOrderStatus.TIMED_OUT.value,
+                    "confirmation_ambiguous": True,
+                    "client_request_id": execution.client_request_id,
+                    "error_message": str(exc),
+                }
+                trade_service.transition_execution(
+                    execution,
+                    status=ExecutionStatus.NEEDS_MANUAL_REVIEW,
+                    trade_intent_id=intent.id,
+                    client_request_id=execution.client_request_id,
+                    intended_risk_amount=intent.estimated_risk_amount,
+                    submitted_risk_amount=submitted_risk_tracking.get(
+                        "submitted_executable_risk_amount"
+                    ),
+                    risk_truth_confidence=str(
+                        submitted_risk_tracking.get("risk_truth_confidence")
+                        or "SUBMITTED_EXECUTABLE_ESTIMATE"
+                    ),
+                    error_code="BROKER_CONFIRMATION_TIMEOUT",
+                    error_message=str(exc),
+                    reason="Broker confirmation timed out; manual review required.",
+                    requires_manual_review=True,
+                    details={
+                        "broker_result": broker_result,
+                        "risk_reconciliation": submitted_risk_reconciliation,
+                    },
+                )
+                trade_service.transition_trade_intent(
+                    intent,
+                    state=TradeIntentState.ACKNOWLEDGED,
+                    decision_reason_code="broker_confirmation_ambiguous",
+                    decision_reason=(
+                        "Broker confirmation timed out after submission; manual review required."
+                    ),
+                    submitted_risk_amount=submitted_risk_tracking.get(
+                        "submitted_executable_risk_amount"
+                    ),
+                    risk_truth_confidence=str(
+                        submitted_risk_tracking.get("risk_truth_confidence")
+                        or "SUBMITTED_EXECUTABLE_ESTIMATE"
+                    ),
+                    acknowledged_at=utc_now(),
+                    details={
+                        **StrategyService._allocation_outcome_update(
+                            stage="broker_confirmation_ambiguous",
+                            final_status=TradeIntentState.ACKNOWLEDGED.value,
+                            hard_risk_passed=True,
+                            execution_submitted=True,
+                            execution_blocked=True,
+                            fill_status=ExecutionStatus.NEEDS_MANUAL_REVIEW.value,
+                        ),
+                        "broker_result": broker_result,
+                        "risk_reconciliation": submitted_risk_reconciliation,
+                    },
+                )
+                raise
             trade_service.transition_execution(
                 execution,
                 status=ExecutionStatus.FAILED,
@@ -2031,6 +2120,10 @@ class StrategyService:
             opened_reason="Entry order acknowledged",
             completed_reason="Entry fill received",
         )
+        if order.status in AMBIGUOUS_BROKER_ORDER_STATUSES:
+            raise RuntimeError(
+                f"Entry order for {signal.instrument} requires manual review; broker result is {order.status.value}."
+            )
         filled_size = order.filled_size or order.size
         if (
             order.status
@@ -2554,6 +2647,55 @@ class StrategyService:
                 acknowledged_at=order.acknowledged_at or order.executed_at,
                 **intent_broker_reference_kwargs,
             )
+        if order.status in AMBIGUOUS_BROKER_ORDER_STATUSES:
+            broker_result = {
+                "status": order.status.value,
+                "confirmation_ambiguous": True,
+                "client_request_id": order.client_request_id,
+                "broker_reference": order.broker_reference,
+                "reason": order.reason,
+                "error_code": order.error_code,
+                "error_message": order.error_message,
+            }
+            trade_service.transition_execution(
+                execution,
+                status=ExecutionStatus.NEEDS_MANUAL_REVIEW,
+                trade_intent_id=trade_intent.id if trade_intent is not None else None,
+                client_request_id=order.client_request_id,
+                broker_reference=order.broker_reference,
+                acknowledged_at=order.acknowledged_at or order.executed_at,
+                reason=order.reason
+                or "Broker result is not final; manual review required.",
+                error_code=order.error_code or "BROKER_CONFIRMATION_AMBIGUOUS",
+                error_message=order.error_message,
+                requires_manual_review=True,
+                details={"broker_result": broker_result},
+            )
+            if trade_intent is not None:
+                trade_service.transition_trade_intent(
+                    trade_intent,
+                    state=TradeIntentState.ACKNOWLEDGED,
+                    execution_client_request_id=order.client_request_id,
+                    acknowledged_at=order.acknowledged_at or order.executed_at,
+                    decision_reason_code="broker_confirmation_ambiguous",
+                    decision_reason=(
+                        order.reason
+                        or "Broker result is not final; manual review required."
+                    ),
+                    details={
+                        **StrategyService._allocation_outcome_update(
+                            stage="broker_confirmation_ambiguous",
+                            final_status=TradeIntentState.ACKNOWLEDGED.value,
+                            hard_risk_passed=True,
+                            execution_submitted=True,
+                            execution_blocked=True,
+                            fill_status=ExecutionStatus.NEEDS_MANUAL_REVIEW.value,
+                        ),
+                        "broker_result": broker_result,
+                    },
+                    **intent_broker_reference_kwargs,
+                )
+            return
         fill_status = (
             ExecutionStatus.FILL_PARTIAL
             if order.status is BrokerOrderStatus.PARTIALLY_FILLED

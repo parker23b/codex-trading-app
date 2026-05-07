@@ -18,6 +18,11 @@ class OrderDirection(str, Enum):
 
 class BrokerOrderStatus(str, Enum):
     ACKNOWLEDGED = "ACKNOWLEDGED"
+    PENDING = "PENDING"
+    TIMED_OUT = "TIMED_OUT"
+    RATE_LIMITED = "RATE_LIMITED"
+    UNKNOWN = "UNKNOWN"
+    AMBIGUOUS = "AMBIGUOUS"
     PARTIALLY_FILLED = "PARTIALLY_FILLED"
     FILLED = "FILLED"
     CANCELLED = "CANCELLED"
