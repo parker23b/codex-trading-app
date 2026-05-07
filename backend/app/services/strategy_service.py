@@ -2632,11 +2632,12 @@ class StrategyService:
             if execution.phase == ExecutionPhase.CLOSE.value
             else {"broker_reference": order.broker_reference}
         )
+        client_request_id = order.client_request_id or execution.client_request_id
         trade_service.transition_execution(
             execution,
             status=ExecutionStatus.ORDER_ACKNOWLEDGED,
             trade_intent_id=trade_intent.id if trade_intent is not None else None,
-            client_request_id=order.client_request_id,
+            client_request_id=client_request_id,
             broker_reference=order.broker_reference,
             submitted_at=order.submitted_at,
             acknowledged_at=order.acknowledged_at or order.executed_at,
@@ -2649,7 +2650,7 @@ class StrategyService:
             trade_service.transition_trade_intent(
                 trade_intent,
                 state=TradeIntentState.ACKNOWLEDGED,
-                execution_client_request_id=order.client_request_id,
+                execution_client_request_id=client_request_id,
                 acknowledged_at=order.acknowledged_at or order.executed_at,
                 **intent_broker_reference_kwargs,
             )
@@ -2657,7 +2658,7 @@ class StrategyService:
             broker_result = {
                 "status": order.status.value,
                 "confirmation_ambiguous": True,
-                "client_request_id": order.client_request_id,
+                "client_request_id": client_request_id,
                 "broker_reference": order.broker_reference,
                 "reason": order.reason,
                 "error_code": order.error_code,
@@ -2667,7 +2668,7 @@ class StrategyService:
                 execution,
                 status=ExecutionStatus.NEEDS_MANUAL_REVIEW,
                 trade_intent_id=trade_intent.id if trade_intent is not None else None,
-                client_request_id=order.client_request_id,
+                client_request_id=client_request_id,
                 broker_reference=order.broker_reference,
                 acknowledged_at=order.acknowledged_at or order.executed_at,
                 reason=order.reason
@@ -2681,7 +2682,7 @@ class StrategyService:
                 trade_service.transition_trade_intent(
                     trade_intent,
                     state=TradeIntentState.ACKNOWLEDGED,
-                    execution_client_request_id=order.client_request_id,
+                    execution_client_request_id=client_request_id,
                     acknowledged_at=order.acknowledged_at or order.executed_at,
                     decision_reason_code="broker_confirmation_ambiguous",
                     decision_reason=(
@@ -2715,7 +2716,7 @@ class StrategyService:
             execution,
             status=fill_status,
             trade_intent_id=trade_intent.id if trade_intent is not None else None,
-            client_request_id=order.client_request_id,
+            client_request_id=client_request_id,
             broker_reference=order.broker_reference,
             completed_at=order.executed_at,
             filled_size=order.filled_size or order.size,

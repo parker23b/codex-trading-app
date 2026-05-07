@@ -1016,6 +1016,76 @@ def test_audit_life_001_entry_timeout_preserves_ambiguous_manual_review_state(
     assert execution.details["broker_result"]["status"] == "TIMED_OUT"
 
 
+@pytest.mark.parametrize(
+    ("broker_status", "error_code"),
+    [
+        (BrokerOrderStatus.RATE_LIMITED, "BROKER_CONFIRMATION_RATE_LIMITED"),
+        (BrokerOrderStatus.UNKNOWN, "BROKER_CONFIRMATION_UNKNOWN"),
+    ],
+)
+def test_audit_life_001_non_final_entry_results_preserve_manual_review_state(
+    session, broker, fixed_now, broker_status, error_code
+):
+    service = StrategyService(session)
+    trade_service = TradeService(session)
+    service.start_strategy(STRATEGY, INSTRUMENT)
+    broker.place_order_outcomes.append(
+        BrokerOrderResult(
+            broker_reference=f"entry-{broker_status.value.lower()}",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.5,
+            executed_at=fixed_now + timedelta(seconds=1),
+            status=broker_status,
+            requested_size=0.2,
+            filled_size=None,
+            average_fill_price=None,
+            submitted_at=fixed_now + timedelta(seconds=1),
+            acknowledged_at=fixed_now + timedelta(seconds=1),
+            reason=f"Broker confirmation ended in {broker_status.value}.",
+            error_code=error_code,
+            requires_manual_review=True,
+        )
+    )
+
+    service.process_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        100.5,
+        bid=100.49,
+        ask=100.51,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
+
+    intent = trade_service.list_trade_intents(limit=1)[0]
+    execution = trade_service.list_executions(limit=1)[0]
+
+    assert len(trade_service.list_positions()) == 0
+    assert intent.state == TradeIntentState.ACKNOWLEDGED.value
+    assert intent.decision_reason_code == "broker_confirmation_ambiguous"
+    assert execution.status == ExecutionStatus.NEEDS_MANUAL_REVIEW.value
+    assert execution.requires_manual_review is True
+    assert execution.error_code == error_code
+    assert execution.broker_reference == f"entry-{broker_status.value.lower()}"
+    assert execution.client_request_id == broker.placed_orders[0].client_request_id
+    assert execution.details["broker_result"]["status"] == broker_status.value
+    assert (
+        execution.details["broker_result"]["client_request_id"]
+        == broker.placed_orders[0].client_request_id
+    )
+
+
 def test_close_failure_keeps_position_open_and_flags_manual_review(
     session, broker, fixed_now
 ):

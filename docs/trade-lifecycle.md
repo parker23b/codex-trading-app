@@ -50,7 +50,7 @@ Reconciliation in [../backend/app/services/reconciliation_service.py](../backend
 - unmatched broker positions create adopted lifecycle records such as `EXTERNAL_POSITION_ADOPTED`
 - broker-missing local positions create forced-close lifecycle records such as `FORCED_RECONCILIATION_CLOSE`
 
-Current audit status still tracks a blocker for stopped-runtime startup recovery with broker-confirmed open risk. Until that is fixed, recovery coverage is incomplete.
+Stopped-runtime startup recovery now has backend regression coverage proving broker-confirmed open risk receives explicit `RECOVERED_POSITION_ATTACHED` intent/position evidence before the runtime remains paused.
 
 ## Target Invariants
 

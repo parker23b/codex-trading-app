@@ -186,7 +186,29 @@ class IGBroker(Broker):
         if not deal_reference:
             raise IGBrokerError("IG order placement did not return a dealReference.")
 
-        confirmation = self._wait_for_deal_confirmation(deal_reference)
+        try:
+            confirmation = self._wait_for_deal_confirmation(deal_reference)
+        except IGBrokerError as exc:
+            logger.warning(
+                "IG order confirmation could not be verified",
+                extra={
+                    "instrument": order.instrument,
+                    "strategy": order.strategy_name,
+                    "deal_reference": deal_reference,
+                    "client_request_id": order.client_request_id,
+                    "error": str(exc),
+                },
+            )
+            return self._confirmation_failure_result(
+                broker_reference=deal_reference,
+                instrument=order.instrument,
+                direction=order.direction,
+                size=order.size,
+                price=order.price,
+                submitted_at=submitted_at,
+                client_request_id=order.client_request_id,
+                error=exc,
+            )
         deal_id = confirmation.get("dealId")
         executed_price = float(confirmation.get("level") or order.price)
         executed_at = self._parse_ig_timestamp(confirmation.get("date")) or now_utc()
@@ -323,7 +345,29 @@ class IGBroker(Broker):
                 "IG close-position request did not return a dealReference."
             )
 
-        confirmation = self._wait_for_deal_confirmation(deal_reference)
+        try:
+            confirmation = self._wait_for_deal_confirmation(deal_reference)
+        except IGBrokerError as exc:
+            logger.warning(
+                "IG close confirmation could not be verified",
+                extra={
+                    "instrument": open_position.instrument,
+                    "broker_reference": open_position.broker_reference,
+                    "deal_reference": deal_reference,
+                    "client_request_id": client_request_id,
+                    "error": str(exc),
+                },
+            )
+            return self._confirmation_failure_result(
+                broker_reference=deal_reference,
+                instrument=open_position.instrument,
+                direction=opposite_direction,
+                size=open_position.size,
+                price=open_position.open_price,
+                submitted_at=submitted_at,
+                client_request_id=client_request_id,
+                error=exc,
+            )
         executed_price = float(confirmation.get("level") or open_position.open_price)
         executed_at = self._parse_ig_timestamp(confirmation.get("date")) or now_utc()
         closed_deal_id = confirmation.get("dealId") or deal_reference
@@ -923,6 +967,79 @@ class IGBroker(Broker):
             time.sleep(0.4)
         raise IGBrokerError(
             f"Timed out waiting for IG confirmation for deal {deal_reference}: {last_response}"
+        )
+
+    @staticmethod
+    def _confirmation_failure_status(
+        error: Exception,
+    ) -> tuple[BrokerOrderStatus, str, bool, str]:
+        message = str(error).lower()
+        if "rejected deal" in message or "deal rejected" in message:
+            return (
+                BrokerOrderStatus.REJECTED,
+                "BROKER_ORDER_REJECTED",
+                False,
+                "IG rejected the broker action.",
+            )
+        if (
+            "status 429" in message
+            or "rate limit" in message
+            or "rate-limit" in message
+        ):
+            return (
+                BrokerOrderStatus.RATE_LIMITED,
+                "BROKER_CONFIRMATION_RATE_LIMITED",
+                True,
+                "IG acknowledged submission, but confirmation lookup was rate limited.",
+            )
+        if "timed out" in message or "timeout" in message:
+            return (
+                BrokerOrderStatus.TIMED_OUT,
+                "BROKER_CONFIRMATION_TIMEOUT",
+                True,
+                "IG acknowledged submission, but confirmation lookup timed out.",
+            )
+        return (
+            BrokerOrderStatus.AMBIGUOUS,
+            "BROKER_CONFIRMATION_AMBIGUOUS",
+            True,
+            "IG acknowledged submission, but final confirmation could not be verified.",
+        )
+
+    def _confirmation_failure_result(
+        self,
+        *,
+        broker_reference: str,
+        instrument: str,
+        direction: OrderDirection,
+        size: float,
+        price: float,
+        submitted_at: datetime,
+        client_request_id: str | None,
+        error: Exception,
+    ) -> BrokerOrderResult:
+        status, error_code, requires_manual_review, reason = (
+            self._confirmation_failure_status(error)
+        )
+        acknowledged_at = now_utc()
+        return BrokerOrderResult(
+            broker_reference=broker_reference,
+            instrument=instrument,
+            direction=direction,
+            size=size,
+            price=price,
+            executed_at=acknowledged_at,
+            client_request_id=client_request_id,
+            status=status,
+            requested_size=size,
+            filled_size=None,
+            average_fill_price=None,
+            submitted_at=submitted_at,
+            acknowledged_at=acknowledged_at,
+            reason=reason,
+            error_code=error_code,
+            error_message=str(error),
+            requires_manual_review=requires_manual_review,
         )
 
     def _parse_market_details(

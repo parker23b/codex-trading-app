@@ -21,9 +21,6 @@ Safe local use means:
 The blocking themes are:
 
 - broker acknowledgement, timeout, or confirmation ambiguity can be represented too strongly as exact success or failure
-- failed or ambiguous close paths can strand still-open risk behind a terminal intent state
-- stopped-runtime recovery can skip adoption evidence for broker-confirmed open exposure
-- unknown broker market status can fail open in some paths
 - `/testing/reset-history` and other mutation routes do not yet have a production-grade backend auth boundary
 - reload or multi-worker startup can duplicate runtime, market-data, streaming, or strategy-processing loops
 - route, frontend, broker-fake, domain-event, dependency, database, and observability evidence is still incomplete for P0/P1 behaviour
@@ -36,8 +33,7 @@ The canonical list is in [audit-status.md](audit-status.md).
 - CORS is permissive for credentialed localhost origins.
 - `/testing/reset-history` is always registered and can delete trading, review, runtime, reconciliation, and domain-event history.
 - Broker acknowledgement, timeout, partial-fill, and confirmation ambiguity are not fully modeled as separate reconciliation/manual-review states.
-- Startup recovery can miss broker-confirmed open risk when persisted runtime mode is `STOPPED`.
-- Market-status handling and fake defaults still need stronger fail-closed coverage for unknown or unrecognized broker states.
+- Broker fake defaults still need stronger fail-closed coverage for live-like unsafe states.
 - Runtime, market-data, streaming, and strategy loops are guarded in-process, but not by a cross-process leader lock.
 - Database evolution currently relies on `create_all()` plus SQLite patch helpers rather than versioned migrations.
 - Python dependency locking and dependency-vulnerability gates are not yet production-grade.
@@ -48,9 +44,6 @@ The canonical list is in [audit-status.md](audit-status.md).
 Before live or demo broker dealing, the app needs at least:
 
 - explicit broker-neutral pending, timeout, and ambiguous execution states
-- close retry/recovery paths that preserve open-risk authority
-- startup recovery that records broker-confirmed open exposure even when persisted runtime state is stopped
-- fail-closed market-status behavior for missing or unknown broker states
 - backend authentication and production gating for mutation and test-only routes
 - cross-process runtime leadership or durable leases
 - regression tests for the fixed P0/P1 behaviours

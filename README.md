@@ -154,7 +154,7 @@ The short version:
 
 - backend mutation and broker-adjacent routes do not yet have a production-grade auth boundary
 - `/testing/reset-history` is destructive and not yet production-gated
-- broker confirmation ambiguity, failed closes, stopped-runtime recovery, and unknown market status still have P0 findings
+- broker confirmation ambiguity, mutation/test-route auth gaps, and duplicate runtime-loop risks still have P0 findings
 - runtime, market-data, streaming, and strategy loops are not protected by cross-process leader locks
 - route, frontend, full-stack, broker-fake, domain-event, migration, dependency, and observability evidence remains incomplete
 

@@ -193,25 +193,6 @@ class RuntimeRecoveryService:
                 )
                 continue
 
-            if runtime.runtime_mode == "STOPPED":
-                self.runtime_state_service.mark_recovery_state(
-                    strategy_name=runtime.strategy_name,
-                    instrument=runtime.instrument,
-                    recovery_state="PAUSED",
-                    recovery_reason="Persisted runtime mode is STOPPED.",
-                    status="STOPPED",
-                    runtime_mode="STOPPED",
-                    current_position_broker_reference=runtime.current_position_broker_reference,
-                )
-                outcomes.append(
-                    {
-                        "strategy": runtime.strategy_name,
-                        "instrument": runtime.instrument,
-                        "outcome": "stopped",
-                    }
-                )
-                continue
-
             current_position = local_position
             if current_position is None and remote_position is not None:
                 current_position = self._position_from_remote(
@@ -252,6 +233,29 @@ class RuntimeRecoveryService:
                     filled_size=current_position.size,
                     opened_at=current_position.open_time,
                 )
+
+            if runtime.runtime_mode == "STOPPED":
+                self.runtime_state_service.mark_recovery_state(
+                    strategy_name=runtime.strategy_name,
+                    instrument=runtime.instrument,
+                    recovery_state="PAUSED",
+                    recovery_reason="Persisted runtime mode is STOPPED.",
+                    status="STOPPED",
+                    runtime_mode="STOPPED",
+                    current_position_broker_reference=(
+                        current_position.broker_reference
+                        if current_position is not None
+                        else runtime.current_position_broker_reference
+                    ),
+                )
+                outcomes.append(
+                    {
+                        "strategy": runtime.strategy_name,
+                        "instrument": runtime.instrument,
+                        "outcome": "stopped",
+                    }
+                )
+                continue
 
             engine = runtime_manager.start(
                 runtime.strategy_name,
