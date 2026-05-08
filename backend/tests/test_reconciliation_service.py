@@ -85,6 +85,65 @@ def test_reconciliation_corrects_local_position_from_broker_truth(
     )
 
 
+def test_audit_broker_002_reconciliation_uses_strict_fake_position_outcome(
+    session, broker, fixed_now
+):
+    broker.require_explicit_positions = True
+    trade_service = TradeService(session)
+    engine = runtime_manager.start(
+        strategy_name="smoke_test_hold",
+        instrument="CS.D.EURUSD.MINI.IP",
+        current_position=Position(
+            strategy_name="smoke_test_hold",
+            broker_reference="broker-strict-pos-1",
+            instrument="CS.D.EURUSD.MINI.IP",
+            direction="BUY",
+            size=0.2,
+            open_price=100.0,
+            open_time=fixed_now - timedelta(minutes=10),
+            current_price=100.0,
+            unrealized_pnl=0.0,
+            account_type="DEMO",
+            is_open=True,
+            broker_sync_status="PENDING",
+        ),
+    )
+    local_position = trade_service.record_broker_position(engine.current_position)
+    RuntimeStateService(session).sync_engine_state(
+        strategy_name="smoke_test_hold",
+        instrument="CS.D.EURUSD.MINI.IP",
+        status="RUNNING",
+        recovery_state="RUNNING",
+        current_position=local_position,
+    )
+    broker.position_outcomes.append(
+        [
+            make_broker_position(
+                broker_reference="broker-strict-pos-1",
+                instrument="CS.D.EURUSD.MINI.IP",
+                direction=OrderDirection.BUY,
+                size=0.5,
+                open_price=101.5,
+                opened_at=fixed_now - timedelta(minutes=10),
+            )
+        ]
+    )
+
+    reconciled_positions = ReconciliationService(
+        trade_service
+    ).reconcile_open_positions()
+
+    assert broker.position_outcomes == []
+    assert len(reconciled_positions) == 1
+    assert reconciled_positions[0].size == 0.5
+    assert reconciled_positions[0].open_price == 101.5
+    assert reconciled_positions[0].broker_sync_status == "CONFIRMED"
+    assert (
+        trade_service.list_reconciliation_events(limit=10)[0].event_type
+        == "POSITION_SYNCED_FROM_BROKER"
+    )
+
+
 def test_reconciliation_adopts_unmatched_broker_position(session, broker, fixed_now):
     trade_service = TradeService(session)
     runtime_manager.start(

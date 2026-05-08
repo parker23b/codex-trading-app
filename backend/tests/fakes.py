@@ -23,10 +23,25 @@ from app.core.broker import (
 class FakeBroker(Broker):
     _account_type: AccountType = AccountType.DEMO
     account_summary: BrokerAccountSummary | None = None
+    account_summary_outcomes: list[BrokerAccountSummary | Exception] = field(
+        default_factory=list
+    )
     remote_positions: list[BrokerPosition] = field(default_factory=list)
+    position_outcomes: list[list[BrokerPosition] | Exception] = field(
+        default_factory=list
+    )
     market_details_by_instrument: dict[str, BrokerMarketDetails] = field(
         default_factory=dict
     )
+    market_details_outcomes: dict[str, list[BrokerMarketDetails | Exception]] = field(
+        default_factory=dict
+    )
+    risk_sizing_quote_outcomes: dict[str, list[BrokerRiskSizingQuote | Exception]] = (
+        field(default_factory=dict)
+    )
+    normalize_order_size_outcomes: dict[
+        str, list[BrokerSizeNormalization | Exception]
+    ] = field(default_factory=dict)
     place_order_outcomes: list[BrokerOrderResult | Exception] = field(
         default_factory=list
     )
@@ -36,6 +51,11 @@ class FakeBroker(Broker):
     placed_orders: list[OrderRequest] = field(default_factory=list)
     close_requests: list[dict[str, str | None]] = field(default_factory=list)
     latest_prices: dict[str, float] = field(default_factory=dict)
+    require_explicit_account_summary: bool = False
+    require_explicit_market_details: bool = False
+    require_explicit_risk_sizing_quote: bool = False
+    require_explicit_size_normalization: bool = False
+    require_explicit_positions: bool = False
 
     @property
     def account_type(self) -> AccountType:
@@ -80,6 +100,13 @@ class FakeBroker(Broker):
         )
 
     def get_positions(self) -> list[BrokerPosition]:
+        if self.position_outcomes:
+            outcome = self.position_outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return list(outcome)
+        if self.require_explicit_positions and not self.remote_positions:
+            raise AssertionError("No fake positions outcome was configured.")
         return list(self.remote_positions)
 
     @staticmethod
@@ -103,8 +130,15 @@ class FakeBroker(Broker):
         return self.latest_prices.get(instrument, 100.0)
 
     def get_account_summary(self) -> BrokerAccountSummary:
+        if self.account_summary_outcomes:
+            outcome = self.account_summary_outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
         if self.account_summary is not None:
             return self.account_summary
+        if self.require_explicit_account_summary:
+            raise AssertionError("No fake account summary outcome was configured.")
         return BrokerAccountSummary(
             account_id="fake-account",
             balance=100_000.0,
@@ -115,8 +149,18 @@ class FakeBroker(Broker):
         )
 
     def get_market_details(self, instrument: str) -> BrokerMarketDetails:
+        outcomes = self.market_details_outcomes.get(instrument)
+        if outcomes:
+            outcome = outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
         if instrument in self.market_details_by_instrument:
             return self.market_details_by_instrument[instrument]
+        if self.require_explicit_market_details:
+            raise AssertionError(
+                f"No fake market details outcome was configured for {instrument}."
+            )
         price = self.get_latest_price(instrument)
         return BrokerMarketDetails(
             instrument=instrument,
@@ -147,6 +191,16 @@ class FakeBroker(Broker):
         stop_loss_price: float | None = None,
         fallback_stop_distance: float | None = None,
     ) -> BrokerRiskSizingQuote:
+        outcomes = self.risk_sizing_quote_outcomes.get(instrument)
+        if outcomes:
+            outcome = outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+        if self.require_explicit_risk_sizing_quote:
+            raise AssertionError(
+                f"No fake sizing quote outcome was configured for {instrument}."
+            )
         details = self.get_market_details(instrument)
         sizing_profile = (
             details.metadata.get("sizing_profile")
@@ -154,10 +208,7 @@ class FakeBroker(Broker):
             else None
         )
         if not isinstance(sizing_profile, dict):
-            sizing_profile = {
-                "mode": BrokerSizingMode.APPROXIMATE_PRICE_DELTA.value,
-                "contract_multiplier": 1.0,
-            }
+            sizing_profile = self._sizing_profile_from_market_details(details)
         stop_distance, sizing_method = self._effective_stop_distance(
             entry_price=entry_price,
             stop_loss_price=stop_loss_price,
@@ -254,9 +305,36 @@ class FakeBroker(Broker):
             details={"source": "fake_broker", "sizing_profile": sizing_profile},
         )
 
+    @staticmethod
+    def _sizing_profile_from_market_details(
+        details: BrokerMarketDetails,
+    ) -> dict[str, object]:
+        if isinstance(details.metadata, dict):
+            ig_sizing = details.metadata.get("ig_sizing")
+            if isinstance(ig_sizing, dict):
+                return {
+                    "mode": BrokerSizingMode.EXACT_POINT_VALUE.value,
+                    "price_increment": ig_sizing.get("price_increment"),
+                    "value_per_increment": ig_sizing.get("value_per_increment"),
+                }
+        return {
+            "mode": BrokerSizingMode.APPROXIMATE_PRICE_DELTA.value,
+            "contract_multiplier": 1.0,
+        }
+
     def normalize_order_size(
         self, instrument: str, requested_size: float
     ) -> BrokerSizeNormalization:
+        outcomes = self.normalize_order_size_outcomes.get(instrument)
+        if outcomes:
+            outcome = outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+        if self.require_explicit_size_normalization:
+            raise AssertionError(
+                f"No fake size normalization outcome was configured for {instrument}."
+            )
         details = self.get_market_details(instrument)
         notes: list[str] = []
         normalized_size = max(float(requested_size), 0.0)
