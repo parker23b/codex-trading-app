@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 
 from app.core.broker import (
@@ -48,7 +48,11 @@ class FakeBroker(Broker):
         outcome = self.place_order_outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
-        return outcome
+        return self._correlate_order_result(
+            outcome,
+            client_request_id=order.client_request_id,
+            requested_size=order.size,
+        )
 
     def close_position(
         self,
@@ -69,10 +73,31 @@ class FakeBroker(Broker):
         outcome = self.close_position_outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
-        return outcome
+        return self._correlate_order_result(
+            outcome,
+            client_request_id=client_request_id,
+            requested_size=outcome.size,
+        )
 
     def get_positions(self) -> list[BrokerPosition]:
         return list(self.remote_positions)
+
+    @staticmethod
+    def _correlate_order_result(
+        result: BrokerOrderResult,
+        *,
+        client_request_id: str | None,
+        requested_size: float,
+    ) -> BrokerOrderResult:
+        return replace(
+            result,
+            client_request_id=result.client_request_id or client_request_id,
+            requested_size=(
+                result.requested_size
+                if result.requested_size is not None
+                else requested_size
+            ),
+        )
 
     def get_latest_price(self, instrument: str) -> float:
         return self.latest_prices.get(instrument, 100.0)
