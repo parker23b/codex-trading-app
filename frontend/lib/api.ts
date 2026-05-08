@@ -698,6 +698,9 @@ export async function resetTestHistory(): Promise<{
   status: string;
   summary: Record<string, number>;
 }> {
+  if (process.env.NEXT_PUBLIC_TESTING_CONTROLS_ENABLED !== "true") {
+    throw new Error("Test history reset is disabled by frontend configuration.");
+  }
   return request<{ status: string; summary: Record<string, number> }>("/testing/reset-history", {
     method: "POST",
   });

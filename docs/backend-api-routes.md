@@ -1,6 +1,7 @@
 # Backend API route reference
 
 This document describes the FastAPI routes currently registered by `backend/app/api/router.py`.
+Routes under `/testing/*` are conditional and are only registered when `TESTING_ROUTES_ENABLED=true`.
 It is an implementation reference, not a requirements spec. Requirements live in `docs/spec/`,
 and audit findings live in `docs/audit-status.md`.
 
@@ -27,7 +28,7 @@ audit notes from the backend API audit.
 | `AUDIT-API-001` | `/control-plane/summary`, `/control-plane/operator-state`, `/control-plane/strategies/{strategy_name}`, `/strategies` | Passive-looking GET routes can seed operator/governance defaults. |
 | `AUDIT-API-002` | `/coverage/summary`, `/strategy-watchlist`, `/market-data/feed-state` | GET routes can sync watchlist rows and streaming metadata. |
 | `AUDIT-API-003` | `/reviews/operator-summary`, `/reviews/daily`, `/reviews/strategies/{strategy_name}`, `/reviews/runtime-health`, `/reviews/trades/{trade_id}/postmortem` | Review GET routes persist `GeneratedReviewRecord` rows by default. |
-| `AUDIT-API-004` | `/testing/reset-history` | Test reset route is always registered and deletes trading/audit history. |
+| `AUDIT-API-004` | `/testing/reset-history` | Verified fixed: test reset route is registered only when `TESTING_ROUTES_ENABLED=true`; frontend control/API helper require `NEXT_PUBLIC_TESTING_CONTROLS_ENABLED=true`. |
 | `AUDIT-API-005` | `/dashboard` | Dashboard performs a live broker account read despite passive-style wording. |
 | `AUDIT-API-006` | Multiple frontend-used routes | Several operator-critical routes still return raw dict/list shapes rather than modeled schemas. |
 | `AUDIT-API-007` | `/aimee/snapshot` | AIMEE passive snapshot indirectly performs a broker account read. |
@@ -96,7 +97,7 @@ audit notes from the backend API audit.
 | POST | `/reviews/questions` | `app.api.routes.ai_reviewer.answer_operational_question` | `MUTATION` | `OperationalQuestionReviewResponse` | `askOperationalQuestion` | Persists explicit advisory artifact. |
 | GET | `/reviews/history` | `app.api.routes.ai_reviewer.list_review_history` | `PASSIVE_READ` | `list[ReviewRecordSummary]` | `getReviewHistory` | Reads persisted review history. |
 | GET | `/reviews/history/{review_id}` | `app.api.routes.ai_reviewer.get_review_record` | `PASSIVE_READ` | `PersistedReviewRecord` | None found | Reads one persisted review record. |
-| POST | `/testing/reset-history` | `app.api.routes.testing.reset_history` | `TEST_ONLY_MUTATION` | `ResetHistoryResponse` | `resetTestHistory` | Deletes trading, reconciliation, domain-event, runtime, and review history. Must be gated. See `AUDIT-API-004`. |
+| POST | `/testing/reset-history` | `app.api.routes.testing.reset_history` | `TEST_ONLY_MUTATION` | `ResetHistoryResponse` | `resetTestHistory` when `NEXT_PUBLIC_TESTING_CONTROLS_ENABLED=true` | Conditional route: registered only when `TESTING_ROUTES_ENABLED=true`. Deletes trading, reconciliation, domain-event, runtime, and review history when enabled. See `AUDIT-API-004`. |
 
 ## Recommended route documentation tests
 
@@ -105,4 +106,4 @@ audit notes from the backend API audit.
 - Add explicit side-effect tests for `ACTIVE_READ_REFRESH` routes.
 - Add broker-call provenance tests for `BROKER_READ` routes.
 - Add response-schema contract tests for frontend-consumed raw dict/list routes.
-- Add production-gating tests for `TEST_ONLY_MUTATION` routes.
+- Maintain production-gating tests for `TEST_ONLY_MUTATION` routes.

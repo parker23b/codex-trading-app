@@ -35,6 +35,7 @@ const EVENT_TYPE_OPTIONS = [
 
 const CATEGORY_OPTIONS = ["strategy", "risk", "execution", "reconciliation", "operator", "health"] as const;
 const SEVERITY_OPTIONS = ["info", "warning", "error"] as const;
+const TESTING_CONTROLS_ENABLED = process.env.NEXT_PUBLIC_TESTING_CONTROLS_ENABLED === "true";
 
 type EventsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -134,9 +135,11 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
             Errors
           </Link>
         </div>
-        <div className="toolbar-group">
-          <ResetHistoryButton />
-        </div>
+        {TESTING_CONTROLS_ENABLED ? (
+          <div className="toolbar-group">
+            <ResetHistoryButton />
+          </div>
+        ) : null}
       </StickyToolbar>
 
       <Panel title="Filters" priority="passive" tone="inactive" compact>

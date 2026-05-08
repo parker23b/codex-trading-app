@@ -114,7 +114,7 @@ This inventory was discovered from `backend/app/api/router.py` and `backend/app/
 | POST | `/reviews/questions` | `routes/ai_reviewer.py:answer_operational_question` | `MUTATION` | Persists requested advisory artifact | AIMEE/reviewer | Pydantic model | High |
 | GET | `/reviews/history` | `routes/ai_reviewer.py:list_review_history` | `PASSIVE_READ` | Review history read | AIMEE/reviewer | Pydantic list model | High |
 | GET | `/reviews/history/{review_id}` | `routes/ai_reviewer.py:get_review_record` | `PASSIVE_READ` | Review record read | Reviewer | Pydantic model | High |
-| POST | `/testing/reset-history` | `routes/testing.py:reset_history` | `TEST_ONLY_MUTATION` | Testing reset; environment gating needs confirmation | Events testing button | Pydantic model | High |
+| POST | `/testing/reset-history` | `routes/testing.py:reset_history` | `TEST_ONLY_MUTATION` | Registered only when `TESTING_ROUTES_ENABLED=true`; clears persisted test history when enabled | Events testing button when `NEXT_PUBLIC_TESTING_CONTROLS_ENABLED=true` | Pydantic model | High |
 
 ## Write-on-read exceptions and redesign candidates
 
@@ -161,7 +161,7 @@ Frontend-consumed route fields must be treated as part of the API contract.
 
 Routes under `/testing/*` are mutation-capable and must be treated as `TEST_ONLY_MUTATION`.
 
-They must be unavailable in production-like operation unless explicitly protected by environment configuration, authentication, or other safeguards. Test-only route use in frontend development tools must not normalize unsafe reset/destructive actions as operator features.
+They must be unavailable in production-like operation unless explicitly protected by environment configuration, authentication, or other safeguards. The current `/testing/reset-history` route is not registered unless `TESTING_ROUTES_ENABLED=true`, and the frontend reset control/API helper are gated by `NEXT_PUBLIC_TESTING_CONTROLS_ENABLED=true`. Test-only route use in frontend development tools must not normalize unsafe reset/destructive actions as operator features.
 
 ## Known unknowns
 
@@ -172,7 +172,7 @@ They must be unavailable in production-like operation unless explicitly protecte
 - `/reviews/*` GET persistence may need API redesign to separate passive preview from explicit persistence.
 - `/allocation/alerts?refresh=true` may need to move to POST or a clearly mutation-classified endpoint.
 - `GET /allocation/alerts` appears to default to `refresh=True` in code and needs contract/design confirmation.
-- Test-only routes need environment-gating confirmation.
+- Test-only route gating currently has router-registration regression evidence for `/testing/reset-history`; broader HTTP route harness evidence is still missing.
 - Many dict responses lack Pydantic response models.
 
 ## Required tests

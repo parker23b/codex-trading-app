@@ -107,6 +107,7 @@ class Settings(BaseSettings):
     ig_market_cache_stale_ttl_seconds: float = 300.0
     ig_verify_ssl: bool = True
     ig_ca_bundle_path: str | None = None
+    testing_routes_enabled: bool = True
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_ENV_FILE, case_sensitive=False, extra="ignore"
