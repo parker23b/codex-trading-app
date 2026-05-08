@@ -7,6 +7,7 @@ from app.models.operator_control import OperatorControlState
 from app.models.promotion_request import PromotionRequest
 from app.models.review import GeneratedReviewRecord
 from app.db.session import engine
+from app.models.runtime_leadership import RuntimeLease
 from app.models.strategy_deployment import StrategyDeployment
 from app.models.strategy_governance import StrategyFamilyGovernance
 from app.models.runtime import StrategyRuntimeState
@@ -28,6 +29,7 @@ def initialize_database() -> None:
         AllocationCycle,
         AllocationAlert,
         Position,
+        RuntimeLease,
         StrategyRuntimeState,
         ReconciliationEvent,
         Execution,
@@ -236,6 +238,11 @@ def initialize_database() -> None:
         "ix_allocationcycle_received_at_desc",
         "allocationcycle",
         "received_at DESC",
+    )
+    _ensure_index(
+        "ix_runtimelease_owner_expires",
+        "runtimelease",
+        "owner_id, expires_at DESC",
     )
 
 

@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     max_spread_pips: float = 2.0
     market_status_cache_ttl_ms: float = 250.0
     system_health_heartbeat_interval_seconds: float = 5.0
+    runtime_leader_lease_ttl_seconds: float = 15.0
     runtime_max_open_positions: int = 6
     runtime_max_positions_per_strategy: int = 3
     runtime_max_open_risk_percent: float = 4.0
@@ -259,6 +260,7 @@ class Settings(BaseSettings):
         "max_spread_pips",
         "market_status_cache_ttl_ms",
         "system_health_heartbeat_interval_seconds",
+        "runtime_leader_lease_ttl_seconds",
         "ig_streaming_promotion_score_threshold",
         "ig_streaming_eviction_score_threshold",
         "tier2_promotion_score_threshold",

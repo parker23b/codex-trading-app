@@ -1,8 +1,12 @@
 import asyncio
 import contextlib
 from contextlib import asynccontextmanager
+from datetime import timedelta
 import logging
+import os
+import socket
 from time import perf_counter
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +23,7 @@ from app.services.domain_event_service import domain_event_service
 from app.services.health_service import get_health_service
 from app.services.ig_streaming_service import get_ig_streaming_service
 from app.services.market_data_service import MarketDataService
+from app.services.runtime_leadership_service import RuntimeLeadershipService
 from app.services.runtime_recovery_service import RuntimeRecoveryService
 
 settings = get_settings()
@@ -41,38 +46,98 @@ SLOW_REQUEST_THRESHOLD_MS = 750.0
 async def lifespan(_: FastAPI):
     logger.info("Starting application")
     initialize_database()
+    leader_owner_id = _make_runtime_leader_owner_id()
+    leader_ttl = timedelta(seconds=settings.runtime_leader_lease_ttl_seconds)
+    with Session(engine) as session:
+        leadership = RuntimeLeadershipService(session, owner_id=leader_owner_id)
+        acquisition = leadership.acquire(ttl=leader_ttl)
+    if not acquisition.acquired:
+        logger.warning(
+            "Runtime background leadership lease is already held; skipping autonomous loops",
+            extra={
+                "owner_id": leader_owner_id,
+                "current_owner_id": acquisition.current_owner_id,
+                "lease_expires_at": acquisition.expires_at,
+                "event_category": "runtime",
+                "event_type": "runtime.leader_not_acquired",
+                "event_title": "Runtime loops skipped because another worker is leader",
+            },
+        )
+        yield
+        return
+
     with Session(engine) as session:
         RuntimeRecoveryService(session).recover()
     streaming_service = get_ig_streaming_service()
     get_health_service().heartbeat()
     streaming_enabled = streaming_service.is_enabled()
+    managed_tasks: list[asyncio.Task[None]] = []
     market_data_task = asyncio.create_task(
         MarketDataService(poll_prices=not streaming_enabled).run()
     )
-    heartbeat_task = asyncio.create_task(_health_heartbeat_loop())
+    managed_tasks.append(market_data_task)
     streaming_task: asyncio.Task[None] | None = None
     if streaming_enabled:
         streaming_task = asyncio.create_task(streaming_service.run())
-    yield
-    heartbeat_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await heartbeat_task
-    if streaming_task is not None:
-        streaming_task.cancel()
+        managed_tasks.append(streaming_task)
+    heartbeat_task = asyncio.create_task(
+        _runtime_leader_heartbeat_loop(
+            owner_id=leader_owner_id,
+            ttl=leader_ttl,
+            managed_tasks=managed_tasks,
+        )
+    )
+    try:
+        yield
+    finally:
+        heartbeat_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await streaming_task
-    market_data_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await market_data_task
-    logger.info("Shutting down application")
+            await heartbeat_task
+        for task in managed_tasks:
+            task.cancel()
+        for task in managed_tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        with Session(engine) as session:
+            RuntimeLeadershipService(session, owner_id=leader_owner_id).release()
+        logger.info("Shutting down application")
 
 
-async def _health_heartbeat_loop() -> None:
-    interval = get_settings().system_health_heartbeat_interval_seconds
+async def _runtime_leader_heartbeat_loop(
+    *,
+    owner_id: str,
+    ttl: timedelta,
+    managed_tasks: list[asyncio.Task[None]],
+) -> None:
+    interval = min(
+        get_settings().system_health_heartbeat_interval_seconds,
+        max(ttl.total_seconds() / 3, 1.0),
+    )
     health_service = get_health_service()
     while True:
+        with Session(engine) as session:
+            renewed = RuntimeLeadershipService(session, owner_id=owner_id).renew(
+                ttl=ttl
+            )
+        if not renewed:
+            logger.error(
+                "Runtime background leadership lease was lost; cancelling autonomous loops",
+                extra={
+                    "owner_id": owner_id,
+                    "event_category": "runtime",
+                    "event_type": "runtime.leader_lost",
+                    "event_title": "Runtime loops stopped because leadership lease was lost",
+                },
+            )
+            for task in managed_tasks:
+                task.cancel()
+            return
         health_service.heartbeat()
         await asyncio.sleep(interval)
+
+
+def _make_runtime_leader_owner_id() -> str:
+    return f"{socket.gethostname()}:{os.getpid()}:{uuid4()}"
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
