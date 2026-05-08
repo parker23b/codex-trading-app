@@ -356,8 +356,9 @@ def test_execute_entry_signal_reuses_broker_normalization_for_revalidation(
     )
     market_status_service = get_market_status_service()
     original_get_status = market_status_service.get_status
-    market_status_service.get_status = lambda instrument, *, broker=None, now=None: (
-        MarketStatus(
+
+    def always_ok_status(instrument, *, broker=None, now=None, force_refresh=False):
+        return MarketStatus(
             instrument=instrument,
             is_ok=True,
             market_open=True,
@@ -370,7 +371,8 @@ def test_execute_entry_signal_reuses_broker_normalization_for_revalidation(
             spread=0.1,
             reason=None,
         )
-    )
+
+    market_status_service.get_status = always_ok_status
 
     try:
         with pytest.raises(ValueError, match="reallocation required"):
@@ -564,6 +566,116 @@ def test_audit_risk_002_execution_revalidates_sizing_quote_before_submission(
     assert execution.details["execution_revalidation"]["layer"] == "sizing_quote"
     assert (
         intent.details["execution_revalidation"]["reason_code"] == "unsupported_sizing"
+    )
+
+
+def test_audit_risk_002_execution_revalidates_market_status_without_cache(
+    session, broker, fixed_now
+):
+    trade_service = TradeService(session)
+    runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
+    broker.market_details_by_instrument[INSTRUMENT] = BrokerMarketDetails(
+        instrument=INSTRUMENT,
+        name=INSTRUMENT,
+        bid=100.0,
+        offer=100.1,
+        high=101.0,
+        low=99.0,
+        percentage_change=0.0,
+        net_change=0.0,
+        market_status="TRADEABLE",
+        update_time=fixed_now.isoformat(),
+        tradable=True,
+    )
+    cached_status = get_market_status_service().get_status(
+        INSTRUMENT, broker=broker, now=fixed_now
+    )
+    assert cached_status.is_ok is True
+
+    broker.market_details_by_instrument[INSTRUMENT] = BrokerMarketDetails(
+        instrument=INSTRUMENT,
+        name=INSTRUMENT,
+        bid=100.0,
+        offer=100.1,
+        high=101.0,
+        low=99.0,
+        percentage_change=0.0,
+        net_change=0.0,
+        market_status="CLOSED",
+        update_time=fixed_now.isoformat(),
+        tradable=True,
+    )
+    broker.place_order_outcomes.append(
+        make_order_result(
+            broker_reference="entry-stale-market-cache",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.0,
+            executed_at=fixed_now + timedelta(seconds=1),
+        )
+    )
+    intent = trade_service.create_trade_intent(
+        TradeIntent(
+            strategy_name=STRATEGY,
+            instrument=INSTRUMENT,
+            direction="BUY",
+            state=TradeIntentState.APPROVED.value,
+            signal_time=fixed_now,
+            proposed_size=0.2,
+            allocated_size=0.2,
+            proposed_risk_percent=0.1,
+            allocated_risk_percent=0.1,
+            estimated_risk_amount=100.0,
+        )
+    )
+    execution = trade_service.create_execution(
+        Execution(
+            trade_intent_id=intent.id,
+            strategy_name=STRATEGY,
+            instrument=INSTRUMENT,
+            phase=ExecutionPhase.ENTRY.value,
+            status=ExecutionStatus.SUBMISSION_PENDING.value,
+            client_request_id="ent-market-cache-drift",
+            signal_time=fixed_now,
+            requested_size=0.2,
+            requested_price=100.0,
+        )
+    )
+    engine = runtime_manager.start(strategy_name=STRATEGY, instrument=INSTRUMENT)
+
+    with pytest.raises(RuntimeError, match="closed"):
+        StrategyService._execute_entry_signal(
+            engine=engine,
+            signal=EntrySignal(
+                kind=SignalKind.ENTRY,
+                strategy_name=STRATEGY,
+                instrument=INSTRUMENT,
+                observed_price=100.0,
+                signal_at=fixed_now,
+                direction=OrderDirection.BUY,
+                size=0.2,
+                risk_percent=0.1,
+                bid=99.9,
+                ask=100.1,
+                market_status="TRADEABLE",
+                tradable=True,
+            ),
+            intent=intent,
+            trade_service=trade_service,
+            execution=execution,
+        )
+
+    assert broker.placed_orders == []
+    assert execution.status == ExecutionStatus.FAILED.value
+    assert intent.state == TradeIntentState.FAILED.value
+    assert execution.details["execution_revalidation"]["layer"] == "market_status"
+    assert (
+        execution.details["execution_revalidation"]["market_status"]["market_open"]
+        is False
+    )
+    assert (
+        intent.details["allocation_outcome"]["stage"] == "execution_revalidation_failed"
     )
 
 
@@ -939,8 +1051,12 @@ def test_entry_is_blocked_when_market_quote_is_stale(session, broker, fixed_now)
     market_status_service = get_market_status_service()
     original_get_status = market_status_service.get_status
 
-    def stale_get_status(instrument: str, *, broker=None, now=None):
-        status = original_get_status(instrument, broker=broker, now=now)
+    def stale_get_status(
+        instrument: str, *, broker=None, now=None, force_refresh=False
+    ):
+        status = original_get_status(
+            instrument, broker=broker, now=now, force_refresh=force_refresh
+        )
         return status.model_copy(
             update={
                 "is_ok": False,
@@ -1107,9 +1223,13 @@ def test_execution_rechecks_market_status_before_order_submission(
     original_get_status = market_status_service.get_status
     calls = {"count": 0}
 
-    def guarded_get_status(instrument: str, *, broker=None, now=None):
+    def guarded_get_status(
+        instrument: str, *, broker=None, now=None, force_refresh=False
+    ):
         calls["count"] += 1
-        status = original_get_status(instrument, broker=broker, now=now)
+        status = original_get_status(
+            instrument, broker=broker, now=now, force_refresh=force_refresh
+        )
         if calls["count"] >= 2:
             return status.model_copy(
                 update={

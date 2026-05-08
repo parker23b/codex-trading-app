@@ -2028,6 +2028,7 @@ class StrategyService:
             execution=execution,
             trade_service=trade_service,
             phase="entry_execution",
+            trade_intent=intent,
         )
         executable_size = intent.allocated_size or signal.size
         size_validation = engine.broker.normalize_order_size(
@@ -2808,11 +2809,13 @@ class StrategyService:
         execution: Execution,
         trade_service: TradeService,
         phase: str,
+        trade_intent: TradeIntent | None = None,
     ) -> MarketStatus:
         status = get_market_status_service().get_status(
             instrument,
             broker=engine.broker,
             now=execution.last_transition_at or execution.signal_time or utc_now(),
+            force_refresh=True,
         )
         if status.is_ok:
             return status
@@ -2829,6 +2832,20 @@ class StrategyService:
                 "client_request_id": execution.client_request_id,
             },
         )
+        if trade_intent is not None:
+            reason = f"Execution blocked by market status: {status.reason}"
+            StrategyService._fail_entry_execution_revalidation(
+                trade_service=trade_service,
+                execution=execution,
+                intent=trade_intent,
+                reason=reason,
+                reason_code="market_status_blocked",
+                details={
+                    "layer": "market_status",
+                    "market_status": status.model_dump(mode="json"),
+                },
+            )
+            raise RuntimeError(status.reason or "Execution blocked by market status.")
         trade_service.transition_execution(
             execution,
             status=ExecutionStatus.FAILED,

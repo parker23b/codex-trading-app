@@ -63,11 +63,16 @@ class MarketStatusService:
         *,
         broker: Broker | None = None,
         now: datetime | None = None,
+        force_refresh: bool = False,
     ) -> MarketStatus:
         cached = self._cache.get(instrument)
         now_monotonic = monotonic()
         ttl_seconds = self.settings.market_status_cache_ttl_ms / 1000
-        if cached is not None and now_monotonic - cached.created_at <= ttl_seconds:
+        if (
+            not force_refresh
+            and cached is not None
+            and now_monotonic - cached.created_at <= ttl_seconds
+        ):
             return cached.status
 
         active_broker = broker or get_broker()
