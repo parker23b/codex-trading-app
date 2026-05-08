@@ -680,7 +680,7 @@ def test_exposure_summary_separates_reserved_and_live_risk(session, broker, fixe
     assert any(bucket["name"] == "carry" for bucket in summary["by_family"])
 
 
-def test_partial_fill_is_marked_provisional_and_updates_exposure(
+def test_audit_risk_001_partial_fill_preserves_residual_reserved_and_provisional_live_risk(
     session, broker, fixed_now, monkeypatch
 ):
     _enable_live_operational_gate(monkeypatch)
@@ -747,8 +747,13 @@ def test_partial_fill_is_marked_provisional_and_updates_exposure(
         intent_view["allocation_outcome"]["fill_status"]
         == TradeIntentState.PARTIALLY_FILLED.value
     )
-    assert exposure["totals"]["reserved_risk_percent"] == 0.0
+    assert exposure["totals"]["reserved_risk_percent"] > 0.0
     assert exposure["totals"]["provisional_live_risk_percent"] > 0.0
+    assert any(
+        "partial_fill_residual" in bucket["risk_basis"]
+        for bucket in exposure["by_instrument"]
+        if bucket["name"] == INSTRUMENT
+    )
     assert any(alert["alert_type"] == "incomplete_fill_truth" for alert in alerts)
 
 

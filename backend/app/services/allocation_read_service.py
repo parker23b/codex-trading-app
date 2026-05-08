@@ -496,6 +496,7 @@ class AllocationReadService:
                 limit=1000, states=reserved_states
             )
             if intent.position_id is None
+            or self._partial_fill_residual_ratio(intent) > 0.0
         ]
         summary = {
             "totals": {
@@ -673,7 +674,7 @@ class AllocationReadService:
                 "currency_bucket_mode": "gross_proxy_plus_directional_split",
                 "directional_netting": "derived_from_pair_direction_and_currency_side",
                 "currency_directional_exactness": "exact_pair_direction_with_split_risk_attribution",
-                "reserved_risk_basis": "intent_submitted_or_fill_derived_or_estimated",
+                "reserved_risk_basis": "intent_submitted_or_fill_derived_or_estimated_or_partial_fill_residual",
                 "live_risk_basis": "position_entry_risk_amount_or_position_risk_percent",
             },
         }
@@ -984,6 +985,21 @@ class AllocationReadService:
 
     @staticmethod
     def _intent_risk(intent: TradeIntent) -> tuple[float, float, str]:
+        residual_ratio = AllocationReadService._partial_fill_residual_ratio(intent)
+        if residual_ratio > 0.0:
+            submitted_risk_amount = (
+                intent.submitted_risk_amount
+                if intent.submitted_risk_amount is not None
+                else intent.estimated_risk_amount
+            )
+            return (
+                float(
+                    intent.allocated_risk_percent or intent.proposed_risk_percent or 0.0
+                )
+                * residual_ratio,
+                float(submitted_risk_amount or 0.0) * residual_ratio,
+                "partial_fill_residual",
+            )
         if intent.fill_derived_risk_amount is not None:
             return (
                 float(
@@ -1005,6 +1021,19 @@ class AllocationReadService:
             float(intent.estimated_risk_amount or 0.0),
             "estimated_allocation",
         )
+
+    @staticmethod
+    def _partial_fill_residual_ratio(intent: TradeIntent) -> float:
+        if intent.state != "PARTIALLY_FILLED":
+            return 0.0
+        partial_fill = (intent.details or {}).get("partial_fill") or {}
+        if not isinstance(partial_fill, dict):
+            return 0.0
+        submitted_size = float(partial_fill.get("submitted_size") or 0.0)
+        residual_size = float(partial_fill.get("residual_size") or 0.0)
+        if submitted_size <= 0 or residual_size <= 0:
+            return 0.0
+        return min(max(residual_size / submitted_size, 0.0), 1.0)
 
     @classmethod
     def _add_exposure(

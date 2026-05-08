@@ -2487,7 +2487,12 @@ class StrategyService:
             family_name=intent.family_name,
             account_type=engine.broker.account_type.value,
             is_open=True,
-            risk_percent=intent.allocated_risk_percent or signal.risk_percent,
+            risk_percent=float(
+                fill_risk_tracking.get("fill_derived_risk_percent")
+                or intent.allocated_risk_percent
+                or signal.risk_percent
+                or 0.0
+            ),
             entry_risk_amount=float(
                 fill_risk_tracking.get("fill_derived_risk_amount")
                 or fill_risk_tracking.get("submitted_executable_risk_amount")
