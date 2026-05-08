@@ -4,11 +4,12 @@ from contextlib import asynccontextmanager
 import logging
 from time import perf_counter
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 from sqlmodel import Session
 
+from app.api.auth import require_operator_identity, requires_operator_auth
 from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
@@ -79,11 +80,28 @@ app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def enforce_operator_auth(request: Request, call_next):
+    if requires_operator_auth(
+        method=request.method,
+        path=request.url.path,
+        query_params=request.query_params,
+    ):
+        try:
+            require_operator_identity(request)
+        except HTTPException as exc:
+            return JSONResponse(
+                {"detail": exc.detail},
+                status_code=exc.status_code,
+                headers=exc.headers,
+            )
+    return await call_next(request)
 
 
 @app.middleware("http")

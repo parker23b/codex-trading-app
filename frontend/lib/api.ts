@@ -32,6 +32,7 @@ import {
 } from "@/lib/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const OPERATOR_API_TOKEN = process.env.NEXT_PUBLIC_OPERATOR_API_TOKEN;
 const REQUEST_TIMEOUT_MS = 1500;
 const MARKET_REQUEST_TIMEOUT_MS = 12000;
 
@@ -282,14 +283,17 @@ async function fetchWithTimeout(input: string, init?: RequestInit, timeoutMs = R
 }
 
 async function request<T>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const headers = new Headers(init?.headers);
+  headers.set("Content-Type", "application/json");
+  if (OPERATOR_API_TOKEN && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${OPERATOR_API_TOKEN}`);
+  }
+
   const response = await fetchWithTimeout(
     `${API_BASE_URL}${path}`,
     {
       ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...(init?.headers ?? {}),
-      },
+      headers,
       cache: "no-store",
     },
     init?.timeoutMs,

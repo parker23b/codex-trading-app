@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     ai_reviewer_llm_enabled: bool = False
     ai_reviewer_llm_provider: str = "disabled"
     ai_reviewer_llm_model: str = "unconfigured"
+    operator_api_token: str | None = None
     ig_api_key: str | None = None
     ig_username: str | None = None
     ig_password: str | None = None
