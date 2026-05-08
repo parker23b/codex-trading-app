@@ -73,6 +73,12 @@ class StrategyService:
         ExecutionStatus.SIGNAL_GENERATED.value,
         ExecutionStatus.CLOSE_REQUESTED.value,
     }
+    UNSAFE_ENTRY_RETRY_STATUSES = {
+        ExecutionStatus.ORDER_SUBMITTED.value,
+        ExecutionStatus.ORDER_ACKNOWLEDGED.value,
+        ExecutionStatus.FILL_PARTIAL.value,
+        ExecutionStatus.NEEDS_MANUAL_REVIEW.value,
+    }
 
     def __init__(self, session: Session | None = None):
         self.session = session
@@ -2830,6 +2836,46 @@ class StrategyService:
                 "last_duplicate_detected_at": utc_now().isoformat(),
                 "last_duplicate_status": reusable_execution.status,
             }
+            if (
+                phase == ExecutionPhase.ENTRY.value
+                and reusable_execution.status in cls.UNSAFE_ENTRY_RETRY_STATUSES
+            ):
+                duplicate_details["blocked_duplicate_client_request_id"] = (
+                    reusable_execution.client_request_id
+                )
+                domain_event_service.record_event(
+                    event_type="execution.retry_suppressed",
+                    category="execution",
+                    severity="warning",
+                    source="strategy_service.prepare_execution",
+                    title="Duplicate entry retry suppressed",
+                    message=(
+                        "A duplicate entry request was blocked because the prior "
+                        "entry may already have reached the broker."
+                    ),
+                    correlation_id=reusable_execution.client_request_id,
+                    strategy_name=strategy_name,
+                    instrument=instrument,
+                    execution_id=reusable_execution.id,
+                    payload_json=duplicate_details,
+                )
+                return (
+                    trade_service.transition_execution(
+                        reusable_execution,
+                        status=ExecutionStatus.NEEDS_MANUAL_REVIEW,
+                        trade_intent_id=trade_intent_id,
+                        client_request_id=reusable_execution.client_request_id,
+                        broker_reference=broker_reference,
+                        local_position_id=local_position_id,
+                        reason=(
+                            "Duplicate entry retry blocked; prior entry may already "
+                            "have reached the broker"
+                        ),
+                        requires_manual_review=True,
+                        details={**duplicate_details, "duplicate_retry_blocked": True},
+                    ),
+                    False,
+                )
             if (
                 phase == ExecutionPhase.CLOSE.value
                 and reusable_execution.status not in cls.SAFE_CLOSE_RETRY_STATUSES

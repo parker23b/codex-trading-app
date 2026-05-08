@@ -18,10 +18,12 @@ export type Trade = {
 
 export type Execution = {
   id: number;
+  trade_intent_id?: number | null;
   strategy_name: string;
   instrument: string;
   phase: "ENTRY" | "CLOSE";
   status:
+    | "SUBMISSION_PENDING"
     | "SIGNAL_GENERATED"
     | "RISK_APPROVED"
     | "RISK_REJECTED"
@@ -35,6 +37,7 @@ export type Execution = {
     | "FAILED"
     | "CANCELLED"
     | "NEEDS_MANUAL_REVIEW";
+  client_request_id?: string | null;
   broker_reference?: string | null;
   local_position_id?: number | null;
   local_trade_id?: number | null;
@@ -47,6 +50,10 @@ export type Execution = {
   filled_size?: number | null;
   requested_price?: number | null;
   average_fill_price?: number | null;
+  intended_risk_amount?: number | null;
+  submitted_risk_amount?: number | null;
+  fill_derived_risk_amount?: number | null;
+  risk_truth_confidence?: string | null;
   reason?: string | null;
   error_code?: string | null;
   error_message?: string | null;

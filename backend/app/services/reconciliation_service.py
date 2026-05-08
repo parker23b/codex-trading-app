@@ -4,6 +4,7 @@ from app.core.broker_factory import get_broker
 from app.core.logging import get_logger
 from app.core.runtime import runtime_manager
 from app.models.trade import (
+    ExecutionStatus,
     Position,
     Trade,
     TradeIntent,
@@ -63,6 +64,14 @@ class ReconciliationService:
             local_position = local_by_broker_reference.get(
                 remote_position.broker_reference
             )
+            correlated_intent = None
+            if local_position is None:
+                correlated_intent = (
+                    self.trade_service.find_active_trade_intent_by_broker_reference(
+                        instrument=instrument,
+                        broker_reference=remote_position.broker_reference,
+                    )
+                )
             matching_engine = next(
                 (
                     engine
@@ -93,12 +102,20 @@ class ReconciliationService:
                 local_position.strategy_name
                 if local_position
                 else (
-                    matching_engine.strategy.name if matching_engine else "broker_sync"
+                    correlated_intent.strategy_name
+                    if correlated_intent is not None
+                    else (
+                        matching_engine.strategy.name
+                        if matching_engine
+                        else "broker_sync"
+                    )
                 )
             )
             family_name = (
                 local_position.family_name
                 if local_position is not None
+                else correlated_intent.family_name
+                if correlated_intent is not None
                 else (
                     strategy_registry.get_metadata(strategy_name).family_name
                     or strategy_name
@@ -121,6 +138,8 @@ class ReconciliationService:
                 id=persisted_id,
                 trade_intent_id=local_position.trade_intent_id
                 if local_position is not None
+                else correlated_intent.id
+                if correlated_intent is not None
                 else None,
                 strategy_name=strategy_name,
                 family_name=family_name,
@@ -151,13 +170,14 @@ class ReconciliationService:
                 broker_open_confirmed_at=remote_position.opened_at,
                 last_reconciled_at=utc_now(),
             )
-            is_adopted = local_position is None
+            is_adopted = local_position is None and correlated_intent is None
             needs_update = is_adopted or self._position_needs_reconciliation(
                 local_position, synced_position
             )
             persisted = self.trade_service.record_broker_position(synced_position)
             intent = self._resolve_reconciled_trade_intent(
                 local_position=local_position,
+                correlated_intent=correlated_intent,
                 persisted_position=persisted,
                 matching_engine=matching_engine,
                 is_adopted=is_adopted,
@@ -169,13 +189,19 @@ class ReconciliationService:
                 details = {
                     "trade_intent_id": intent.id if intent is not None else None,
                     "matched_local_position": local_position is not None,
+                    "matched_ambiguous_intent": correlated_intent is not None,
                     "matched_runtime_engine": matching_engine is not None,
+                    "execution_client_request_id": (
+                        intent.execution_client_request_id
+                        if intent is not None
+                        else None
+                    ),
                     "size": remote_position.size,
                     "open_price": remote_position.open_price,
                 }
                 self.trade_service.record_reconciliation_event(
                     event_type="POSITION_SYNCED_FROM_BROKER"
-                    if local_position is not None
+                    if not is_adopted
                     else "POSITION_ADOPTED_FROM_BROKER",
                     trade_intent_id=intent.id if intent is not None else None,
                     strategy_name=strategy_name,
@@ -184,6 +210,12 @@ class ReconciliationService:
                     local_position_id=persisted.id,
                     details=details,
                 )
+                if correlated_intent is not None:
+                    self._resolve_reconciled_execution(
+                        intent=intent,
+                        persisted_position=persisted,
+                        details=details,
+                    )
                 if is_adopted:
                     adopted_count += 1
                     domain_event_service.record_event(
@@ -400,10 +432,30 @@ class ReconciliationService:
         self,
         *,
         local_position: Position | None,
+        correlated_intent: TradeIntent | None,
         persisted_position: Position,
         matching_engine,
         is_adopted: bool,
     ) -> TradeIntent | None:
+        if correlated_intent is not None:
+            return self.trade_service.transition_trade_intent(
+                correlated_intent,
+                state=TradeIntentState.POSITION_OPENED,
+                broker_reference=persisted_position.broker_reference,
+                position_id=persisted_position.id,
+                risk_truth_confidence=(
+                    persisted_position.risk_truth_confidence
+                    or "BROKER_CONFIRMED_AVERAGE_FILL_ESTIMATED"
+                ),
+                average_fill_price=persisted_position.open_price,
+                filled_size=persisted_position.size,
+                opened_at=persisted_position.open_time,
+                details={
+                    "reconciliation_linked_ambiguous_entry": True,
+                    "reconciled_broker_reference": persisted_position.broker_reference,
+                    "reconciled_position_id": persisted_position.id,
+                },
+            )
         if local_position is not None and local_position.trade_intent_id is not None:
             intent = self.trade_service.get_trade_intent(local_position.trade_intent_id)
             if intent is not None:
@@ -492,6 +544,44 @@ class ReconciliationService:
             )
         )
         return intent
+
+    def _resolve_reconciled_execution(
+        self,
+        *,
+        intent: TradeIntent | None,
+        persisted_position: Position,
+        details: dict[str, object],
+    ) -> None:
+        if intent is None or intent.execution_client_request_id is None:
+            return
+        execution = self.trade_service.find_execution_by_client_request_id(
+            intent.execution_client_request_id
+        )
+        if execution is None:
+            return
+        self.trade_service.transition_execution(
+            execution,
+            status=ExecutionStatus.POSITION_OPENED,
+            trade_intent_id=intent.id,
+            client_request_id=execution.client_request_id,
+            broker_reference=persisted_position.broker_reference,
+            local_position_id=persisted_position.id,
+            completed_at=persisted_position.open_time,
+            filled_size=persisted_position.size,
+            average_fill_price=persisted_position.open_price,
+            reason="Broker reconciliation linked ambiguous entry to an open position.",
+            requires_manual_review=False,
+            risk_truth_confidence=(
+                persisted_position.risk_truth_confidence
+                or "BROKER_CONFIRMED_AVERAGE_FILL_ESTIMATED"
+            ),
+            details={
+                **details,
+                "reconciliation_linked_open_position": True,
+                "reconciled_broker_reference": persisted_position.broker_reference,
+                "reconciled_position_id": persisted_position.id,
+            },
+        )
 
     def _resolve_forced_close_trade_intent(
         self, local_position: Position

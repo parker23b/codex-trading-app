@@ -263,6 +263,18 @@ class TradeService:
             statement = statement.where(TradeIntent.id != exclude_intent_id)
         return self.session.exec(statement).first()
 
+    def find_active_trade_intent_by_broker_reference(
+        self, *, instrument: str, broker_reference: str
+    ) -> TradeIntent | None:
+        statement = (
+            select(TradeIntent)
+            .where(TradeIntent.instrument == instrument)
+            .where(TradeIntent.broker_reference == broker_reference)
+            .where(TradeIntent.state.in_(ACTIVE_INSTRUMENT_OWNERSHIP_STATES))
+            .order_by(desc(TradeIntent.updated_at))
+        )
+        return self.session.exec(statement).first()
+
     def find_open_trade_intent(
         self,
         *,

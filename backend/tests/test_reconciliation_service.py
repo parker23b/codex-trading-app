@@ -4,7 +4,14 @@ from datetime import timedelta
 
 from app.core.broker import OrderDirection
 from app.core.runtime import runtime_manager
-from app.models.trade import Position, TradeIntent, TradeIntentState
+from app.models.trade import (
+    Execution,
+    ExecutionPhase,
+    ExecutionStatus,
+    Position,
+    TradeIntent,
+    TradeIntentState,
+)
 from app.services.reconciliation_service import ReconciliationService
 from app.services.runtime_state_service import RuntimeStateService
 from app.services.trade_service import TradeService
@@ -121,6 +128,88 @@ def test_reconciliation_adopts_unmatched_broker_position(session, broker, fixed_
         trade_service.list_reconciliation_events(limit=10)[0].event_type
         == "POSITION_ADOPTED_FROM_BROKER"
     )
+
+
+def test_audit_life_001_reconciliation_links_ambiguous_entry_by_broker_reference(
+    session, broker, fixed_now
+):
+    trade_service = TradeService(session)
+    intent = trade_service.create_trade_intent(
+        TradeIntent(
+            strategy_name="smoke_test_hold",
+            instrument="CS.D.EURUSD.MINI.IP",
+            direction="BUY",
+            state=TradeIntentState.ACKNOWLEDGED.value,
+            signal_time=fixed_now - timedelta(minutes=2),
+            proposed_size=0.2,
+            allocated_size=0.2,
+            broker_reference="entry-ambiguous-1",
+            execution_client_request_id="ent-ambiguous-1",
+            decision_reason_code="broker_confirmation_ambiguous",
+            decision_reason="Broker confirmation was ambiguous.",
+        )
+    )
+    execution = trade_service.create_execution(
+        Execution(
+            trade_intent_id=intent.id,
+            strategy_name="smoke_test_hold",
+            instrument="CS.D.EURUSD.MINI.IP",
+            phase=ExecutionPhase.ENTRY.value,
+            status=ExecutionStatus.NEEDS_MANUAL_REVIEW.value,
+            client_request_id="ent-ambiguous-1",
+            broker_reference="entry-ambiguous-1",
+            signal_time=fixed_now - timedelta(minutes=2),
+            requested_size=0.2,
+            requested_price=100.0,
+            requires_manual_review=True,
+            details={
+                "broker_result": {
+                    "status": "AMBIGUOUS",
+                    "client_request_id": "ent-ambiguous-1",
+                    "broker_reference": "entry-ambiguous-1",
+                }
+            },
+        )
+    )
+    broker.remote_positions = [
+        make_broker_position(
+            broker_reference="entry-ambiguous-1",
+            instrument="CS.D.EURUSD.MINI.IP",
+            direction=OrderDirection.BUY,
+            size=0.2,
+            open_price=100.25,
+            opened_at=fixed_now - timedelta(minutes=1),
+        )
+    ]
+
+    reconciled_positions = ReconciliationService(
+        trade_service
+    ).reconcile_open_positions()
+
+    refreshed_intent = trade_service.get_trade_intent(intent.id)
+    refreshed_execution = trade_service.find_execution_by_client_request_id(
+        "ent-ambiguous-1"
+    )
+    events = trade_service.list_reconciliation_events(limit=10)
+    intents = trade_service.list_trade_intents(limit=10)
+
+    assert len(reconciled_positions) == 1
+    assert len(intents) == 1
+    assert refreshed_intent is not None
+    assert refreshed_intent.id == intent.id
+    assert refreshed_intent.state == TradeIntentState.POSITION_OPENED.value
+    assert refreshed_intent.position_id == reconciled_positions[0].id
+    assert refreshed_intent.execution_client_request_id == "ent-ambiguous-1"
+    assert refreshed_intent.details["reconciliation_linked_ambiguous_entry"] is True
+    assert refreshed_execution is not None
+    assert refreshed_execution.id == execution.id
+    assert refreshed_execution.status == ExecutionStatus.POSITION_OPENED.value
+    assert refreshed_execution.requires_manual_review is False
+    assert refreshed_execution.local_position_id == reconciled_positions[0].id
+    assert refreshed_execution.details["reconciliation_linked_open_position"] is True
+    assert events[0].event_type == "POSITION_SYNCED_FROM_BROKER"
+    assert events[0].trade_intent_id == intent.id
+    assert events[0].details["execution_client_request_id"] == "ent-ambiguous-1"
 
 
 def test_reconciliation_closes_local_position_missing_at_broker(session, fixed_now):

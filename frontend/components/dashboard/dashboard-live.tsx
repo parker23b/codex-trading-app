@@ -881,6 +881,8 @@ export function DashboardLive({
               { key: "strategy", header: "Strategy", render: (row) => row.strategy_name },
               { key: "instrument", header: "Instrument", render: (row) => formatInstrumentLabel(row.instrument) },
               { key: "status", header: "Status", render: (row) => row.status.replaceAll("_", " ") },
+              { key: "request", header: "Request", render: (row) => row.client_request_id ?? "n/a" },
+              { key: "broker", header: "Broker Ref", render: (row) => row.broker_reference ?? "n/a" },
             ]}
           />
         ) : null}

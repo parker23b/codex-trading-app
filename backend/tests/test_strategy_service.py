@@ -103,7 +103,7 @@ def test_prepare_execution_reuses_existing_entry_attempt_for_same_opportunity(
             strategy_name="mean_reversion",
             instrument=INSTRUMENT,
             phase=ExecutionPhase.ENTRY.value,
-            status=ExecutionStatus.ORDER_SUBMITTED.value,
+            status=ExecutionStatus.SUBMISSION_PENDING.value,
             client_request_id="ent-existing-request",
             signal_time=fixed_now,
             requested_size=1.0,
@@ -136,6 +136,56 @@ def test_prepare_execution_reuses_existing_entry_attempt_for_same_opportunity(
     assert execution.client_request_id == "ent-existing-request"
     assert execution.details["duplicate_action_detected"] is True
     assert execution.details["duplicate_attempt_count"] == 1
+    assert len(executions) == 1
+
+
+def test_audit_life_001_blocks_submitted_entry_duplicate_retry_until_review(
+    session, fixed_now
+):
+    trade_service = TradeService(session)
+    initial_execution = trade_service.create_execution(
+        Execution(
+            strategy_name="mean_reversion",
+            instrument=INSTRUMENT,
+            phase=ExecutionPhase.ENTRY.value,
+            status=ExecutionStatus.ORDER_SUBMITTED.value,
+            client_request_id="ent-submitted-request",
+            signal_time=fixed_now,
+            requested_size=1.0,
+            requested_price=100.0,
+            details={
+                "action_key": f"entry:mean_reversion:{INSTRUMENT}:BUY",
+                "direction": "BUY",
+            },
+        )
+    )
+
+    execution, should_submit = StrategyService._prepare_execution(
+        trade_service=trade_service,
+        strategy_name="mean_reversion",
+        instrument=INSTRUMENT,
+        phase=ExecutionPhase.ENTRY.value,
+        signal_time=fixed_now + timedelta(seconds=5),
+        requested_size=1.0,
+        requested_price=100.2,
+        reason="Entry signal generated",
+        details={
+            "action_key": f"entry:mean_reversion:{INSTRUMENT}:BUY",
+            "direction": "BUY",
+        },
+    )
+
+    executions = trade_service.list_executions(limit=10)
+    assert should_submit is False
+    assert execution.id == initial_execution.id
+    assert execution.client_request_id == "ent-submitted-request"
+    assert execution.status == ExecutionStatus.NEEDS_MANUAL_REVIEW.value
+    assert execution.requires_manual_review is True
+    assert execution.details["duplicate_retry_blocked"] is True
+    assert execution.details["duplicate_attempt_count"] == 1
+    assert execution.details["blocked_duplicate_client_request_id"] == (
+        "ent-submitted-request"
+    )
     assert len(executions) == 1
 
 
