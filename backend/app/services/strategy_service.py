@@ -1982,6 +1982,67 @@ class StrategyService:
                 },
             )
             raise ValueError(reason)
+        previous_sizing_quote = sizing_details.get("sizing_quote")
+        approved_sizing_quote_size: float | None = None
+        if isinstance(previous_sizing_quote, dict):
+            previous_normalization = previous_sizing_quote.get("normalization")
+            if isinstance(previous_normalization, dict):
+                raw_previous_size = previous_normalization.get("normalized_size")
+                if raw_previous_size is not None:
+                    approved_sizing_quote_size = float(raw_previous_size)
+            if approved_sizing_quote_size is None:
+                raw_previous_size = previous_sizing_quote.get("normalized_size")
+                if raw_previous_size is not None:
+                    approved_sizing_quote_size = float(raw_previous_size)
+        if approved_sizing_quote_size is None and (
+            previous_sizing_quote is not None or allocation.get("sizing_precision")
+        ):
+            raw_previous_size = allocation.get("normalized_size")
+            if raw_previous_size is not None:
+                approved_sizing_quote_size = float(raw_previous_size)
+        previous_sizing_precision = (
+            previous_sizing_quote.get("precision")
+            if isinstance(previous_sizing_quote, dict)
+            else allocation.get("sizing_precision")
+        )
+        if (
+            approved_sizing_quote_size is not None
+            and previous_sizing_precision == BrokerSizingPrecision.EXACT.value
+            and sizing_quote.precision is BrokerSizingPrecision.EXACT
+        ):
+            sizing_quote_size_drift = StrategyService._drift_metric(
+                expected=approved_sizing_quote_size,
+                actual=float(sizing_quote.normalized_size),
+                threshold_percent=get_settings().allocation_drift_warning_percent,
+            )
+            if (
+                isinstance(sizing_quote_size_drift, dict)
+                and bool(sizing_quote_size_drift.get("material"))
+                and float(sizing_quote_size_drift.get("absolute_drift_abs") or 0.0) > 0
+            ):
+                reason = (
+                    "Entry execution blocked because broker sizing quote drift "
+                    "requires reallocation."
+                )
+                StrategyService._fail_entry_execution_revalidation(
+                    trade_service=trade_service,
+                    execution=execution,
+                    intent=intent,
+                    reason=reason,
+                    reason_code="sizing_quote_drift",
+                    details={
+                        "layer": "sizing_quote",
+                        "approved_sizing_quote_size": approved_sizing_quote_size,
+                        "current_sizing_quote_size": sizing_quote.normalized_size,
+                        "sizing_quote_size_drift": sizing_quote_size_drift,
+                        "precision": sizing_quote.precision.value,
+                        "mode": sizing_quote.mode.value,
+                        "sizing_available": sizing_quote.sizing_available,
+                        "account_equity": account_equity,
+                        "account_available": account_available,
+                    },
+                )
+                raise ValueError(reason)
         if (
             engine.broker.account_type.value == "LIVE"
             and sizing_quote.precision is BrokerSizingPrecision.APPROXIMATE

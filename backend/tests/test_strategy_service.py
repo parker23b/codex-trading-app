@@ -9,6 +9,7 @@ from app.core.broker import (
     BrokerAccountSummary,
     BrokerMarketDetails,
     BrokerSizingMode,
+    BrokerSizingPrecision,
     OrderDirection,
 )
 from app.core.config import get_settings
@@ -760,6 +761,138 @@ def test_audit_risk_002_execution_revalidates_sizing_quote_before_submission(
     assert execution.details["execution_revalidation"]["layer"] == "sizing_quote"
     assert (
         intent.details["execution_revalidation"]["reason_code"] == "unsupported_sizing"
+    )
+
+
+def test_audit_risk_002_execution_blocks_material_broker_sizing_quote_drift(
+    session, broker, fixed_now
+):
+    trade_service = TradeService(session)
+    runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
+    get_settings().allocation_drift_warning_percent = 5.0
+    broker.market_details_by_instrument[INSTRUMENT] = BrokerMarketDetails(
+        instrument=INSTRUMENT,
+        name=INSTRUMENT,
+        bid=100.0,
+        offer=100.1,
+        high=101.0,
+        low=99.0,
+        percentage_change=0.0,
+        net_change=0.0,
+        market_status="TRADEABLE",
+        update_time=datetime.now(UTC).isoformat(),
+        tradable=True,
+        metadata={
+            "sizing_profile": {
+                "mode": BrokerSizingMode.EXACT_CONTRACT_RISK.value,
+                "contract_multiplier": 200.0,
+            }
+        },
+    )
+    broker.place_order_outcomes.append(
+        make_order_result(
+            broker_reference="entry-sizing-quote-drift",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.0,
+            executed_at=fixed_now + timedelta(seconds=1),
+        )
+    )
+    intent = trade_service.create_trade_intent(
+        TradeIntent(
+            strategy_name=STRATEGY,
+            instrument=INSTRUMENT,
+            direction="BUY",
+            state=TradeIntentState.APPROVED.value,
+            signal_time=fixed_now,
+            proposed_size=0.2,
+            allocated_size=0.2,
+            proposed_risk_percent=0.02,
+            allocated_risk_percent=0.02,
+            estimated_risk_amount=20.0,
+            details={
+                "allocation": {
+                    "account_equity": 100_000.0,
+                    "risk_amount": 20.0,
+                    "allocated_risk_percent": 0.02,
+                    "normalized_size": 0.2,
+                    "sizing_precision": BrokerSizingPrecision.EXACT.value,
+                    "sizing_mode": BrokerSizingMode.EXACT_CONTRACT_RISK.value,
+                    "sizing_details": {
+                        "stop_distance_price": 1.0,
+                        "sizing_quote": {
+                            "precision": BrokerSizingPrecision.EXACT.value,
+                            "mode": BrokerSizingMode.EXACT_CONTRACT_RISK.value,
+                            "risk_amount": 20.0,
+                            "risk_per_unit": 100.0,
+                            "requested_size": 0.2,
+                            "normalized_size": 0.2,
+                            "stop_distance_price": 1.0,
+                            "normalization": {
+                                "accepted": True,
+                                "reason_code": "normalized",
+                                "reason": "Size normalized to broker-valid constraints.",
+                                "normalized_size": 0.2,
+                                "min_deal_size": None,
+                                "size_step": None,
+                                "details": {},
+                                "notes": [],
+                            },
+                        },
+                    },
+                }
+            },
+        )
+    )
+    execution = trade_service.create_execution(
+        Execution(
+            trade_intent_id=intent.id,
+            strategy_name=STRATEGY,
+            instrument=INSTRUMENT,
+            phase=ExecutionPhase.ENTRY.value,
+            status=ExecutionStatus.SUBMISSION_PENDING.value,
+            client_request_id="ent-sizing-quote-drift",
+            signal_time=fixed_now,
+            requested_size=0.2,
+            requested_price=100.0,
+        )
+    )
+    engine = runtime_manager.start(strategy_name=STRATEGY, instrument=INSTRUMENT)
+
+    with pytest.raises(ValueError, match="sizing quote drift"):
+        StrategyService._execute_entry_signal(
+            engine=engine,
+            signal=EntrySignal(
+                kind=SignalKind.ENTRY,
+                strategy_name=STRATEGY,
+                instrument=INSTRUMENT,
+                observed_price=100.0,
+                signal_at=fixed_now,
+                direction=OrderDirection.BUY,
+                size=0.2,
+                risk_percent=0.02,
+                bid=99.9,
+                ask=100.1,
+                market_status="TRADEABLE",
+                tradable=True,
+            ),
+            intent=intent,
+            trade_service=trade_service,
+            execution=execution,
+        )
+
+    assert broker.placed_orders == []
+    assert execution.status == ExecutionStatus.FAILED.value
+    assert intent.state == TradeIntentState.FAILED.value
+    revalidation = execution.details["execution_revalidation"]
+    assert revalidation["layer"] == "sizing_quote"
+    assert revalidation["reason_code"] == "sizing_quote_drift"
+    assert revalidation["approved_sizing_quote_size"] == pytest.approx(0.2)
+    assert revalidation["current_sizing_quote_size"] == pytest.approx(0.1)
+    assert revalidation["sizing_quote_size_drift"]["material"] is True
+    assert (
+        intent.details["allocation_outcome"]["stage"] == "execution_revalidation_failed"
     )
 
 
