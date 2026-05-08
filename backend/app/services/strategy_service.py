@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from sqlmodel import Session, select
 
-from app.core.broker import BrokerOrderStatus, OrderRequest
+from app.core.broker import BrokerOrderStatus, BrokerSizingPrecision, OrderRequest
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.signals import EntrySignal, ExitSignal, SignalCandidate, SignalStatus
@@ -1751,6 +1751,220 @@ class StrategyService:
         }
 
     @staticmethod
+    def _fail_entry_execution_revalidation(
+        *,
+        trade_service: TradeService,
+        execution: Execution,
+        intent: TradeIntent,
+        reason: str,
+        reason_code: str,
+        details: dict[str, object],
+    ) -> None:
+        risk_reconciliation = StrategyService._build_risk_reconciliation(intent=intent)
+        revalidation_details = {
+            "accepted": False,
+            "reason_code": reason_code,
+            "reason": reason,
+            **details,
+        }
+        trade_service.transition_execution(
+            execution,
+            status=ExecutionStatus.FAILED,
+            trade_intent_id=intent.id,
+            client_request_id=execution.client_request_id,
+            reason=reason,
+            error_message=reason,
+            risk_truth_confidence="INCOMPLETE_DEGRADED",
+            requires_manual_review=False,
+            details={
+                "risk_reconciliation": risk_reconciliation,
+                "execution_revalidation": revalidation_details,
+            },
+        )
+        trade_service.transition_trade_intent(
+            intent,
+            state=TradeIntentState.FAILED,
+            decision_reason_code="execution_revalidation_failed",
+            decision_reason=reason,
+            risk_truth_confidence="INCOMPLETE_DEGRADED",
+            details={
+                **StrategyService._allocation_outcome_update(
+                    stage="execution_revalidation_failed",
+                    final_status=TradeIntentState.FAILED.value,
+                    hard_risk_passed=True,
+                    execution_blocked=True,
+                ),
+                "risk_reconciliation": risk_reconciliation,
+                "execution_revalidation": revalidation_details,
+            },
+        )
+
+    @staticmethod
+    def _assert_account_and_sizing_allow_execution(
+        *,
+        engine,
+        signal: EntrySignal,
+        intent: TradeIntent,
+        execution: Execution,
+        trade_service: TradeService,
+    ) -> dict[str, object]:
+        try:
+            account_summary = engine.broker.get_account_summary()
+        except Exception as exc:
+            reason = (
+                "Entry execution blocked because broker account equity is unavailable."
+            )
+            StrategyService._fail_entry_execution_revalidation(
+                trade_service=trade_service,
+                execution=execution,
+                intent=intent,
+                reason=reason,
+                reason_code="account_equity_unavailable",
+                details={
+                    "layer": "account",
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise ValueError(reason) from exc
+
+        account_equity = float(account_summary.equity or 0.0)
+        account_available = float(account_summary.available or 0.0)
+        if account_equity <= 0 or account_available <= 0:
+            reason = "Entry execution blocked because broker account equity or available funds are invalid."
+            StrategyService._fail_entry_execution_revalidation(
+                trade_service=trade_service,
+                execution=execution,
+                intent=intent,
+                reason=reason,
+                reason_code="account_equity_invalid",
+                details={
+                    "layer": "account",
+                    "account_equity": account_equity,
+                    "account_available": account_available,
+                },
+            )
+            raise ValueError(reason)
+
+        allocation = StrategyService._allocation_details(intent)
+        sizing_details = (
+            (allocation.get("sizing_details") or {})
+            if isinstance(allocation, dict)
+            else {}
+        )
+        fallback_stop_distance = sizing_details.get("stop_distance_price")
+        if fallback_stop_distance is None:
+            fallback_stop_distance = max(
+                float(signal.observed_price or 0.0)
+                * get_settings().allocation_fallback_stop_distance_percent,
+                1e-9,
+            )
+        risk_amount = (
+            intent.estimated_risk_amount
+            or allocation.get("risk_amount")
+            or (
+                account_equity * ((intent.allocated_risk_percent or 0.0) / 100.0)
+                if intent.allocated_risk_percent is not None
+                else None
+            )
+            or 1.0
+        )
+        try:
+            sizing_quote = engine.broker.quote_risk_sized_order(
+                signal.instrument,
+                entry_price=signal.observed_price,
+                risk_amount=float(risk_amount),
+                stop_loss_price=signal.stop_loss_price
+                or sizing_details.get("stop_loss_price"),
+                fallback_stop_distance=float(fallback_stop_distance),
+            )
+        except Exception as exc:
+            reason = (
+                "Entry execution blocked because broker sizing quote is unavailable."
+            )
+            StrategyService._fail_entry_execution_revalidation(
+                trade_service=trade_service,
+                execution=execution,
+                intent=intent,
+                reason=reason,
+                reason_code="sizing_quote_unavailable",
+                details={
+                    "layer": "sizing_quote",
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "account_equity": account_equity,
+                    "account_available": account_available,
+                },
+            )
+            raise ValueError(reason) from exc
+
+        if (
+            not sizing_quote.sizing_available
+            or sizing_quote.precision is BrokerSizingPrecision.UNSUPPORTED
+        ):
+            reason = (
+                sizing_quote.reason
+                or "Entry execution blocked because broker sizing quote is unavailable."
+            )
+            StrategyService._fail_entry_execution_revalidation(
+                trade_service=trade_service,
+                execution=execution,
+                intent=intent,
+                reason=reason,
+                reason_code=sizing_quote.reason_code or "sizing_quote_unavailable",
+                details={
+                    "layer": "sizing_quote",
+                    "precision": sizing_quote.precision.value,
+                    "mode": sizing_quote.mode.value,
+                    "sizing_available": sizing_quote.sizing_available,
+                    "account_equity": account_equity,
+                    "account_available": account_available,
+                },
+            )
+            raise ValueError(reason)
+        if (
+            engine.broker.account_type.value == "LIVE"
+            and sizing_quote.precision is BrokerSizingPrecision.APPROXIMATE
+        ):
+            reason = "Entry execution blocked because approximate sizing is not permitted for live submission."
+            StrategyService._fail_entry_execution_revalidation(
+                trade_service=trade_service,
+                execution=execution,
+                intent=intent,
+                reason=reason,
+                reason_code="approximate_sizing_unsupported",
+                details={
+                    "layer": "sizing_quote",
+                    "precision": sizing_quote.precision.value,
+                    "mode": sizing_quote.mode.value,
+                    "sizing_available": sizing_quote.sizing_available,
+                    "account_equity": account_equity,
+                    "account_available": account_available,
+                },
+            )
+            raise ValueError(reason)
+
+        return {
+            "account": {
+                "account_id": account_summary.account_id,
+                "equity": account_equity,
+                "available": account_available,
+                "account_type": account_summary.account_type.value,
+            },
+            "sizing_quote": {
+                "precision": sizing_quote.precision.value,
+                "mode": sizing_quote.mode.value,
+                "sizing_available": sizing_quote.sizing_available,
+                "reason_code": sizing_quote.reason_code,
+                "risk_amount": sizing_quote.risk_amount,
+                "requested_size": sizing_quote.requested_size,
+                "normalized_size": sizing_quote.normalized_size,
+                "risk_per_unit": sizing_quote.risk_per_unit,
+                "stop_distance_price": sizing_quote.stop_distance_price,
+            },
+        }
+
+    @staticmethod
     def _execute_entry_signal(
         *,
         engine,
@@ -1922,6 +2136,15 @@ class StrategyService:
                 f"Broker size normalization for {signal.instrument} changed after approval "
                 f"({executable_size} -> {size_validation.normalized_size}); reallocation required."
             )
+        broker_revalidation = (
+            StrategyService._assert_account_and_sizing_allow_execution(
+                engine=engine,
+                signal=signal,
+                intent=intent,
+                execution=execution,
+                trade_service=trade_service,
+            )
+        )
         submitted_risk_tracking = StrategyService._estimate_execution_risk_snapshot(
             broker=engine.broker,
             intent=intent,
@@ -1962,6 +2185,7 @@ class StrategyService:
             reason="Entry order submitted",
             details={
                 "market_status_execution_check": status.model_dump(mode="json"),
+                "broker_execution_revalidation": broker_revalidation,
                 "risk_tracking": submitted_risk_tracking,
                 "risk_reconciliation": submitted_risk_reconciliation,
             },
@@ -1985,6 +2209,7 @@ class StrategyService:
                     hard_risk_passed=True,
                     execution_submitted=True,
                 ),
+                "broker_execution_revalidation": broker_revalidation,
                 "risk_tracking": submitted_risk_tracking,
                 "risk_reconciliation": submitted_risk_reconciliation,
             },
