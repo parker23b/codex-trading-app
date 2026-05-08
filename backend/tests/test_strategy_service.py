@@ -469,6 +469,200 @@ def test_audit_risk_002_execution_revalidates_account_before_submission(
     )
 
 
+def test_audit_risk_002_execution_blocks_material_account_equity_drift(
+    session, broker, fixed_now
+):
+    trade_service = TradeService(session)
+    runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
+    get_settings().allocation_drift_warning_percent = 10.0
+    broker.account_summary = BrokerAccountSummary(
+        account_id="drifted-account",
+        balance=10_000.0,
+        available=10_000.0,
+        profit_loss=-90_000.0,
+        equity=10_000.0,
+        account_type=AccountType.DEMO,
+    )
+    broker.place_order_outcomes.append(
+        make_order_result(
+            broker_reference="entry-account-equity-drift",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.0,
+            executed_at=fixed_now + timedelta(seconds=1),
+        )
+    )
+    intent = trade_service.create_trade_intent(
+        TradeIntent(
+            strategy_name=STRATEGY,
+            instrument=INSTRUMENT,
+            direction="BUY",
+            state=TradeIntentState.APPROVED.value,
+            signal_time=fixed_now,
+            proposed_size=0.2,
+            allocated_size=0.2,
+            proposed_risk_percent=0.1,
+            allocated_risk_percent=0.1,
+            estimated_risk_amount=100.0,
+            details={
+                "allocation": {
+                    "account_equity": 100_000.0,
+                    "risk_amount": 100.0,
+                    "allocated_risk_percent": 0.1,
+                    "normalized_size": 0.2,
+                    "sizing_details": {
+                        "stop_distance_price": 1.0,
+                    },
+                }
+            },
+        )
+    )
+    execution = trade_service.create_execution(
+        Execution(
+            trade_intent_id=intent.id,
+            strategy_name=STRATEGY,
+            instrument=INSTRUMENT,
+            phase=ExecutionPhase.ENTRY.value,
+            status=ExecutionStatus.SUBMISSION_PENDING.value,
+            client_request_id="ent-account-equity-drift",
+            signal_time=fixed_now,
+            requested_size=0.2,
+            requested_price=100.0,
+        )
+    )
+    engine = runtime_manager.start(strategy_name=STRATEGY, instrument=INSTRUMENT)
+
+    with pytest.raises(ValueError, match="account equity drift"):
+        StrategyService._execute_entry_signal(
+            engine=engine,
+            signal=EntrySignal(
+                kind=SignalKind.ENTRY,
+                strategy_name=STRATEGY,
+                instrument=INSTRUMENT,
+                observed_price=100.0,
+                signal_at=fixed_now,
+                direction=OrderDirection.BUY,
+                size=0.2,
+                risk_percent=0.1,
+                bid=99.9,
+                ask=100.1,
+                market_status="TRADEABLE",
+                tradable=True,
+            ),
+            intent=intent,
+            trade_service=trade_service,
+            execution=execution,
+        )
+
+    assert broker.placed_orders == []
+    assert execution.status == ExecutionStatus.FAILED.value
+    assert intent.state == TradeIntentState.FAILED.value
+    revalidation = execution.details["execution_revalidation"]
+    assert revalidation["layer"] == "account"
+    assert revalidation["reason_code"] == "account_equity_drift"
+    assert revalidation["risk_percent_drift"]["material"] is True
+    assert revalidation["risk_percent_drift"]["actual"] == pytest.approx(1.0)
+    assert (
+        intent.details["allocation_outcome"]["stage"] == "execution_revalidation_failed"
+    )
+
+
+def test_audit_risk_002_execution_blocks_available_funds_below_approved_risk(
+    session, broker, fixed_now
+):
+    trade_service = TradeService(session)
+    runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
+    broker.account_summary = BrokerAccountSummary(
+        account_id="depleted-available",
+        balance=100_000.0,
+        available=50.0,
+        profit_loss=0.0,
+        equity=100_000.0,
+        account_type=AccountType.DEMO,
+    )
+    broker.place_order_outcomes.append(
+        make_order_result(
+            broker_reference="entry-available-drift",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.0,
+            executed_at=fixed_now + timedelta(seconds=1),
+        )
+    )
+    intent = trade_service.create_trade_intent(
+        TradeIntent(
+            strategy_name=STRATEGY,
+            instrument=INSTRUMENT,
+            direction="BUY",
+            state=TradeIntentState.APPROVED.value,
+            signal_time=fixed_now,
+            proposed_size=0.2,
+            allocated_size=0.2,
+            proposed_risk_percent=0.1,
+            allocated_risk_percent=0.1,
+            estimated_risk_amount=100.0,
+            details={
+                "allocation": {
+                    "account_equity": 100_000.0,
+                    "risk_amount": 100.0,
+                    "allocated_risk_percent": 0.1,
+                    "normalized_size": 0.2,
+                    "sizing_details": {
+                        "stop_distance_price": 1.0,
+                    },
+                }
+            },
+        )
+    )
+    execution = trade_service.create_execution(
+        Execution(
+            trade_intent_id=intent.id,
+            strategy_name=STRATEGY,
+            instrument=INSTRUMENT,
+            phase=ExecutionPhase.ENTRY.value,
+            status=ExecutionStatus.SUBMISSION_PENDING.value,
+            client_request_id="ent-available-drift",
+            signal_time=fixed_now,
+            requested_size=0.2,
+            requested_price=100.0,
+        )
+    )
+    engine = runtime_manager.start(strategy_name=STRATEGY, instrument=INSTRUMENT)
+
+    with pytest.raises(ValueError, match="available funds"):
+        StrategyService._execute_entry_signal(
+            engine=engine,
+            signal=EntrySignal(
+                kind=SignalKind.ENTRY,
+                strategy_name=STRATEGY,
+                instrument=INSTRUMENT,
+                observed_price=100.0,
+                signal_at=fixed_now,
+                direction=OrderDirection.BUY,
+                size=0.2,
+                risk_percent=0.1,
+                bid=99.9,
+                ask=100.1,
+                market_status="TRADEABLE",
+                tradable=True,
+            ),
+            intent=intent,
+            trade_service=trade_service,
+            execution=execution,
+        )
+
+    assert broker.placed_orders == []
+    assert execution.status == ExecutionStatus.FAILED.value
+    assert intent.state == TradeIntentState.FAILED.value
+    revalidation = execution.details["execution_revalidation"]
+    assert revalidation["layer"] == "account"
+    assert revalidation["reason_code"] == "account_available_below_risk"
+    assert revalidation["account_available"] == pytest.approx(50.0)
+    assert revalidation["risk_amount"] == pytest.approx(100.0)
+
+
 def test_audit_risk_002_execution_revalidates_sizing_quote_before_submission(
     session, broker, fixed_now
 ):
@@ -673,6 +867,108 @@ def test_audit_risk_002_execution_revalidates_market_status_without_cache(
     assert (
         execution.details["execution_revalidation"]["market_status"]["market_open"]
         is False
+    )
+    assert (
+        intent.details["allocation_outcome"]["stage"] == "execution_revalidation_failed"
+    )
+
+
+def test_audit_risk_002_execution_metadata_failure_before_submission_is_audited(
+    session, broker, fixed_now, monkeypatch
+):
+    trade_service = TradeService(session)
+    runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
+    market_details = BrokerMarketDetails(
+        instrument=INSTRUMENT,
+        name=INSTRUMENT,
+        bid=100.0,
+        offer=100.1,
+        high=101.0,
+        low=99.0,
+        percentage_change=0.0,
+        net_change=0.0,
+        market_status="TRADEABLE",
+        update_time=datetime.now(UTC).isoformat(),
+        tradable=True,
+    )
+    broker.place_order_outcomes.append(
+        make_order_result(
+            broker_reference="entry-metadata-drift",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.0,
+            executed_at=fixed_now + timedelta(seconds=1),
+        )
+    )
+    calls = 0
+
+    def metadata_then_failure(instrument):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return market_details
+        raise RuntimeError("market metadata unavailable during normalization")
+
+    monkeypatch.setattr(broker, "get_market_details", metadata_then_failure)
+    intent = trade_service.create_trade_intent(
+        TradeIntent(
+            strategy_name=STRATEGY,
+            instrument=INSTRUMENT,
+            direction="BUY",
+            state=TradeIntentState.APPROVED.value,
+            signal_time=fixed_now,
+            proposed_size=0.2,
+            allocated_size=0.2,
+            proposed_risk_percent=0.1,
+            allocated_risk_percent=0.1,
+            estimated_risk_amount=100.0,
+        )
+    )
+    execution = trade_service.create_execution(
+        Execution(
+            trade_intent_id=intent.id,
+            strategy_name=STRATEGY,
+            instrument=INSTRUMENT,
+            phase=ExecutionPhase.ENTRY.value,
+            status=ExecutionStatus.SUBMISSION_PENDING.value,
+            client_request_id="ent-metadata-drift",
+            signal_time=fixed_now,
+            requested_size=0.2,
+            requested_price=100.0,
+        )
+    )
+    engine = runtime_manager.start(strategy_name=STRATEGY, instrument=INSTRUMENT)
+
+    with pytest.raises(ValueError, match="broker metadata"):
+        StrategyService._execute_entry_signal(
+            engine=engine,
+            signal=EntrySignal(
+                kind=SignalKind.ENTRY,
+                strategy_name=STRATEGY,
+                instrument=INSTRUMENT,
+                observed_price=100.0,
+                signal_at=fixed_now,
+                direction=OrderDirection.BUY,
+                size=0.2,
+                risk_percent=0.1,
+                bid=99.9,
+                ask=100.1,
+                market_status="TRADEABLE",
+                tradable=True,
+            ),
+            intent=intent,
+            trade_service=trade_service,
+            execution=execution,
+        )
+
+    assert broker.placed_orders == []
+    assert execution.status == ExecutionStatus.FAILED.value
+    assert intent.state == TradeIntentState.FAILED.value
+    assert execution.details["execution_revalidation"]["layer"] == "broker_metadata"
+    assert (
+        execution.details["execution_revalidation"]["reason_code"]
+        == "broker_metadata_unavailable"
     )
     assert (
         intent.details["allocation_outcome"]["stage"] == "execution_revalidation_failed"

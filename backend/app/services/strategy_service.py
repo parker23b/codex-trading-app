@@ -1869,11 +1869,71 @@ class StrategyService:
             )
             or 1.0
         )
+        risk_amount = float(risk_amount)
+        if account_available < risk_amount:
+            reason = "Entry execution blocked because current available funds are below approved risk."
+            StrategyService._fail_entry_execution_revalidation(
+                trade_service=trade_service,
+                execution=execution,
+                intent=intent,
+                reason=reason,
+                reason_code="account_available_below_risk",
+                details={
+                    "layer": "account",
+                    "account_equity": account_equity,
+                    "account_available": account_available,
+                    "risk_amount": risk_amount,
+                },
+            )
+            raise ValueError(reason)
+
+        allocation_account_equity = float(allocation.get("account_equity") or 0.0)
+        approved_risk_percent = (
+            intent.allocated_risk_percent
+            or allocation.get("allocated_risk_percent")
+            or (
+                (risk_amount / allocation_account_equity) * 100.0
+                if allocation_account_equity > 0
+                else None
+            )
+        )
+        current_risk_percent = (risk_amount / account_equity) * 100.0
+        risk_percent_drift = StrategyService._drift_metric(
+            expected=float(approved_risk_percent)
+            if approved_risk_percent is not None
+            else None,
+            actual=current_risk_percent,
+            threshold_percent=get_settings().allocation_drift_warning_percent,
+        )
+        if (
+            isinstance(risk_percent_drift, dict)
+            and bool(risk_percent_drift.get("material"))
+            and float(risk_percent_drift.get("absolute_drift") or 0.0) > 0
+        ):
+            reason = "Entry execution blocked because account equity drift materially increased approved risk."
+            StrategyService._fail_entry_execution_revalidation(
+                trade_service=trade_service,
+                execution=execution,
+                intent=intent,
+                reason=reason,
+                reason_code="account_equity_drift",
+                details={
+                    "layer": "account",
+                    "account_equity_at_allocation": allocation.get("account_equity"),
+                    "account_equity": account_equity,
+                    "account_available": account_available,
+                    "risk_amount": risk_amount,
+                    "approved_risk_percent": approved_risk_percent,
+                    "current_risk_percent": current_risk_percent,
+                    "risk_percent_drift": risk_percent_drift,
+                },
+            )
+            raise ValueError(reason)
         try:
             sizing_quote = engine.broker.quote_risk_sized_order(
                 signal.instrument,
                 entry_price=signal.observed_price,
-                risk_amount=float(risk_amount),
+                risk_amount=risk_amount,
                 stop_loss_price=signal.stop_loss_price
                 or sizing_details.get("stop_loss_price"),
                 fallback_stop_distance=float(fallback_stop_distance),
@@ -2031,9 +2091,27 @@ class StrategyService:
             trade_intent=intent,
         )
         executable_size = intent.allocated_size or signal.size
-        size_validation = engine.broker.normalize_order_size(
-            signal.instrument, executable_size
-        )
+        try:
+            size_validation = engine.broker.normalize_order_size(
+                signal.instrument, executable_size
+            )
+        except Exception as exc:
+            reason = "Entry execution blocked because broker metadata is unavailable during size normalization."
+            StrategyService._fail_entry_execution_revalidation(
+                trade_service=trade_service,
+                execution=execution,
+                intent=intent,
+                reason=reason,
+                reason_code="broker_metadata_unavailable",
+                details={
+                    "layer": "broker_metadata",
+                    "stage": "size_normalization",
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "requested_size": executable_size,
+                },
+            )
+            raise ValueError(reason) from exc
         if not size_validation.accepted:
             risk_reconciliation = StrategyService._build_risk_reconciliation(
                 intent=intent
