@@ -477,6 +477,13 @@ class TradeService:
             raise
 
     def create_execution(self, execution: Execution) -> Execution:
+        if (
+            execution.status == ExecutionStatus.SUBMISSION_PENDING.value
+            and execution.submitted_at is None
+            and execution.acknowledged_at is None
+            and execution.completed_at is None
+        ):
+            execution.last_transition_at = execution.signal_time
         self.session.add(execution)
         self.session.commit()
         self.session.refresh(execution)
