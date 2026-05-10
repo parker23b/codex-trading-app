@@ -2043,6 +2043,56 @@ class StrategyService:
                     },
                 )
                 raise ValueError(reason)
+        approved_risk_amount = risk_amount
+        if isinstance(previous_sizing_quote, dict):
+            raw_previous_risk_amount = previous_sizing_quote.get("risk_amount")
+            if raw_previous_risk_amount is not None:
+                approved_risk_amount = float(raw_previous_risk_amount)
+        current_executable_risk_amount = None
+        if (
+            sizing_quote.precision is BrokerSizingPrecision.EXACT
+            and sizing_quote.risk_per_unit is not None
+            and sizing_quote.normalized_size is not None
+        ):
+            current_executable_risk_amount = float(
+                sizing_quote.normalized_size
+            ) * float(sizing_quote.risk_per_unit)
+        if approved_risk_amount > 0 and current_executable_risk_amount is not None:
+            sizing_quote_risk_drift = StrategyService._drift_metric(
+                expected=approved_risk_amount,
+                actual=current_executable_risk_amount,
+                threshold_percent=get_settings().allocation_drift_warning_percent,
+            )
+            if (
+                isinstance(sizing_quote_risk_drift, dict)
+                and bool(sizing_quote_risk_drift.get("material"))
+                and float(sizing_quote_risk_drift.get("absolute_drift_abs") or 0.0) > 0
+            ):
+                reason = (
+                    "Entry execution blocked because broker sizing quote risk drift "
+                    "requires reallocation."
+                )
+                StrategyService._fail_entry_execution_revalidation(
+                    trade_service=trade_service,
+                    execution=execution,
+                    intent=intent,
+                    reason=reason,
+                    reason_code="sizing_quote_risk_drift",
+                    details={
+                        "layer": "sizing_quote",
+                        "approved_risk_amount": approved_risk_amount,
+                        "current_executable_risk_amount": current_executable_risk_amount,
+                        "sizing_quote_risk_drift": sizing_quote_risk_drift,
+                        "current_sizing_quote_size": sizing_quote.normalized_size,
+                        "risk_per_unit": sizing_quote.risk_per_unit,
+                        "precision": sizing_quote.precision.value,
+                        "mode": sizing_quote.mode.value,
+                        "sizing_available": sizing_quote.sizing_available,
+                        "account_equity": account_equity,
+                        "account_available": account_available,
+                    },
+                )
+                raise ValueError(reason)
         if (
             engine.broker.account_type.value == "LIVE"
             and sizing_quote.precision is BrokerSizingPrecision.APPROXIMATE

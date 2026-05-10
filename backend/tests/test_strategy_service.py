@@ -17,7 +17,11 @@ from app.core.runtime import runtime_manager
 from app.core.signals import EntrySignal, SignalCandidate, SignalKind
 from sqlmodel import select
 
-from app.core.broker import BrokerOrderResult, BrokerOrderStatus
+from app.core.broker import (
+    BrokerOrderResult,
+    BrokerOrderStatus,
+    BrokerRiskSizingQuote,
+)
 from app.models.runtime import StrategyRuntimeState
 from app.models.strategy_deployment import StrategyDeployment
 from app.models.trade import (
@@ -894,6 +898,139 @@ def test_audit_risk_002_execution_blocks_material_broker_sizing_quote_drift(
     assert (
         intent.details["allocation_outcome"]["stage"] == "execution_revalidation_failed"
     )
+
+
+def test_audit_risk_002_execution_blocks_material_broker_unit_risk_drift(
+    session, broker, fixed_now, monkeypatch
+):
+    trade_service = TradeService(session)
+    runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
+    get_settings().allocation_drift_warning_percent = 5.0
+    broker.risk_sizing_quote_outcomes[INSTRUMENT] = [
+        BrokerRiskSizingQuote(
+            instrument=INSTRUMENT,
+            precision=BrokerSizingPrecision.EXACT,
+            mode=BrokerSizingMode.EXACT_CONTRACT_RISK,
+            sizing_available=True,
+            reason_code="quoted",
+            reason="Broker metadata changed unit risk without changing executable size.",
+            entry_price=100.0,
+            risk_amount=20.0,
+            requested_size=0.16666667,
+            normalized_size=0.2,
+            risk_per_unit=120.0,
+            stop_distance_price=1.0,
+        )
+    ]
+    broker.place_order_outcomes.append(
+        make_order_result(
+            broker_reference="entry-unit-risk-drift",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.0,
+            executed_at=fixed_now + timedelta(seconds=1),
+        )
+    )
+    intent = trade_service.create_trade_intent(
+        TradeIntent(
+            strategy_name=STRATEGY,
+            instrument=INSTRUMENT,
+            direction="BUY",
+            state=TradeIntentState.APPROVED.value,
+            signal_time=fixed_now,
+            proposed_size=0.2,
+            allocated_size=0.2,
+            proposed_risk_percent=0.02,
+            allocated_risk_percent=0.02,
+            estimated_risk_amount=20.0,
+            details={
+                "allocation": {
+                    "account_equity": 100_000.0,
+                    "risk_amount": 20.0,
+                    "allocated_risk_percent": 0.02,
+                    "normalized_size": 0.2,
+                    "sizing_precision": BrokerSizingPrecision.EXACT.value,
+                    "sizing_mode": BrokerSizingMode.EXACT_CONTRACT_RISK.value,
+                    "sizing_details": {
+                        "stop_distance_price": 1.0,
+                        "sizing_quote": {
+                            "precision": BrokerSizingPrecision.EXACT.value,
+                            "mode": BrokerSizingMode.EXACT_CONTRACT_RISK.value,
+                            "risk_amount": 20.0,
+                            "risk_per_unit": 100.0,
+                            "requested_size": 0.2,
+                            "normalized_size": 0.2,
+                            "stop_distance_price": 1.0,
+                        },
+                    },
+                }
+            },
+        )
+    )
+    execution = trade_service.create_execution(
+        Execution(
+            trade_intent_id=intent.id,
+            strategy_name=STRATEGY,
+            instrument=INSTRUMENT,
+            phase=ExecutionPhase.ENTRY.value,
+            status=ExecutionStatus.SUBMISSION_PENDING.value,
+            client_request_id="ent-unit-risk-drift",
+            signal_time=fixed_now,
+            requested_size=0.2,
+            requested_price=100.0,
+        )
+    )
+    engine = runtime_manager.start(strategy_name=STRATEGY, instrument=INSTRUMENT)
+    monkeypatch.setattr(
+        get_market_status_service(),
+        "get_status",
+        lambda instrument, *, broker=None, now=None, force_refresh=False: MarketStatus(
+            instrument=instrument,
+            is_ok=True,
+            market_open=True,
+            tradable=True,
+            quote_fresh=True,
+            spread_ok=True,
+            session_valid=True,
+            dealing_allowed=True,
+            last_price_age_ms=0.0,
+            spread=0.1,
+            reason=None,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="sizing quote risk drift"):
+        StrategyService._execute_entry_signal(
+            engine=engine,
+            signal=EntrySignal(
+                kind=SignalKind.ENTRY,
+                strategy_name=STRATEGY,
+                instrument=INSTRUMENT,
+                observed_price=100.0,
+                signal_at=fixed_now,
+                direction=OrderDirection.BUY,
+                size=0.2,
+                risk_percent=0.02,
+                bid=99.9,
+                ask=100.1,
+                market_status="TRADEABLE",
+                tradable=True,
+            ),
+            intent=intent,
+            trade_service=trade_service,
+            execution=execution,
+        )
+
+    assert broker.placed_orders == []
+    assert execution.status == ExecutionStatus.FAILED.value
+    assert intent.state == TradeIntentState.FAILED.value
+    revalidation = execution.details["execution_revalidation"]
+    assert revalidation["layer"] == "sizing_quote"
+    assert revalidation["reason_code"] == "sizing_quote_risk_drift"
+    assert revalidation["approved_risk_amount"] == pytest.approx(20.0)
+    assert revalidation["current_executable_risk_amount"] == pytest.approx(24.0)
+    assert revalidation["sizing_quote_risk_drift"]["material"] is True
 
 
 def test_audit_risk_002_execution_revalidates_market_status_without_cache(
