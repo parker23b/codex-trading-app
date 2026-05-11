@@ -643,6 +643,7 @@ class IGBroker(Broker):
                 entry_price=entry_price,
                 risk_amount=risk_amount,
                 min_stop_distance=details.min_normal_stop_or_limit_distance,
+                account_currency=self._account_currency,
                 details={"broker": "IG"},
             )
         price_increment = self._coerce_float(sizing_metadata.get("price_increment"))
@@ -668,6 +669,7 @@ class IGBroker(Broker):
                 entry_price=entry_price,
                 risk_amount=risk_amount,
                 min_stop_distance=details.min_normal_stop_or_limit_distance,
+                account_currency=self._account_currency,
                 details={
                     "broker": "IG",
                     "sizing_metadata": sizing_metadata,
@@ -700,9 +702,9 @@ class IGBroker(Broker):
             sizing_method=sizing_method,
             min_stop_distance=details.min_normal_stop_or_limit_distance,
             normalization=normalization,
+            account_currency=self._get_account_currency(),
             details={
                 "broker": "IG",
-                "account_currency": self._get_account_currency(),
                 "price_increment": price_increment,
                 "value_per_increment": value_per_increment,
                 "instrument_type": sizing_metadata.get("instrument_type"),

@@ -209,6 +209,16 @@ class FakeBroker(Broker):
         )
         if not isinstance(sizing_profile, dict):
             sizing_profile = self._sizing_profile_from_market_details(details)
+        account_currency = (
+            str(sizing_profile["account_currency"]).upper()
+            if sizing_profile.get("account_currency")
+            else None
+        )
+        diagnostic_sizing_profile = {
+            key: value
+            for key, value in sizing_profile.items()
+            if key != "account_currency"
+        }
         stop_distance, sizing_method = self._effective_stop_distance(
             entry_price=entry_price,
             stop_loss_price=stop_loss_price,
@@ -238,7 +248,11 @@ class FakeBroker(Broker):
                     stop_distance_price=stop_distance,
                     sizing_method=sizing_method,
                     min_stop_distance=details.min_normal_stop_or_limit_distance,
-                    details={"source": "fake_broker", "sizing_profile": sizing_profile},
+                    account_currency=account_currency,
+                    details={
+                        "source": "fake_broker",
+                        "sizing_profile": diagnostic_sizing_profile,
+                    },
                 )
             risk_per_unit = (stop_distance / price_increment) * value_per_increment
             precision = BrokerSizingPrecision.EXACT
@@ -259,7 +273,11 @@ class FakeBroker(Broker):
                     stop_distance_price=stop_distance,
                     sizing_method=sizing_method,
                     min_stop_distance=details.min_normal_stop_or_limit_distance,
-                    details={"source": "fake_broker", "sizing_profile": sizing_profile},
+                    account_currency=account_currency,
+                    details={
+                        "source": "fake_broker",
+                        "sizing_profile": diagnostic_sizing_profile,
+                    },
                 )
             risk_per_unit = stop_distance * contract_multiplier
             precision = BrokerSizingPrecision.EXACT
@@ -282,7 +300,11 @@ class FakeBroker(Broker):
                 stop_distance_price=stop_distance,
                 sizing_method=sizing_method,
                 min_stop_distance=details.min_normal_stop_or_limit_distance,
-                details={"source": "fake_broker", "sizing_profile": sizing_profile},
+                account_currency=account_currency,
+                details={
+                    "source": "fake_broker",
+                    "sizing_profile": diagnostic_sizing_profile,
+                },
             )
         requested_size = risk_amount / max(risk_per_unit, 1e-9)
         normalization = self.normalize_order_size(instrument, requested_size)
@@ -302,7 +324,11 @@ class FakeBroker(Broker):
             sizing_method=sizing_method,
             min_stop_distance=details.min_normal_stop_or_limit_distance,
             normalization=normalization,
-            details={"source": "fake_broker", "sizing_profile": sizing_profile},
+            account_currency=account_currency,
+            details={
+                "source": "fake_broker",
+                "sizing_profile": diagnostic_sizing_profile,
+            },
         )
 
     @staticmethod

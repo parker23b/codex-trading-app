@@ -1205,6 +1205,7 @@ class CapitalAllocatorService:
             "stop_distance_price": quote.stop_distance_price,
             "sizing_method": quote.sizing_method,
             "min_stop_distance": quote.min_stop_distance,
+            "account_currency": quote.account_currency,
             "normalization": {
                 "accepted": quote.normalization.accepted,
                 "reason_code": quote.normalization.reason_code,

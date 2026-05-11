@@ -132,6 +132,7 @@ class BrokerRiskSizingQuote:
     stop_distance_price: float | None = None
     sizing_method: str | None = None
     min_stop_distance: float | None = None
+    account_currency: str | None = None
     normalization: BrokerSizeNormalization | None = None
     details: dict[str, object] = field(default_factory=dict)
 

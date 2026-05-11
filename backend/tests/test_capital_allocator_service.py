@@ -148,6 +148,43 @@ def test_allocator_sizes_with_broker_owned_exact_point_value_quote(
     assert decision.sizing_details["risk_per_unit"] == pytest.approx(10.0)
 
 
+def test_audit_broker_004_allocator_serializes_sizing_currency_as_first_class_quote_field(
+    session, broker, fixed_now
+):
+    broker.account_summary = BrokerAccountSummary(
+        account_id="broker-neutral-currency",
+        balance=1_000.0,
+        available=1_000.0,
+        profit_loss=0.0,
+        equity=1_000.0,
+        account_type=AccountType.DEMO,
+    )
+    candidate = _candidate(
+        strategy_name="fx_micro_pullback",
+        instrument="CS.D.EURUSD.MINI.IP",
+        direction=OrderDirection.BUY,
+        signal_at=fixed_now,
+        broker=broker,
+        price=1.2000,
+        risk_per_trade=1.0,
+        stop_loss_price=1.1990,
+        sizing_profile={
+            "mode": BrokerSizingMode.EXACT_POINT_VALUE.value,
+            "price_increment": 0.0001,
+            "value_per_increment": 1.0,
+            "account_currency": "USD",
+        },
+    )
+
+    decision = CapitalAllocatorService(session).allocate(
+        [candidate], received_at=fixed_now
+    )[0]
+
+    serialized_quote = decision.sizing_details["sizing_quote"]
+    assert serialized_quote["account_currency"] == "USD"
+    assert serialized_quote["details"].get("account_currency") is None
+
+
 def test_allocator_uses_same_broker_quote_model_for_fallback_stop(
     session, broker, fixed_now
 ):

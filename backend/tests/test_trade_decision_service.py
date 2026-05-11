@@ -8,6 +8,10 @@ from app.core.broker import (
     AccountType,
     BrokerAccountSummary,
     BrokerMarketDetails,
+    BrokerRiskSizingQuote,
+    BrokerSizeNormalization,
+    BrokerSizingMode,
+    BrokerSizingPrecision,
     OrderDirection,
 )
 from app.core.runtime import runtime_manager
@@ -126,6 +130,92 @@ def test_decision_service_persists_proposed_signal_as_approved_trade_intent(
         "sizing_method"
     ) is not None
     assert intents[0].decision_reason_code == "approved"
+
+
+def test_audit_broker_004_decision_uses_first_class_sizing_quote_currency(
+    session, broker, fixed_now, monkeypatch
+):
+    _enable_live_entry_context(monkeypatch)
+    runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
+    broker.account_summary = BrokerAccountSummary(
+        account_id="broker-neutral-currency",
+        balance=10_000.0,
+        available=10_000.0,
+        profit_loss=0.0,
+        equity=10_000.0,
+        account_type=AccountType.DEMO,
+    )
+    broker.market_details_by_instrument[INSTRUMENT] = BrokerMarketDetails(
+        instrument=INSTRUMENT,
+        name=INSTRUMENT,
+        bid=1.1000,
+        offer=1.1002,
+        high=1.11,
+        low=1.09,
+        percentage_change=0.0,
+        net_change=0.0,
+        market_status="TRADEABLE",
+        update_time=fixed_now.isoformat(),
+        tradable=True,
+    )
+    broker.risk_sizing_quote_outcomes[INSTRUMENT] = [
+        BrokerRiskSizingQuote(
+            instrument=INSTRUMENT,
+            precision=BrokerSizingPrecision.EXACT,
+            mode=BrokerSizingMode.EXACT_POINT_VALUE,
+            sizing_available=True,
+            reason_code="quoted",
+            reason="Broker-neutral quote with first-class currency.",
+            entry_price=1.1001,
+            risk_amount=40.0,
+            requested_size=0.2,
+            normalized_size=0.2,
+            risk_per_unit=200.0,
+            stop_distance_price=0.001,
+            sizing_method="stop_distance",
+            account_currency="USD",
+            normalization=BrokerSizeNormalization(
+                instrument=INSTRUMENT,
+                requested_size=0.2,
+                normalized_size=0.2,
+                accepted=True,
+                reason_code="accepted",
+                reason="Accepted.",
+            ),
+            details={"source": "fake_broker"},
+        )
+    ]
+    decision_service = TradeDecisionService(session)
+    candidate = _candidate(
+        strategy_name="smoke_test_hold",
+        instrument=INSTRUMENT,
+        direction=OrderDirection.BUY,
+        signal_at=fixed_now,
+        confidence=0.9,
+        broker=broker,
+        position_size=0.2,
+        risk_per_trade=0.4,
+    )
+
+    result = decision_service.decide_signal_candidates(
+        [candidate], received_at=fixed_now
+    )[0]
+
+    assert result.intent is not None
+    assert result.intent.risk_currency == "USD"
+    assert result.intent.details["risk_tracking"]["risk_currency"] == "USD"
+    assert (
+        result.intent.details["allocation"]["sizing_details"]["sizing_quote"][
+            "account_currency"
+        ]
+        == "USD"
+    )
+    assert (
+        result.intent.details["allocation"]["sizing_details"]["sizing_quote"][
+            "details"
+        ].get("account_currency")
+        is None
+    )
 
 
 def test_decision_service_resolves_same_instrument_competition_explicitly(

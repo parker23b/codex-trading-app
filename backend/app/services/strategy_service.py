@@ -1651,9 +1651,7 @@ class StrategyService:
             else {}
         )
         risk_currency = intent.risk_currency or (
-            ((sizing_details.get("sizing_quote") or {}).get("details") or {}).get(
-                "account_currency"
-            )
+            (sizing_details.get("sizing_quote") or {}).get("account_currency")
         )
         account_equity = float(allocation.get("account_equity") or 0.0)
         stop_loss_price = sizing_details.get("stop_loss_price")
@@ -2163,6 +2161,7 @@ class StrategyService:
                 "normalized_size": sizing_quote.normalized_size,
                 "risk_per_unit": sizing_quote.risk_per_unit,
                 "stop_distance_price": sizing_quote.stop_distance_price,
+                "account_currency": sizing_quote.account_currency,
             },
         }
 

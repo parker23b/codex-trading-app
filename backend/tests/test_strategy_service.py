@@ -768,6 +768,70 @@ def test_audit_risk_002_execution_revalidates_sizing_quote_before_submission(
     )
 
 
+def test_audit_broker_004_execution_risk_snapshot_uses_first_class_sizing_quote_currency(
+    broker, fixed_now
+):
+    broker.market_details_by_instrument[INSTRUMENT] = BrokerMarketDetails(
+        instrument=INSTRUMENT,
+        name=INSTRUMENT,
+        bid=100.0,
+        offer=100.1,
+        high=101.0,
+        low=99.0,
+        percentage_change=0.0,
+        net_change=0.0,
+        market_status="TRADEABLE",
+        update_time=fixed_now.isoformat(),
+        tradable=True,
+        metadata={
+            "sizing_profile": {
+                "mode": BrokerSizingMode.EXACT_CONTRACT_RISK.value,
+                "contract_multiplier": 100.0,
+            }
+        },
+    )
+    intent = TradeIntent(
+        strategy_name=STRATEGY,
+        instrument=INSTRUMENT,
+        direction="BUY",
+        state=TradeIntentState.APPROVED.value,
+        signal_time=fixed_now,
+        proposed_size=0.2,
+        allocated_size=0.2,
+        proposed_risk_percent=0.1,
+        allocated_risk_percent=0.1,
+        estimated_risk_amount=100.0,
+        details={
+            "allocation": {
+                "account_equity": 100_000.0,
+                "risk_amount": 100.0,
+                "allocated_risk_percent": 0.1,
+                "normalized_size": 0.2,
+                "sizing_precision": BrokerSizingPrecision.EXACT.value,
+                "sizing_mode": BrokerSizingMode.EXACT_CONTRACT_RISK.value,
+                "sizing_details": {
+                    "stop_distance_price": 1.0,
+                    "sizing_quote": {
+                        "account_currency": "USD",
+                        "details": {"source": "fake_broker"},
+                    },
+                },
+            }
+        },
+    )
+
+    snapshot = StrategyService._estimate_execution_risk_snapshot(
+        broker=broker,
+        intent=intent,
+        entry_price=100.0,
+        size=0.2,
+        risk_state="submitted",
+        reservation_owner="EXECUTION",
+    )
+
+    assert snapshot["risk_currency"] == "USD"
+
+
 def test_audit_risk_002_execution_blocks_material_broker_sizing_quote_drift(
     session, broker, fixed_now
 ):

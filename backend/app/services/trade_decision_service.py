@@ -497,8 +497,7 @@ class TradeDecisionService:
         details: dict[str, object] | None = None,
     ) -> TradeIntent:
         risk_currency = (
-            ((allocation.sizing_details or {}).get("sizing_quote") or {}).get("details")
-            or {}
+            (allocation.sizing_details or {}).get("sizing_quote") or {}
         ).get("account_currency")
         allocation_outcome_stage = (
             "allocator_rejected"

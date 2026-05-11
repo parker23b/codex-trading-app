@@ -264,3 +264,5 @@ def test_ig_quote_risk_sized_order_is_exact_when_metadata_is_complete(monkeypatc
     assert quote.stop_distance_price == pytest.approx(0.001)
     assert quote.risk_per_unit == pytest.approx(10.0)
     assert quote.requested_size == pytest.approx(1.0)
+    assert quote.account_currency == "USD"
+    assert quote.details.get("account_currency") is None
