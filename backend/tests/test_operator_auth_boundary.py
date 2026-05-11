@@ -51,14 +51,40 @@ def test_audit_sec_001_all_state_changing_routes_require_operator_auth_policy():
 
 
 def test_audit_sec_001_write_on_read_refresh_routes_require_operator_auth_policy():
-    assert requires_operator_auth(method="GET", path="/reviews/operator-summary")
-    assert requires_operator_auth(method="GET", path="/reviews/daily")
-    assert requires_operator_auth(method="GET", path="/reviews/runtime-health")
-    assert requires_operator_auth(
+    assert not requires_operator_auth(method="GET", path="/reviews/operator-summary")
+    assert not requires_operator_auth(method="GET", path="/reviews/daily")
+    assert not requires_operator_auth(method="GET", path="/reviews/runtime-health")
+    assert not requires_operator_auth(
         method="GET", path="/reviews/strategies/{strategy_name}"
     )
-    assert requires_operator_auth(
+    assert not requires_operator_auth(
         method="GET", path="/reviews/trades/{trade_id}/postmortem"
+    )
+    assert requires_operator_auth(
+        method="GET",
+        path="/reviews/operator-summary",
+        query_params={"persist": "true"},
+    )
+    assert requires_operator_auth(
+        method="GET", path="/reviews/daily", query_params={"persist": "true"}
+    )
+    assert requires_operator_auth(
+        method="GET", path="/reviews/runtime-health", query_params={"persist": "true"}
+    )
+    assert requires_operator_auth(
+        method="GET",
+        path="/reviews/strategies/{strategy_name}",
+        query_params={"persist": "true"},
+    )
+    assert requires_operator_auth(
+        method="GET",
+        path="/reviews/trades/{trade_id}/postmortem",
+        query_params={"persist": "true"},
+    )
+    assert not requires_operator_auth(
+        method="GET",
+        path="/reviews/operator-summary",
+        query_params={"persist": "false"},
     )
     assert requires_operator_auth(
         method="GET", path="/allocation/alerts", query_params={"refresh": "true"}

@@ -78,7 +78,7 @@ def add_strategy_watchlist_items(
 def get_strategy_watchlist(
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
-    return WatchlistService(session).strategy_watchlist_response()
+    return WatchlistService(session).strategy_watchlist_response(sync=False)
 
 
 @router.delete("/strategy-watchlist/{instrument_id}")
@@ -91,7 +91,7 @@ def remove_strategy_watchlist_item(
 
 @router.get("/market-data/feed-state")
 def get_feed_state(session: Session = Depends(get_session)) -> dict[str, object]:
-    return WatchlistService(session).feed_state_response()
+    return WatchlistService(session).feed_state_response(sync=False)
 
 
 @router.get("/market-data/feed-state/{instrument_id}")

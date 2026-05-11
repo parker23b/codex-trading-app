@@ -40,7 +40,7 @@ AIMEE passive reads are explanation and orientation only. They are not command e
 - `GET /aimee/snapshot` must be classified as `PASSIVE_READ`.
 - `POST /reviews/questions` is an explicit `MUTATION` for user-requested advisory persistence.
 - `GET /reviews/history` and `GET /reviews/history/{review_id}` are passive review-history reads if they do not write.
-- Mutation-like `/reviews/*` GET endpoints that persist `GeneratedReviewRecord` rows must not be used by passive AIMEE refresh.
+- Mutation-like `/reviews/*` GET calls with `persist=true` must not be used by passive AIMEE refresh.
 
 If exact route classification differs in `04-backend-api-contract.md`, that needs audit rather than invented certainty.
 
@@ -58,7 +58,7 @@ If exact route classification differs in `04-backend-api-contract.md`, that need
 | AIMEE-008 | Frontend AIMEE passive refresh MUST call passive read endpoints only. Passive AIMEE components/hooks must not import or call mutation API functions except through visually explicit user-triggered advisory controls. | `getAimeeSnapshot` calls `GET /aimee/snapshot`; passive hooks/components do not call `POST /reviews/questions` or mutation-like `/reviews/*` GET endpoints automatically. | Frontend/API-client tests or import/call graph review. | P1 |
 | AIMEE-009 | AIMEE snapshot response fields consumed by the frontend MUST be modeled by a backend response model or documented dict schema, and synchronized with frontend types/API client assumptions. | Pydantic response model, documented schema, OpenAPI contract, or explicit frontend contract tests. | Contract test for AIMEE response fields used by frontend. | P1 |
 | AIMEE-010 | AIMEE explanations MUST NOT upgrade backend truth. Stale, fallback, estimated, provisional, unknown, simulated, disconnected, blocked, manual-review, or degraded backend states must remain visible in AIMEE copy and UI. | AIMEE formatter/prompt/read-model code preserves confidence/provenance fields. | Tests or fixtures for degraded/stale/fallback/unknown/manual-review AIMEE responses. | P1 |
-| AIMEE-011 | Passive AIMEE refresh MUST NOT call `/reviews/*` GET endpoints that persist `GeneratedReviewRecord` rows by default. If review data is needed passively, it must come from non-persisting read methods or passive history endpoints. | API-client and backend service call review proving passive AIMEE uses `GET /aimee/snapshot` and passive history reads only. | Tests fail if passive AIMEE refresh calls mutation-like review GET endpoints. | P1 |
+| AIMEE-011 | Passive AIMEE refresh MUST NOT call `/reviews/*` GET endpoints with `persist=true`. If review data is needed passively, it must come from non-persisting read methods or passive history endpoints. | API-client and backend service call review proving passive AIMEE uses `GET /aimee/snapshot` and passive history reads only. | Tests fail if passive AIMEE refresh calls mutation-like review GET endpoints or passes `persist=true`. | P1 |
 | AIMEE-012 | AIMEE passive snapshot and passive drawer behavior MUST NOT perform command execution, remediation, runtime changes, governance updates, watchlist mutations, alert acknowledge/resolve, broker actions, or testing resets automatically. | Frontend/backend review showing passive AIMEE has no mutation controls or automatic mutation calls. | Component/API tests for passive drawer open, refresh, polling, and snapshot load. | P0 |
 
 ## Allowed reads
@@ -166,12 +166,12 @@ Passive AIMEE snapshot must be audited for absence of:
 ## Known unknowns
 
 - Frontend AIMEE tests were not found.
-- Whether all `/reviews/*` GET endpoints persist by default needs route-level audit beyond AIMEE passive snapshot.
+- `/reviews/*` GET endpoints now default to non-persisting previews; future audit should ensure passive AIMEE never opts into `persist=true`.
 - AIMEE response shape is a dict and not strongly modeled by a backend Pydantic response model.
 - Frontend AIMEE passive refresh import/call boundaries have not been proven by tests.
 - Whether AIMEE explanations preserve all degraded/stale/fallback/unknown/manual-review provenance needs fixture coverage.
 - Whether passive AIMEE could indirectly call mutation-capable helpers through shared summary/projection services needs route-level audit.
-- Whether passive AIMEE uses any `/reviews/*` GET endpoint that persists by default needs frontend and backend call-path audit.
+- Whether passive AIMEE uses any `/reviews/*` GET endpoint with `persist=true` needs frontend and backend call-path audit.
 - Whether future AIMEE conversation persistence, preferences, or feedback storage could blur the passive operational snapshot boundary needs separate specification.
 - Whether operational telemetry projections used by AIMEE are guaranteed side-effect free needs confirmation.
 - Whether allocation/risk summaries used by AIMEE can refresh alerts or persist derived state needs confirmation.
@@ -187,7 +187,7 @@ Passive AIMEE snapshot must be audited for absence of:
 - Contract tests or schema tests for AIMEE response fields consumed by frontend.
 - Fixture tests proving AIMEE explanations preserve degraded, stale, fallback, estimated, unknown, simulated, manual-review, and unavailable states.
 - Tests proving passive AIMEE loading/error/fallback states are not rendered as healthy system truth.
-- Tests proving mutation-like `/reviews/*` GET endpoints are not used by passive AIMEE refresh.
+- Tests proving mutation-like `/reviews/*?persist=true` GET calls are not used by passive AIMEE refresh.
 
 ## Audit questions for Codex
 
@@ -197,7 +197,7 @@ Passive AIMEE snapshot must be audited for absence of:
 - Does passive AIMEE trigger reconciliation, recovery, adoption, forced close, broker reads with reconciliation side effects, or broker mutation?
 - Does passive AIMEE seed governance defaults, sync watchlists, refresh allocation alerts, emit events, or mutate runtime/control state?
 - Does any passive AIMEE frontend component, hook, drawer open, refresh, or polling path call `POST /reviews/questions` automatically?
-- Does passive AIMEE call mutation-like `/reviews/*` GET endpoints that persist by default?
+- Does passive AIMEE call mutation-like `/reviews/*` GET endpoints with `persist=true`?
 - Is AIMEE response shape modeled by Pydantic or documented dict schema?
 - Which AIMEE response fields are consumed by `frontend/components/aimee`?
 - Does AIMEE copy preserve degraded, stale, fallback, estimated, unknown, simulated, manual-review, and unavailable states?

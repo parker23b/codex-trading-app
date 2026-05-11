@@ -17,8 +17,8 @@ class CoverageService:
         self.watchlist_service = WatchlistService(session)
 
     def get_summary(self) -> dict[str, object]:
-        streaming_plan = self.watchlist_service.get_streaming_plan()
-        tier2_plan = self.watchlist_service.get_tier2_refresh_plan()
+        streaming_plan = self.watchlist_service.get_streaming_plan(sync=False)
+        tier2_plan = self.watchlist_service.get_tier2_refresh_plan(sync=False)
         watchlist_entries = list(
             self.session.exec(
                 select(WatchlistEntry).where(

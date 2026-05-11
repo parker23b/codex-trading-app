@@ -29,18 +29,20 @@ class OperationalQuestionRequest(BaseModel):
 
 @router.get("/operator-summary", response_model=OperatorSummaryReview)
 def get_operator_summary(
+    persist: bool = Query(default=False),
     session: Session = Depends(get_session),
 ) -> OperatorSummaryReview:
-    return AIReviewerService(session).get_operator_summary()
+    return AIReviewerService(session).get_operator_summary(persist=persist)
 
 
 @router.get("/daily", response_model=DailyReviewResponse)
 def get_daily_review(
     review_date: date | None = Query(default=None, alias="date"),
+    persist: bool = Query(default=False),
     session: Session = Depends(get_session),
 ) -> DailyReviewResponse:
     return AIReviewerService(session).get_daily_review(
-        review_date or datetime.now(UTC).date()
+        review_date or datetime.now(UTC).date(), persist=persist
     )
 
 
@@ -48,19 +50,23 @@ def get_daily_review(
 def get_strategy_review(
     strategy_name: str,
     days: int = Query(default=7, ge=1, le=90),
+    persist: bool = Query(default=False),
     session: Session = Depends(get_session),
 ) -> StrategyReviewResponse:
     return AIReviewerService(session).get_strategy_review(
-        strategy_name, period_days=days
+        strategy_name, period_days=days, persist=persist
     )
 
 
 @router.get("/runtime-health", response_model=RuntimeHealthReviewResponse)
 def get_runtime_health_review(
     hours: int = Query(default=24, ge=1, le=168),
+    persist: bool = Query(default=False),
     session: Session = Depends(get_session),
 ) -> RuntimeHealthReviewResponse:
-    return AIReviewerService(session).get_runtime_health_review(period_hours=hours)
+    return AIReviewerService(session).get_runtime_health_review(
+        period_hours=hours, persist=persist
+    )
 
 
 @router.get(
@@ -68,10 +74,13 @@ def get_runtime_health_review(
 )
 def get_trade_postmortem(
     trade_id: int,
+    persist: bool = Query(default=False),
     session: Session = Depends(get_session),
 ) -> TradePostMortemReviewResponse:
     try:
-        return AIReviewerService(session).get_trade_postmortem(trade_id)
+        return AIReviewerService(session).get_trade_postmortem(
+            trade_id, persist=persist
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)

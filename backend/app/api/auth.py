@@ -31,18 +31,10 @@ def requires_operator_auth(
     if normalized_method != "GET":
         return False
 
-    if path in ACTIVE_READ_REFRESH_GET_PATHS:
-        return True
-    if _is_review_refresh_path(path):
-        return True
+    if path in ACTIVE_READ_REFRESH_GET_PATHS or _is_review_refresh_path(path):
+        return _truthy_query_param(query_params, "persist")
     if path == "/allocation/alerts":
-        refresh = (query_params or {}).get("refresh")
-        return refresh is not None and refresh.lower() not in {
-            "0",
-            "false",
-            "no",
-            "off",
-        }
+        return _truthy_query_param(query_params, "refresh")
     return False
 
 
@@ -106,3 +98,8 @@ def _is_review_refresh_path(path: str) -> bool:
     if path.startswith("/reviews/strategies/"):
         return True
     return path.startswith("/reviews/trades/") and path.endswith("/postmortem")
+
+
+def _truthy_query_param(query_params: Mapping[str, str] | None, name: str) -> bool:
+    value = (query_params or {}).get(name)
+    return value is not None and value.lower() not in {"0", "false", "no", "off"}

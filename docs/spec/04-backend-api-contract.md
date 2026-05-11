@@ -66,7 +66,7 @@ This inventory was discovered from `backend/app/api/router.py` and `backend/app/
 | GET | `/control-plane/strategies/{strategy_name}` | `routes/control_plane.py:get_control_plane_strategy_detail` | `PASSIVE_READ` | Projection; default governance/deployment seeding removed and regression-tested; raw dict schema still needed | Control plane | Raw dict needs schema | Medium |
 | POST | `/control-plane/reconcile` | `routes/control_plane.py:reconcile_control_plane` | `MUTATION` | Reconciles control-plane state; may create/update lifecycle evidence | Needs confirmation | Raw dict needs schema | High |
 | PUT | `/control-plane/governance/{strategy_name}` | `routes/control_plane.py:update_strategy_governance` | `MUTATION` | Updates strategy governance | Control plane | Raw dict needs schema | High |
-| GET | `/coverage/summary` | `routes/coverage.py:get_coverage_summary` | `PASSIVE_READ` | Coverage projection; refresh-plan side effects need audit | Coverage/dashboard | Pydantic model | Medium |
+| GET | `/coverage/summary` | `routes/coverage.py:get_coverage_summary` | `PASSIVE_READ` | Coverage projection; uses passive watchlist plan snapshots without syncing or timestamp writes | Coverage/dashboard | Pydantic model | High |
 | GET | `/dashboard` | `routes/dashboard.py:get_dashboard` | `PASSIVE_READ` | Dashboard projection; indirect write audit needed | Operate dashboard | Raw dict needs schema | Medium |
 | GET | `/events` | `routes/events.py:list_events` | `PASSIVE_READ` | Event read | Events page/live view | Pydantic list model | High |
 | GET | `/events/{event_id}` | `routes/events.py:get_event` | `PASSIVE_READ` | Event read | Events detail | Pydantic model | High |
@@ -88,9 +88,9 @@ This inventory was discovered from `backend/app/api/router.py` and `backend/app/
 | POST | `/watchlist/shortlist/{instrument_id}` | `routes/markets.py:add_shortlist_item` | `MUTATION` | Adds shortlist item | Markets page | Raw dict needs schema | High |
 | DELETE | `/watchlist/shortlist/{instrument_id}` | `routes/markets.py:remove_shortlist_item` | `MUTATION` | Removes shortlist item | Markets page | Raw dict needs schema | High |
 | POST | `/strategy-watchlist/bulk` | `routes/markets.py:add_strategy_watchlist_items` | `MUTATION` | Bulk adds strategy watchlist items | Markets page | Raw dict needs schema | High |
-| GET | `/strategy-watchlist` | `routes/markets.py:get_strategy_watchlist` | `PASSIVE_READ` | Watchlist read | Markets/coverage | Raw dict needs schema | Medium |
+| GET | `/strategy-watchlist` | `routes/markets.py:get_strategy_watchlist` | `PASSIVE_READ` | Watchlist read with `sync=false`; no watchlist sync or timestamp writes | Markets/coverage | Raw dict needs schema | High |
 | DELETE | `/strategy-watchlist/{instrument_id}` | `routes/markets.py:remove_strategy_watchlist_item` | `MUTATION` | Removes strategy watchlist item | Markets page | Raw dict needs schema | High |
-| GET | `/market-data/feed-state` | `routes/markets.py:get_feed_state` | `PASSIVE_READ` | Feed-state projection; no refresh writes proven | Coverage/markets/live | Raw dict needs schema | Medium |
+| GET | `/market-data/feed-state` | `routes/markets.py:get_feed_state` | `PASSIVE_READ` | Feed-state projection with `sync=false`; no watchlist sync or timestamp writes | Coverage/markets/live | Raw dict needs schema | High |
 | GET | `/market-data/feed-state/{instrument_id}` | `routes/markets.py:get_instrument_feed_state` | `PASSIVE_READ` | Instrument feed-state projection | Live chart | Raw dict needs schema | Medium |
 | GET | `/live/instruments/{instrument_id}/chart` | `routes/markets.py:get_live_instrument_chart` | `PASSIVE_READ` | Chart projection from local/feed state; broker read audit needed | Markets/live | Raw dict needs schema | Medium |
 | GET | `/charts/equity` | `routes/charts.py:get_equity_chart` | `PASSIVE_READ` | Chart projection | Needs confirmation | Raw dict needs schema | Medium |
@@ -106,11 +106,11 @@ This inventory was discovered from `backend/app/api/router.py` and `backend/app/
 | POST | `/strategies/{name}/start` | `routes/strategies.py:start_strategy_by_name` | `MUTATION` | Starts runtime by name | Needs confirmation/compat | Pydantic model | High |
 | POST | `/strategies/{name}/stop` | `routes/strategies.py:stop_strategy_by_name` | `MUTATION` | Stops runtime by name | Needs confirmation/compat | Pydantic model | High |
 | GET | `/aimee/snapshot` | `routes/aimee.py:get_snapshot` | `PASSIVE_READ` | Passive AIMEE snapshot; must not persist/reconcile/sync | AIMEE drawer | Raw dict needs schema | High |
-| GET | `/reviews/operator-summary` | `routes/ai_reviewer.py:get_operator_summary` | `ACTIVE_READ_REFRESH` | Persists `GeneratedReviewRecord` by default | Reviewer/AIMEE | Pydantic model | High |
-| GET | `/reviews/daily` | `routes/ai_reviewer.py:get_daily_review` | `ACTIVE_READ_REFRESH` | Persists `GeneratedReviewRecord` by default | Needs confirmation | Pydantic model | High |
-| GET | `/reviews/strategies/{strategy_name}` | `routes/ai_reviewer.py:get_strategy_review` | `ACTIVE_READ_REFRESH` | Persists `GeneratedReviewRecord` by default | Needs confirmation | Pydantic model | High |
-| GET | `/reviews/runtime-health` | `routes/ai_reviewer.py:get_runtime_health_review` | `ACTIVE_READ_REFRESH` | Persists `GeneratedReviewRecord` by default | Needs confirmation | Pydantic model | High |
-| GET | `/reviews/trades/{trade_id}/postmortem` | `routes/ai_reviewer.py:get_trade_postmortem` | `ACTIVE_READ_REFRESH` | Persists `GeneratedReviewRecord` by default | Needs confirmation | Pydantic model | High |
+| GET | `/reviews/operator-summary` | `routes/ai_reviewer.py:get_operator_summary` | `PASSIVE_READ` by default; `ACTIVE_READ_REFRESH` when `persist=true` | Default preview does not persist; explicit `persist=true` creates `GeneratedReviewRecord` | Reviewer/AIMEE | Pydantic model | High |
+| GET | `/reviews/daily` | `routes/ai_reviewer.py:get_daily_review` | `PASSIVE_READ` by default; `ACTIVE_READ_REFRESH` when `persist=true` | Default preview does not persist; explicit `persist=true` creates `GeneratedReviewRecord` | Needs confirmation | Pydantic model | High |
+| GET | `/reviews/strategies/{strategy_name}` | `routes/ai_reviewer.py:get_strategy_review` | `PASSIVE_READ` by default; `ACTIVE_READ_REFRESH` when `persist=true` | Default preview does not persist; explicit `persist=true` creates `GeneratedReviewRecord` | Needs confirmation | Pydantic model | High |
+| GET | `/reviews/runtime-health` | `routes/ai_reviewer.py:get_runtime_health_review` | `PASSIVE_READ` by default; `ACTIVE_READ_REFRESH` when `persist=true` | Default preview does not persist; explicit `persist=true` creates `GeneratedReviewRecord` | Needs confirmation | Pydantic model | High |
+| GET | `/reviews/trades/{trade_id}/postmortem` | `routes/ai_reviewer.py:get_trade_postmortem` | `PASSIVE_READ` by default; `ACTIVE_READ_REFRESH` when `persist=true` | Default preview does not persist; explicit `persist=true` creates `GeneratedReviewRecord` | Needs confirmation | Pydantic model | High |
 | POST | `/reviews/questions` | `routes/ai_reviewer.py:answer_operational_question` | `MUTATION` | Persists requested advisory artifact | AIMEE/reviewer | Pydantic model | High |
 | GET | `/reviews/history` | `routes/ai_reviewer.py:list_review_history` | `PASSIVE_READ` | Review history read | AIMEE/reviewer | Pydantic list model | High |
 | GET | `/reviews/history/{review_id}` | `routes/ai_reviewer.py:get_review_record` | `PASSIVE_READ` | Review record read | Reviewer | Pydantic model | High |
@@ -122,11 +122,11 @@ The following routes are not passive reads even though they use GET or read-like
 
 | Route | Current behavior | Required classification | Preferred future direction |
 | --- | --- | --- | --- |
-| `GET /reviews/operator-summary` | Persists `GeneratedReviewRecord` by default. | `ACTIVE_READ_REFRESH` | Add a passive preview endpoint or make persistence explicit through POST/query/body. |
-| `GET /reviews/daily` | Persists `GeneratedReviewRecord` by default. | `ACTIVE_READ_REFRESH` | Same as above. |
-| `GET /reviews/strategies/{strategy_name}` | Persists `GeneratedReviewRecord` by default. | `ACTIVE_READ_REFRESH` | Same as above. |
-| `GET /reviews/runtime-health` | Persists `GeneratedReviewRecord` by default. | `ACTIVE_READ_REFRESH` | Same as above. |
-| `GET /reviews/trades/{trade_id}/postmortem` | Persists `GeneratedReviewRecord` by default. | `ACTIVE_READ_REFRESH` | Same as above. |
+| `GET /reviews/operator-summary?persist=true` | Explicitly persists `GeneratedReviewRecord`. | `ACTIVE_READ_REFRESH` | Prefer POST persistence long term if review archival becomes an operator workflow. |
+| `GET /reviews/daily?persist=true` | Explicitly persists `GeneratedReviewRecord`. | `ACTIVE_READ_REFRESH` | Same as above. |
+| `GET /reviews/strategies/{strategy_name}?persist=true` | Explicitly persists `GeneratedReviewRecord`. | `ACTIVE_READ_REFRESH` | Same as above. |
+| `GET /reviews/runtime-health?persist=true` | Explicitly persists `GeneratedReviewRecord`. | `ACTIVE_READ_REFRESH` | Same as above. |
+| `GET /reviews/trades/{trade_id}/postmortem?persist=true` | Explicitly persists `GeneratedReviewRecord`. | `ACTIVE_READ_REFRESH` | Same as above. |
 | `GET /allocation/alerts?refresh=true` | Can refresh persisted alerts. | `ACTIVE_READ_REFRESH` | Prefer POST refresh or separate mutation endpoint. |
 
 ## Side-effect rules
@@ -169,7 +169,7 @@ They must be unavailable in production-like operation unless explicitly protecte
 - Some `PASSIVE_READ` or projection-labelled routes may call services that seed defaults, refresh alerts, reconcile broker state, create events, or commit/flush indirectly.
 - Response contract status is unclear for many raw dict responses consumed by frontend components.
 - Unknown frontend consumer status requires code search before treating routes as unused.
-- `/reviews/*` GET persistence may need API redesign to separate passive preview from explicit persistence.
+- `/reviews/*` GET persistence now requires explicit `persist=true`; a future API redesign may still move archival persistence to POST.
 - `/allocation/alerts?refresh=true` may need to move to POST or a clearly mutation-classified endpoint.
 - `GET /allocation/alerts` now defaults to passive `refresh=false`; explicit `refresh=true` remains mutation-like and tested.
 - Test-only route gating currently has router-registration regression evidence for `/testing/reset-history`; broader HTTP route harness evidence is still missing.
@@ -180,7 +180,7 @@ They must be unavailable in production-like operation unless explicitly protecte
 - Route inventory test or review checklist comparing registered FastAPI routes to this spec.
 - Route-level tests proving `PASSIVE_READ` routes do not write, flush, commit, seed defaults, reconcile broker state, refresh alerts, create events, persist reviews, or mutate runtime/broker state.
 - Tests proving `ACTIVE_READ_REFRESH` routes have intentional documented side effects.
-- Tests proving `/reviews/*` write-on-read behavior is either preserved intentionally with documentation or replaced by explicit mutation endpoints.
+- Tests proving `/reviews/*` default previews do not write and `persist=true` active reads intentionally persist review records.
 - Tests proving `GET /allocation/alerts` default behavior is passive and `refresh=true` behavior is classified/tested as mutation-like, or migrated to POST.
 - Tests proving broker mutation routes require lifecycle authority and preserve audit state.
 - Tests proving test-only routes are unavailable in production-like operation.

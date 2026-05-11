@@ -274,9 +274,10 @@ class WatchlistService:
             session.delete(entry)
             session.commit()
 
-    def list_strategy_watchlist(self) -> list[dict[str, object]]:
+    def list_strategy_watchlist(self, *, sync: bool = True) -> list[dict[str, object]]:
         with self._session_scope() as session:
-            self._sync_system_entries(session=session, now=self._now())
+            if sync:
+                self._sync_system_entries(session=session, now=self._now())
             entries = list(
                 session.exec(
                     select(WatchlistEntry)
@@ -299,8 +300,8 @@ class WatchlistService:
                 )
             ]
 
-    def strategy_watchlist_response(self) -> dict[str, object]:
-        rows = self.list_strategy_watchlist()
+    def strategy_watchlist_response(self, *, sync: bool = True) -> dict[str, object]:
+        rows = self.list_strategy_watchlist(sync=sync)
         protective_count = len([row for row in rows if row.get("protective")])
         normal_count = len(rows) - protective_count
         limit = self.settings.ig_streaming_max_instruments
@@ -418,8 +419,8 @@ class WatchlistService:
             "limit": self.settings.ig_streaming_max_instruments,
         }
 
-    def feed_state_response(self) -> dict[str, object]:
-        watchlist = self.list_strategy_watchlist()
+    def feed_state_response(self, *, sync: bool = True) -> dict[str, object]:
+        watchlist = self.list_strategy_watchlist(sync=sync)
         rows = [
             self.feed_state_for_instrument(str(row["instrument"]), watchlist_entry=row)
             for row in watchlist
@@ -545,10 +546,11 @@ class WatchlistService:
             session.add(entry)
             session.commit()
 
-    def get_streaming_plan(self) -> StreamingPlan:
+    def get_streaming_plan(self, *, sync: bool = True) -> StreamingPlan:
         with self._session_scope() as session:
             now = self._now()
-            self._sync_system_entries(session=session, now=now)
+            if sync:
+                self._sync_system_entries(session=session, now=now)
             entries = list(
                 session.exec(
                     select(WatchlistEntry)
@@ -597,20 +599,21 @@ class WatchlistService:
                 normal_selected_count += 1
                 asset_usage[asset_class] += 1
 
-            for instrument in selected:
-                entry = next(
-                    (
-                        candidate
-                        for candidate in entries
-                        if candidate.instrument == instrument
-                    ),
-                    None,
-                )
-                if entry is not None:
-                    entry.last_streamed_at = now
-                    entry.updated_at = now
-                    session.add(entry)
-            session.commit()
+            if sync:
+                for instrument in selected:
+                    entry = next(
+                        (
+                            candidate
+                            for candidate in entries
+                            if candidate.instrument == instrument
+                        ),
+                        None,
+                    )
+                    if entry is not None:
+                        entry.last_streamed_at = now
+                        entry.updated_at = now
+                        session.add(entry)
+                session.commit()
 
             return StreamingPlan(
                 instruments=tuple(selected),
@@ -619,12 +622,13 @@ class WatchlistService:
                 asset_class_usage=dict(asset_usage),
             )
 
-    def get_tier2_refresh_plan(self) -> Tier2RefreshPlan:
-        streaming_plan = self.get_streaming_plan()
+    def get_tier2_refresh_plan(self, *, sync: bool = True) -> Tier2RefreshPlan:
+        streaming_plan = self.get_streaming_plan(sync=sync)
         streamed = set(streaming_plan.instruments)
         with self._session_scope() as session:
             now = self._now()
-            self._sync_tier2_seed_entries(session=session, now=now)
+            if sync:
+                self._sync_tier2_seed_entries(session=session, now=now)
             tier2_entries = list(
                 session.exec(
                     select(WatchlistEntry)
