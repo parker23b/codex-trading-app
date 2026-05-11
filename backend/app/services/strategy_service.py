@@ -549,13 +549,13 @@ class StrategyService:
                 f"No active engine for strategy '{strategy_name}' on '{instrument}'."
             )
         engine.runtime_mode = runtime_mode
+        persisted_runtime = None
         if self.runtime_state_service is not None:
-            self.runtime_state_service.sync_engine_state(
+            persisted_runtime = self.runtime_state_service.sync_engine_state(
                 strategy_name=strategy_name,
                 instrument=instrument,
                 status="RUNNING",
                 recovery_state="RUNNING",
-                control_mode="AUTO",
                 runtime_mode=runtime_mode,
                 last_price_seen=runtime_manager.get_last_price(instrument),
                 last_price_seen_at=runtime_manager.get_last_price_updated_at(
@@ -574,7 +574,15 @@ class StrategyService:
             runtime_id=engine.runtime_id,
             strategy_name=strategy_name,
             instrument=instrument,
-            payload_json={"runtime_mode": runtime_mode, "reason": recovery_reason},
+            payload_json={
+                "runtime_mode": runtime_mode,
+                "control_mode": (
+                    persisted_runtime.control_mode
+                    if persisted_runtime is not None
+                    else None
+                ),
+                "reason": recovery_reason,
+            },
         )
 
     def stop_strategy(

@@ -2601,6 +2601,25 @@ def test_exits_only_runtime_mode_suppresses_new_entries(session, broker, fixed_n
     assert trade_service.list_trade_intents(limit=10) == []
 
 
+def test_audit_life_004_set_runtime_mode_preserves_manual_runtime_ownership(
+    session,
+):
+    service = StrategyService(session)
+    service.start_strategy(STRATEGY, INSTRUMENT, control_mode="MANUAL")
+
+    service.set_runtime_mode(
+        strategy_name=STRATEGY, instrument=INSTRUMENT, runtime_mode="EXITS_ONLY"
+    )
+
+    runtime = session.exec(
+        select(StrategyRuntimeState)
+        .where(StrategyRuntimeState.strategy_name == STRATEGY)
+        .where(StrategyRuntimeState.instrument == INSTRUMENT)
+    ).one()
+    assert runtime.control_mode == "MANUAL"
+    assert runtime.runtime_mode == "EXITS_ONLY"
+
+
 def test_exits_only_runtime_mode_still_allows_strategy_driven_exits(
     session, broker, fixed_now
 ):
