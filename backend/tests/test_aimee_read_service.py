@@ -288,6 +288,35 @@ def test_aimee_snapshot_route_is_side_effect_free(session, fixed_now, monkeypatc
     assert before == after_first == after_second
 
 
+def test_audit_api_007_aimee_passive_snapshot_does_not_call_broker_account(
+    session, fixed_now, monkeypatch
+):
+    _seed_read_models(session, fixed_now)
+
+    broker_account_reads = 0
+
+    def _fail_broker_read():
+        nonlocal broker_account_reads
+        broker_account_reads += 1
+        raise AssertionError("AIMEE passive snapshot must not call broker account")
+
+    monkeypatch.setattr(
+        "app.services.dashboard_service.get_broker",
+        _fail_broker_read,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.core.broker_factory.get_broker",
+        _fail_broker_read,
+    )
+
+    snapshot = get_aimee_snapshot_route(session)
+
+    assert snapshot["review"] is not None
+    assert snapshot["review"].metadata.review_id is None
+    assert broker_account_reads == 0
+
+
 def test_get_operator_summary_persist_false_does_not_create_review_rows(session):
     reviewer = AIReviewerService(session)
     response = reviewer.get_operator_summary(persist=False)

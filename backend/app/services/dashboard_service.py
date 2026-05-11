@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from app.core.broker_factory import get_broker
 from app.core.config import get_settings
 from app.core.instrument_catalog import list_instruments
 from app.core.runtime import runtime_manager
@@ -24,12 +23,7 @@ class DashboardService:
         recent_trades = trades[: self.settings.dashboard_recent_trade_window]
         system_daily_pnl = self._daily_pnl(trades, positions)
         persisted_account_value = self._persisted_account_value(trades, positions)
-        broker_info = self._broker_info()
-        account_value = (
-            broker_info["equity"]
-            if broker_info is not None
-            else persisted_account_value
-        )
+        account_value = persisted_account_value
 
         return {
             "accountValue": round(account_value, 2),
@@ -51,7 +45,7 @@ class DashboardService:
             "winRate": round(self._win_rate(recent_trades), 2),
             "riskReward": round(self._risk_reward(recent_trades), 2),
             "runningStrategies": self._running_strategies(),
-            "brokerInfo": broker_info,
+            "brokerInfo": None,
         }
 
     def build_equity_curve(self) -> list[dict[str, float | str]]:
@@ -141,21 +135,6 @@ class DashboardService:
         closed_pnl = sum(trade.pnl for trade in trades)
         open_pnl = sum(position.unrealized_pnl or 0.0 for position in positions)
         return self.settings.starting_account_value + closed_pnl + open_pnl
-
-    @staticmethod
-    def _broker_info() -> dict[str, object] | None:
-        try:
-            summary = get_broker().get_account_summary()
-        except Exception:
-            return None
-        return {
-            "accountId": summary.account_id,
-            "accountType": summary.account_type.value,
-            "balance": summary.balance,
-            "available": summary.available,
-            "equity": summary.equity,
-            "profitLoss": summary.profit_loss,
-        }
 
     @staticmethod
     def _win_rate(trades: Sequence[Trade]) -> float:
