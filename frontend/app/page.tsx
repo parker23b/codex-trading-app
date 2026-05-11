@@ -38,7 +38,7 @@ export default async function DashboardPage() {
     loadWithMeta(() => getControlPlaneSummary(), EMPTY_CONTROL_PLANE_SUMMARY),
     loadWithMeta(() => getSystemOperatingLimits(), EMPTY_SYSTEM_OPERATING_LIMITS),
     loadWithMeta(() => getAllocationExposureSummary(), EMPTY_ALLOCATION_EXPOSURE_SUMMARY),
-    loadWithMeta(() => getAllocationAlerts({ limit: 40, refresh: true }), [] as AllocationAlert[]),
+    loadWithMeta(() => getAllocationAlerts({ limit: 40 }), [] as AllocationAlert[]),
     loadWithMeta(() => getAllocationDriftSummary({ limit: 20, windowMinutes: 720 }), EMPTY_ALLOCATION_DRIFT_SUMMARY),
     loadWithMeta(() => getAllocationCycles(12), [] as AllocationCycle[]),
     loadWithMeta(() => getAllocationIntents({ limit: 40 }), [] as AllocationIntent[]),

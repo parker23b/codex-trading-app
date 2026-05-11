@@ -63,10 +63,10 @@ def test_audit_sec_001_write_on_read_refresh_routes_require_operator_auth_policy
     assert requires_operator_auth(
         method="GET", path="/allocation/alerts", query_params={"refresh": "true"}
     )
-    assert requires_operator_auth(
+    assert not requires_operator_auth(
         method="GET", path="/allocation/alerts", query_params={}
     )
-    assert requires_operator_auth(
+    assert not requires_operator_auth(
         method="GET", path="/allocation/alerts/unresolved-critical"
     )
     assert not requires_operator_auth(

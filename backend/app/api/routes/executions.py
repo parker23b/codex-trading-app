@@ -35,6 +35,9 @@ class ExecutionResponse(BaseModel):
     submitted_risk_amount: float | None
     fill_derived_risk_amount: float | None
     risk_truth_confidence: str | None
+    risk_reconciliation: dict[str, object] | None
+    material_execution_drift: bool
+    critical_execution_drift: bool
     reason: str | None
     error_code: str | None
     error_message: str | None
@@ -45,6 +48,16 @@ class ExecutionResponse(BaseModel):
 
 
 def _serialize_execution(execution: Execution) -> ExecutionResponse:
+    risk_reconciliation = (execution.details or {}).get("risk_reconciliation")
+    if not isinstance(risk_reconciliation, dict):
+        risk_reconciliation = None
+    drift_flags = (
+        risk_reconciliation.get("flags")
+        if isinstance(risk_reconciliation, dict)
+        else None
+    )
+    if not isinstance(drift_flags, dict):
+        drift_flags = {}
     return ExecutionResponse(
         id=execution.id or 0,
         trade_intent_id=execution.trade_intent_id,
@@ -69,6 +82,9 @@ def _serialize_execution(execution: Execution) -> ExecutionResponse:
         submitted_risk_amount=execution.submitted_risk_amount,
         fill_derived_risk_amount=execution.fill_derived_risk_amount,
         risk_truth_confidence=execution.risk_truth_confidence,
+        risk_reconciliation=risk_reconciliation,
+        material_execution_drift=bool(drift_flags.get("material_execution_drift")),
+        critical_execution_drift=bool(drift_flags.get("critical_execution_drift")),
         reason=execution.reason,
         error_code=execution.error_code,
         error_message=execution.error_message,

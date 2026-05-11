@@ -54,6 +54,9 @@ export type Execution = {
   submitted_risk_amount?: number | null;
   fill_derived_risk_amount?: number | null;
   risk_truth_confidence?: string | null;
+  risk_reconciliation?: Record<string, unknown> | null;
+  material_execution_drift: boolean;
+  critical_execution_drift: boolean;
   reason?: string | null;
   error_code?: string | null;
   error_message?: string | null;

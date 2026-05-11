@@ -193,7 +193,7 @@ Expected classifications:
 - `GET /allocation/alerts?refresh=true`: active read/refresh or redesign candidate
 - `POST /allocation/alerts/{alert_id}/acknowledge`: mutation
 - `POST /allocation/alerts/{alert_id}/resolve`: mutation
-- `GET /allocation/alerts/unresolved-critical`: active read/refresh if it refreshes persisted alert state; otherwise Needs audit before passive classification
+- `GET /allocation/alerts/unresolved-critical`: passive read of persisted unresolved critical alerts
 
 Do not invent certainty. If the actual route behavior differs, mark Needs audit.
 
@@ -220,7 +220,7 @@ Do not invent certainty. If the actual route behavior differs, mark Needs audit.
 - Reserved risk and live risk may overlap during partial-fill or position-opened transitions; expected overlap behavior needs confirmation.
 - Concurrent allocation cycles and active intent uniqueness need explicit audit coverage.
 - Execution-time revalidation drift thresholds and materiality rules need confirmation.
-- Allocation alert refresh via GET `refresh=true` may need to move to POST or another mutation-classified endpoint.
+- Allocation alert refresh via GET `refresh=true` remains mutation-like and may later move to POST or another mutation-classified endpoint.
 - Frontend risk surfaces may not consistently label confidence, timestamp/freshness, simulated values, or degraded/unknown state.
 - Currency exposure exactness/proxy/split attribution may need stronger operator-facing labels.
 - Broker sizing details/debug fields may leak broker-specific assumptions if app services depend on raw details shape.

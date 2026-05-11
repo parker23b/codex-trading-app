@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { formatDateTime, formatInstrumentLabel, formatPrice } from "@/lib/format";
+import { buildExecutionDetail } from "@/lib/execution-notifications";
+import { formatDateTime, formatInstrumentLabel } from "@/lib/format";
 import { BrokerAuthStatus, Execution, StreamHealthStatus } from "@/lib/types";
 
 type NotificationTone = "positive" | "warning" | "negative" | "neutral";
@@ -25,46 +26,6 @@ type NotificationCenterProps = {
 };
 
 const DISMISSED_STORAGE_KEY = "trading-platform-dismissed-notifications";
-
-function getExecutionDetailValue(details: Record<string, unknown>, key: string) {
-  const value = details[key];
-  return typeof value === "string" && value.length ? value : null;
-}
-
-function getBrokerResultStatus(details: Record<string, unknown>) {
-  const brokerResult = details.broker_result;
-  if (!brokerResult || typeof brokerResult !== "object" || Array.isArray(brokerResult)) {
-    return null;
-  }
-  const status = (brokerResult as Record<string, unknown>).status;
-  return typeof status === "string" && status.length ? status : null;
-}
-
-function buildExecutionDetail(execution: Execution) {
-  const size = execution.filled_size ?? execution.requested_size;
-  const price = execution.average_fill_price ?? execution.requested_price;
-  const brokerResultStatus = getBrokerResultStatus(execution.details);
-  const reconciledBrokerReference = getExecutionDetailValue(execution.details, "reconciled_broker_reference");
-  const parts = [
-    execution.strategy_name,
-    formatInstrumentLabel(execution.instrument),
-    typeof size === "number" ? `size ${size}` : null,
-    typeof price === "number" ? `px ${formatPrice(price, execution.instrument)}` : null,
-    execution.client_request_id ? `request ${execution.client_request_id}` : null,
-    execution.broker_reference ? `broker ${execution.broker_reference}` : null,
-    brokerResultStatus ? `broker result ${brokerResultStatus.replaceAll("_", " ")}` : null,
-    reconciledBrokerReference ? `reconciled broker ${reconciledBrokerReference}` : null,
-    execution.requires_manual_review ? "manual review required" : null,
-  ].filter(Boolean);
-
-  if (execution.error_message) {
-    parts.push(execution.error_message);
-  } else if (execution.reason) {
-    parts.push(execution.reason);
-  }
-
-  return parts.join(" • ");
-}
 
 function buildExecutionNotification(execution: Execution): NotificationItem {
   const timestamp = execution.last_transition_at;

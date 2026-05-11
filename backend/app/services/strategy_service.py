@@ -2005,10 +2005,18 @@ class StrategyService:
             if isinstance(previous_sizing_quote, dict)
             else allocation.get("sizing_precision")
         )
+        if previous_sizing_precision == BrokerSizingPrecision.APPROXIMATE.value:
+            raw_allocated_size = allocation.get("normalized_size")
+            if raw_allocated_size is not None:
+                approved_sizing_quote_size = float(raw_allocated_size)
+        supported_size_drift_precisions = {
+            BrokerSizingPrecision.EXACT.value,
+            BrokerSizingPrecision.APPROXIMATE.value,
+        }
         if (
             approved_sizing_quote_size is not None
-            and previous_sizing_precision == BrokerSizingPrecision.EXACT.value
-            and sizing_quote.precision is BrokerSizingPrecision.EXACT
+            and previous_sizing_precision in supported_size_drift_precisions
+            and sizing_quote.precision.value in supported_size_drift_precisions
         ):
             sizing_quote_size_drift = StrategyService._drift_metric(
                 expected=approved_sizing_quote_size,
@@ -2048,11 +2056,24 @@ class StrategyService:
             raw_previous_risk_amount = previous_sizing_quote.get("risk_amount")
             if raw_previous_risk_amount is not None:
                 approved_risk_amount = float(raw_previous_risk_amount)
+        if previous_sizing_precision == BrokerSizingPrecision.APPROXIMATE.value:
+            raw_allocated_risk_amount = allocation.get("risk_amount")
+            if raw_allocated_risk_amount is not None:
+                approved_risk_amount = float(raw_allocated_risk_amount)
         current_executable_risk_amount = None
-        if (
-            sizing_quote.precision is BrokerSizingPrecision.EXACT
-            and sizing_quote.risk_per_unit is not None
+        same_executable_size = (
+            approved_sizing_quote_size is not None
             and sizing_quote.normalized_size is not None
+            and abs(float(sizing_quote.normalized_size) - approved_sizing_quote_size)
+            <= 1e-8
+        )
+        if (
+            sizing_quote.risk_per_unit is not None
+            and sizing_quote.normalized_size is not None
+            and (
+                sizing_quote.precision is BrokerSizingPrecision.EXACT
+                or same_executable_size
+            )
         ):
             current_executable_risk_amount = float(
                 sizing_quote.normalized_size

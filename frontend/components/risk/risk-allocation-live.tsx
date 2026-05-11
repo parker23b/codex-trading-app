@@ -97,7 +97,7 @@ export function RiskAllocationLive({
     const refresh = async () => {
       const [nextExposure, nextAlerts, nextDrift, nextCycles, nextIntents, nextSelectedCycle] = await Promise.allSettled([
         getAllocationExposureSummary(),
-        getAllocationAlerts({ limit: 60, refresh: true }),
+        getAllocationAlerts({ limit: 60 }),
         getAllocationDriftSummary({ limit: 30, windowMinutes: 720 }),
         getAllocationCycles(24),
         getAllocationIntents({ limit: 60 }),

@@ -186,7 +186,7 @@ export function LiveSystemView({ initialData, initialErrors }: LiveSystemViewPro
         getControlPlaneSummary(),
         getOperationalTelemetry(),
         getAllocationExposureSummary(),
-        getAllocationAlerts({ limit: 20, refresh: true }),
+        getAllocationAlerts({ limit: 20 }),
         getDomainEvents({ limit: 80 }),
       ]);
 

@@ -83,7 +83,7 @@ def list_allocation_alerts(
     limit: int = Query(default=50, ge=1, le=500),
     window_minutes: int | None = Query(default=None, ge=1, le=10_080),
     include_resolved: bool = Query(default=False),
-    refresh: bool = Query(default=True),
+    refresh: bool = Query(default=False),
     session: Session = Depends(get_session),
 ) -> list[dict[str, object]]:
     alerts = AllocationAlertService(session).list_alerts(
@@ -162,7 +162,10 @@ def list_unresolved_critical_allocation_alerts(
     session: Session = Depends(get_session),
 ) -> list[dict[str, object]]:
     alerts = AllocationAlertService(session).list_alerts(
-        limit=limit, include_resolved=False, refresh=True, window_minutes=window_minutes
+        limit=limit,
+        include_resolved=False,
+        refresh=False,
+        window_minutes=window_minutes,
     )
     critical = [alert for alert in alerts if alert.severity == "error"]
     return [

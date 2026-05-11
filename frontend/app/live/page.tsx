@@ -43,7 +43,7 @@ export default async function LivePage() {
     loadWithMeta(() => getControlPlaneSummary(), EMPTY_CONTROL_PLANE_SUMMARY),
     loadWithMeta(() => getOperationalTelemetry(), EMPTY_OPERATIONAL_TELEMETRY),
     loadWithMeta(() => getAllocationExposureSummary(), EMPTY_ALLOCATION_EXPOSURE_SUMMARY),
-    loadWithMeta(() => getAllocationAlerts({ limit: 20, refresh: true }), []),
+    loadWithMeta(() => getAllocationAlerts({ limit: 20 }), []),
     loadWithMeta(() => getDomainEvents({ limit: 80 }), []),
   ]);
 

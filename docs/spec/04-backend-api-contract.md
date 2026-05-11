@@ -75,11 +75,11 @@ This inventory was discovered from `backend/app/api/router.py` and `backend/app/
 | GET | `/allocation/intents` | `routes/allocation.py:list_allocation_intents` | `PASSIVE_READ` | Allocation intent read | Dashboard/risk | List DTO; schema needs confirmation | High |
 | GET | `/allocation/intents/{trade_intent_id}` | `routes/allocation.py:get_allocation_intent` | `PASSIVE_READ` | Allocation intent read | Risk drawer | Documented dict needed | High |
 | GET | `/allocation/drift` | `routes/allocation.py:get_allocation_drift_summary` | `PASSIVE_READ` | Projection; indirect write audit needed | Dashboard/risk | Raw dict needs schema | Medium |
-| GET | `/allocation/alerts` | `routes/allocation.py:list_allocation_alerts` | `PASSIVE_READ` by contract when `refresh=false`; `ACTIVE_READ_REFRESH` when `refresh=true` | Default query currently needs audit because code default is `refresh=True`; refresh can persist alerts | Dashboard/risk | List DTO; schema needs confirmation | Medium |
+| GET | `/allocation/alerts` | `routes/allocation.py:list_allocation_alerts` | `PASSIVE_READ` by default; `ACTIVE_READ_REFRESH` when `refresh=true` | Default query is passive; explicit refresh can persist alerts | Dashboard/risk | List DTO; schema needs confirmation | High |
 | GET | `/allocation/alerts?refresh=true` | `routes/allocation.py:list_allocation_alerts` | `ACTIVE_READ_REFRESH` | Refreshes persisted alerts | Dashboard/risk | List DTO; schema needs confirmation | Medium |
 | POST | `/allocation/alerts/{alert_id}/acknowledge` | `routes/allocation.py:acknowledge_allocation_alert` | `MUTATION` | Acknowledges alert | Risk UI | Documented dict needed | High |
 | POST | `/allocation/alerts/{alert_id}/resolve` | `routes/allocation.py:resolve_allocation_alert` | `MUTATION` | Resolves alert | Risk UI | Documented dict needed | High |
-| GET | `/allocation/alerts/unresolved-critical` | `routes/allocation.py:list_unresolved_critical_allocation_alerts` | `ACTIVE_READ_REFRESH` | Code path appears to call alert refresh; needs confirmation | Needs confirmation | List DTO; schema needs confirmation | Medium |
+| GET | `/allocation/alerts/unresolved-critical` | `routes/allocation.py:list_unresolved_critical_allocation_alerts` | `PASSIVE_READ` | Reads persisted unresolved critical alerts without refresh | Needs confirmation | List DTO; schema needs confirmation | High |
 | GET | `/allocation/exposure` | `routes/allocation.py:get_allocation_exposure_summary` | `PASSIVE_READ` | Exposure projection; indirect write audit needed | Dashboard/risk | Raw dict needs schema | Medium |
 | GET | `/market-status/{instrument}` | `routes/market_status.py:get_market_status` | `BROKER_READ` | Broker/market status read; freshness/provenance required | Needs confirmation | Pydantic model | Medium |
 | GET | `/markets/overview` | `routes/markets.py:get_market_overview` | `BROKER_READ` | Market overview may read broker/market services; side effects need audit | Markets page | Raw dict needs schema | Medium |
@@ -171,7 +171,7 @@ They must be unavailable in production-like operation unless explicitly protecte
 - Unknown frontend consumer status requires code search before treating routes as unused.
 - `/reviews/*` GET persistence may need API redesign to separate passive preview from explicit persistence.
 - `/allocation/alerts?refresh=true` may need to move to POST or a clearly mutation-classified endpoint.
-- `GET /allocation/alerts` appears to default to `refresh=True` in code and needs contract/design confirmation.
+- `GET /allocation/alerts` now defaults to passive `refresh=false`; explicit `refresh=true` remains mutation-like and tested.
 - Test-only route gating currently has router-registration regression evidence for `/testing/reset-history`; broader HTTP route harness evidence is still missing.
 - Many dict responses lack Pydantic response models.
 

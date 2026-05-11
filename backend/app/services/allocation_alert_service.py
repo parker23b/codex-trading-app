@@ -112,7 +112,7 @@ class AllocationAlertService:
         *,
         limit: int = 100,
         include_resolved: bool = False,
-        refresh: bool = True,
+        refresh: bool = False,
         window_minutes: int | None = None,
     ) -> list[AllocationAlert]:
         if refresh:

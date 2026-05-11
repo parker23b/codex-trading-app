@@ -16,7 +16,6 @@ ACTIVE_READ_REFRESH_GET_PATHS = {
     "/reviews/operator-summary",
     "/reviews/daily",
     "/reviews/runtime-health",
-    "/allocation/alerts/unresolved-critical",
 }
 
 
@@ -38,7 +37,12 @@ def requires_operator_auth(
         return True
     if path == "/allocation/alerts":
         refresh = (query_params or {}).get("refresh")
-        return refresh is None or refresh.lower() not in {"0", "false", "no", "off"}
+        return refresh is not None and refresh.lower() not in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }
     return False
 
 

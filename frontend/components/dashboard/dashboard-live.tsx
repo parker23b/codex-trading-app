@@ -217,7 +217,7 @@ export function DashboardLive({
           getControlPlaneSummary(),
           getSystemOperatingLimits(),
           getAllocationExposureSummary(),
-          getAllocationAlerts({ limit: 40, refresh: true }),
+          getAllocationAlerts({ limit: 40 }),
           getAllocationDriftSummary({ limit: 20, windowMinutes: 720 }),
           getAllocationCycles(12),
           getAllocationIntents({ limit: 40 }),
