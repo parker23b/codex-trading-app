@@ -136,9 +136,11 @@ class StrategyService:
                 latest_decision_warning_by_key[key] = intent
 
         strategies: list[dict[str, object]] = []
+        governance_records = StrategyGovernanceService(
+            self.session
+        ).list_existing_strategies()
         governance_by_name = {
-            record.strategy_name: record
-            for record in StrategyGovernanceService(self.session).list_strategies()
+            record.strategy_name: record for record in governance_records
         }
         deployment_by_name = {
             deployment.strategy_name: deployment

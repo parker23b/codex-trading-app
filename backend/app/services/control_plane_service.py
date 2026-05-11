@@ -80,11 +80,11 @@ class ControlPlaneService:
     def _build_family_rows(self) -> list[dict[str, object]]:
         governance = {
             record.strategy_name: record
-            for record in self.governance_service.list_strategies()
+            for record in self.governance_service.list_existing_strategies()
         }
         deployments = {
             deployment.strategy_name: deployment
-            for deployment in self.deployment_manager.list_deployments()
+            for deployment in self.deployment_manager.list_existing_deployments()
         }
         runtimes_by_strategy: dict[str, list[StrategyRuntimeState]] = {}
         for runtime in self.session.exec(

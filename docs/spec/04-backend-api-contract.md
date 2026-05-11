@@ -60,10 +60,10 @@ This inventory was discovered from `backend/app/api/router.py` and `backend/app/
 | GET | `/system/telemetry` | `routes/health.py:operational_telemetry` | `PASSIVE_READ` | Telemetry projection; needs write audit | `getOperationalTelemetry`, broker status | Pydantic model | Medium |
 | GET | `/system/limits` | `routes/system.py:get_system_operating_limits` | `PASSIVE_READ` | Settings projection | Dashboard/coverage | Pydantic model | High |
 | GET | `/broker/positions` | `routes/broker.py:list_broker_positions` | `BROKER_READ` | Reads broker positions; freshness/provenance needs audit | Needs confirmation | Pydantic list model | Medium |
-| GET | `/control-plane/summary` | `routes/control_plane.py:get_control_plane_summary` | `PASSIVE_READ` | Projection; indirect write audit needed | Control plane, dashboard | Pydantic model | Medium |
-| GET | `/control-plane/operator-state` | `routes/control_plane.py:get_operator_control_state` | `PASSIVE_READ` | Operator state read; default seeding audit needed | Control plane | Pydantic model | Medium |
+| GET | `/control-plane/summary` | `routes/control_plane.py:get_control_plane_summary` | `PASSIVE_READ` | Projection; default governance/deployment seeding removed and regression-tested; broader indirect write audit still needed | Control plane, dashboard | Pydantic model | Medium |
+| GET | `/control-plane/operator-state` | `routes/control_plane.py:get_operator_control_state` | `PASSIVE_READ` | Operator state read; default operator-control seeding removed and regression-tested | Control plane | Pydantic model | High |
 | PUT | `/control-plane/operator-state` | `routes/control_plane.py:update_operator_control_state` | `MUTATION` | Updates operator control state | Control plane toggle | Pydantic model | High |
-| GET | `/control-plane/strategies/{strategy_name}` | `routes/control_plane.py:get_control_plane_strategy_detail` | `PASSIVE_READ` | Projection; indirect write audit needed | Control plane | Raw dict needs schema | Medium |
+| GET | `/control-plane/strategies/{strategy_name}` | `routes/control_plane.py:get_control_plane_strategy_detail` | `PASSIVE_READ` | Projection; default governance/deployment seeding removed and regression-tested; raw dict schema still needed | Control plane | Raw dict needs schema | Medium |
 | POST | `/control-plane/reconcile` | `routes/control_plane.py:reconcile_control_plane` | `MUTATION` | Reconciles control-plane state; may create/update lifecycle evidence | Needs confirmation | Raw dict needs schema | High |
 | PUT | `/control-plane/governance/{strategy_name}` | `routes/control_plane.py:update_strategy_governance` | `MUTATION` | Updates strategy governance | Control plane | Raw dict needs schema | High |
 | GET | `/coverage/summary` | `routes/coverage.py:get_coverage_summary` | `PASSIVE_READ` | Coverage projection; refresh-plan side effects need audit | Coverage/dashboard | Pydantic model | Medium |
@@ -100,7 +100,7 @@ This inventory was discovered from `backend/app/api/router.py` and `backend/app/
 | GET | `/executions` | `routes/executions.py:list_executions` | `PASSIVE_READ` | Execution read | Dashboard/strategies | Pydantic list model | High |
 | GET | `/trades` | `routes/trades.py:list_trades` | `PASSIVE_READ` | Trade read | Dashboard | Pydantic list model | High |
 | GET | `/trades/positions` | `routes/trades.py:list_positions_compat` | `PASSIVE_READ` | Compatibility positions read | Dashboard | Raw dict/list needs schema | High |
-| GET | `/strategies` | `routes/strategies.py:list_strategies` | `PASSIVE_READ` | Strategy projection; runtime side-effect audit needed | Strategies page | List of raw dicts needs schema | Medium |
+| GET | `/strategies` | `routes/strategies.py:list_strategies` | `PASSIVE_READ` | Strategy projection; default governance seeding removed and regression-tested; runtime side-effect audit still needed | Strategies page | List of raw dicts needs schema | Medium |
 | POST | `/strategy/start` | `routes/strategies.py:start_strategy` | `MUTATION` | Starts runtime; compatibility route status needs audit | Strategies page | Raw dict needs schema | High |
 | POST | `/strategy/stop` | `routes/strategies.py:stop_strategy` | `MUTATION` | Stops runtime; compatibility route status needs audit | Strategies page | Raw dict needs schema | High |
 | POST | `/strategies/{name}/start` | `routes/strategies.py:start_strategy_by_name` | `MUTATION` | Starts runtime by name | Needs confirmation/compat | Pydantic model | High |

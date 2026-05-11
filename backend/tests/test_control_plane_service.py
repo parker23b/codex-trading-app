@@ -149,10 +149,9 @@ def _attach_open_position(
     return position
 
 
-def test_control_plane_seeds_governance_defaults(session):
-    service = ControlPlaneService(session)
-
-    summary = service.get_summary()
+def test_governance_service_seeds_governance_defaults_explicitly(session):
+    StrategyGovernanceService(session).ensure_defaults()
+    summary = ControlPlaneService(session).get_summary()
 
     assert summary["families"]
     families_by_name = {item["strategy_name"]: item for item in summary["families"]}

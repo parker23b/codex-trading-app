@@ -229,6 +229,9 @@ class StrategyDeploymentManagerService:
 
     def list_deployments(self) -> list[StrategyDeployment]:
         self.governance_service.ensure_defaults()
+        return self.list_existing_deployments()
+
+    def list_existing_deployments(self) -> list[StrategyDeployment]:
         statement = select(StrategyDeployment).order_by(
             StrategyDeployment.strategy_name
         )

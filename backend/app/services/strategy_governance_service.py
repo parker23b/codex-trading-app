@@ -83,6 +83,9 @@ class StrategyGovernanceService:
 
     def list_strategies(self) -> list[StrategyFamilyGovernance]:
         self.ensure_defaults()
+        return self.list_existing_strategies()
+
+    def list_existing_strategies(self) -> list[StrategyFamilyGovernance]:
         statement = select(StrategyFamilyGovernance).order_by(
             StrategyFamilyGovernance.strategy_name
         )
