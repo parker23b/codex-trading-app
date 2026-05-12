@@ -15,10 +15,12 @@ import {
 import { formatCurrency, formatDateTime, formatInstrumentLabel, formatPercent, formatPrice, formatRelativeDuration } from "@/lib/format";
 import {
   alertSeverityTone,
+  buildRiskLoadQuality,
   buildRiskConsoleSummary,
   cycleStatus,
   formatDirectionalBias,
   formatHotspotLabel,
+  RiskLoadErrors,
   truthConfidenceMeta,
 } from "@/lib/risk-allocation";
 import type {
@@ -38,6 +40,7 @@ type RiskAllocationLiveProps = {
   initialCycles: AllocationCycle[];
   initialIntents: AllocationIntent[];
   initialSelectedCycle: AllocationCycle | null;
+  initialLoadErrors?: RiskLoadErrors;
 };
 
 function budgetTone(utilization?: number | null) {
@@ -78,6 +81,7 @@ export function RiskAllocationLive({
   initialCycles,
   initialIntents,
   initialSelectedCycle,
+  initialLoadErrors = {},
 }: RiskAllocationLiveProps) {
   const [exposure, setExposure] = useState(initialExposure);
   const [alerts, setAlerts] = useState(initialAlerts);
@@ -89,10 +93,13 @@ export function RiskAllocationLive({
   const [alertSeverityFilter, setAlertSeverityFilter] = useState<"all" | "error" | "warning" | "info">("all");
   const [alertStateFilter, setAlertStateFilter] = useState<"all" | "OPEN" | "ACKNOWLEDGED" | "RESOLVED">("all");
   const [alertTypeFilter, setAlertTypeFilter] = useState("");
+  const [loadErrors, setLoadErrors] = useState<RiskLoadErrors>(initialLoadErrors);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
     let cancelled = false;
+
+    const errorMessage = (reason: unknown) => reason instanceof Error ? reason.message : "Risk read failed";
 
     const refresh = async () => {
       const [nextExposure, nextAlerts, nextDrift, nextCycles, nextIntents, nextSelectedCycle] = await Promise.allSettled([
@@ -125,6 +132,14 @@ export function RiskAllocationLive({
       if (nextSelectedCycle.status === "fulfilled") {
         setSelectedCycle(nextSelectedCycle.value);
       }
+      setLoadErrors({
+        exposure: nextExposure.status === "rejected" ? errorMessage(nextExposure.reason) : null,
+        alerts: nextAlerts.status === "rejected" ? errorMessage(nextAlerts.reason) : null,
+        drift: nextDrift.status === "rejected" ? errorMessage(nextDrift.reason) : null,
+        cycles: nextCycles.status === "rejected" ? errorMessage(nextCycles.reason) : null,
+        intents: nextIntents.status === "rejected" ? errorMessage(nextIntents.reason) : null,
+        selectedCycle: nextSelectedCycle.status === "rejected" ? errorMessage(nextSelectedCycle.reason) : null,
+      });
     };
 
     void refresh();
@@ -145,6 +160,7 @@ export function RiskAllocationLive({
     () => buildRiskConsoleSummary({ exposure, alerts, drift, cycles, intents }),
     [exposure, alerts, drift, cycles, intents],
   );
+  const loadQuality = useMemo(() => buildRiskLoadQuality(loadErrors), [loadErrors]);
 
   const unresolvedAlerts = alerts.filter((alert) => alert.state !== "RESOLVED");
   const criticalAlerts = unresolvedAlerts.filter((alert) => alert.severity === "error");
@@ -160,6 +176,11 @@ export function RiskAllocationLive({
   const topStrategies = topBuckets(exposure.by_strategy, 5);
   const topInstruments = topBuckets(exposure.by_instrument, 5);
   const selectedCycleStatus = cycleStatus(selectedCycle);
+  const exposureUnavailable = loadQuality.sectionUnavailable("exposure");
+  const alertsUnavailable = loadQuality.sectionUnavailable("alerts");
+  const driftUnavailable = loadQuality.sectionUnavailable("drift");
+  const cyclesUnavailable = loadQuality.sectionUnavailable("cycles");
+  const intentsUnavailable = loadQuality.sectionUnavailable("intents");
 
   async function mutateAlert(alertId: number, action: "acknowledge" | "resolve") {
     startTransition(async () => {
@@ -185,57 +206,90 @@ export function RiskAllocationLive({
           </p>
         </div>
         <div className="risk-page-hero__context">
+          {loadQuality.degraded ? <StatusPill label={loadQuality.headline} tone="negative" title={loadQuality.detail} /> : null}
           <StatusPill
-            label={summary.criticalAlertCount > 0 ? `${summary.criticalAlertCount} critical alerts` : "No critical alerts"}
-            tone={summary.criticalAlertCount > 0 ? "negative" : "positive"}
+            label={
+              alertsUnavailable
+                ? "Alerts unavailable"
+                : summary.criticalAlertCount > 0
+                  ? `${summary.criticalAlertCount} critical alerts`
+                  : "No critical alerts"
+            }
+            tone={alertsUnavailable || summary.criticalAlertCount > 0 ? "negative" : "positive"}
           />
           {summary.degradedSizingOrTruth ? <StatusPill label="Degraded sizing/truth" tone="warning" /> : null}
-          <StatusPill label={summary.lastCycleStatus.label} tone={summary.lastCycleStatus.tone} />
+          <StatusPill
+            label={cyclesUnavailable ? "Cycles unavailable" : summary.lastCycleStatus.label}
+            tone={cyclesUnavailable ? "negative" : summary.lastCycleStatus.tone}
+          />
         </div>
       </section>
+
+      {loadQuality.degraded ? <div className="status-note status-note--inline">{loadQuality.detail}</div> : null}
 
       <StatusStrip
         items={[
           {
             label: "Open Risk",
-            value: formatPercent(summary.openRiskPercent),
-            tone: budgetTone((summary.openRiskPercent / Math.max(summary.openRiskPercent + summary.remainingPortfolioRiskPercent, 0.0001)) * 100),
-            meta: `${exposure.totals.open_position_count} live positions`,
+            value: exposureUnavailable ? "Unavailable" : formatPercent(summary.openRiskPercent),
+            tone: exposureUnavailable
+              ? "negative"
+              : budgetTone((summary.openRiskPercent / Math.max(summary.openRiskPercent + summary.remainingPortfolioRiskPercent, 0.0001)) * 100),
+            meta: exposureUnavailable ? "Exposure read failed" : `${exposure.totals.open_position_count} live positions`,
           },
           {
             label: "Reserved Risk",
-            value: formatPercent(summary.reservedRiskPercent),
-            tone: summary.reservedRiskPercent > 0 ? "warning" : "positive",
-            meta: `${exposure.totals.reserved_intent_count} reserved intents`,
+            value: exposureUnavailable ? "Unavailable" : formatPercent(summary.reservedRiskPercent),
+            tone: exposureUnavailable ? "negative" : summary.reservedRiskPercent > 0 ? "warning" : "positive",
+            meta: exposureUnavailable ? "Exposure read failed" : `${exposure.totals.reserved_intent_count} reserved intents`,
           },
           {
             label: "Active Risk",
-            value: formatPercent(summary.totalActiveRiskPercent),
-            tone: summary.totalActiveRiskPercent > 4 ? "negative" : summary.totalActiveRiskPercent > 2.5 ? "warning" : "positive",
-            meta: `${formatPercent(summary.remainingPortfolioRiskPercent)} remaining`,
+            value: exposureUnavailable ? "Unavailable" : formatPercent(summary.totalActiveRiskPercent),
+            tone: exposureUnavailable
+              ? "negative"
+              : summary.totalActiveRiskPercent > 4
+                ? "negative"
+                : summary.totalActiveRiskPercent > 2.5
+                  ? "warning"
+                  : "positive",
+            meta: exposureUnavailable ? "Exposure read failed" : `${formatPercent(summary.remainingPortfolioRiskPercent)} remaining`,
           },
           {
             label: "Critical Alerts",
-            value: String(summary.criticalAlertCount),
-            tone: summary.criticalAlertCount > 0 ? "negative" : "positive",
-            meta: summary.warningAlertCount > 0 ? `${summary.warningAlertCount} warnings open` : "No warning backlog",
+            value: alertsUnavailable ? "Unavailable" : String(summary.criticalAlertCount),
+            tone: alertsUnavailable || summary.criticalAlertCount > 0 ? "negative" : "positive",
+            meta: alertsUnavailable
+              ? "Alert read failed"
+              : summary.warningAlertCount > 0
+                ? `${summary.warningAlertCount} warnings open`
+                : "No warning backlog",
           },
           {
             label: "Material Drift",
-            value: String(summary.materialDriftCount),
-            tone: summary.materialDriftCount > 0 ? "warning" : "positive",
-            meta: `critical at ${formatPercent(drift.drift_critical_percent)}`,
+            value: driftUnavailable ? "Unavailable" : String(summary.materialDriftCount),
+            tone: driftUnavailable ? "negative" : summary.materialDriftCount > 0 ? "warning" : "positive",
+            meta: driftUnavailable ? "Drift read failed" : `critical at ${formatPercent(drift.drift_critical_percent)}`,
           },
           {
             label: "Risk Truth",
-            value:
-              summary.truthMix.degraded > 0
+            value: intentsUnavailable || exposureUnavailable
+              ? "Unavailable"
+              : summary.truthMix.degraded > 0
                 ? `${summary.truthMix.degraded} degraded`
                 : summary.truthMix.provisional > 0
                   ? `${summary.truthMix.provisional} provisional`
                   : `${summary.truthMix.exact} exact`,
-            tone: summary.truthMix.degraded > 0 ? "negative" : summary.truthMix.provisional > 0 || summary.truthMix.estimated > 0 ? "warning" : "positive",
-            meta: `${summary.truthMix.estimated} estimated · ${summary.truthMix.exact} exact`,
+            tone: intentsUnavailable || exposureUnavailable
+              ? "negative"
+              : summary.truthMix.degraded > 0
+                ? "negative"
+                : summary.truthMix.provisional > 0 || summary.truthMix.estimated > 0
+                  ? "warning"
+                  : "positive",
+            meta: intentsUnavailable || exposureUnavailable
+              ? "Risk truth read failed"
+              : `${summary.truthMix.estimated} estimated · ${summary.truthMix.exact} exact`,
           },
         ]}
       />
@@ -243,7 +297,7 @@ export function RiskAllocationLive({
       <SplitPanel
         left={(
           <>
-            <Panel title="Budgets" subtitle="Where risk budget is actually being consumed." priority="primary" tone={summary.topHotspot ? budgetTone(summary.topHotspot.utilization_percent) : "neutral"}>
+            <Panel title="Budgets" subtitle="Where risk budget is actually being consumed." priority="primary" tone={exposureUnavailable ? "negative" : summary.topHotspot ? budgetTone(summary.topHotspot.utilization_percent) : "neutral"}>
               <div className="risk-budget-grid">
                 <div className="risk-budget-card">
                   <span>Total portfolio risk</span>
@@ -258,7 +312,7 @@ export function RiskAllocationLive({
               </div>
               <CompactTable
                 rows={hotspotBuckets}
-                emptyLabel="No family budget hotspots."
+                emptyLabel={exposureUnavailable ? "Risk exposure unavailable." : "No family budget hotspots."}
                 getRowTone={(row) => budgetTone(row.utilization_percent)}
                 columns={[
                   { key: "family", header: "Family", render: (row) => row.name },
@@ -269,7 +323,7 @@ export function RiskAllocationLive({
               />
             </Panel>
 
-            <Panel title="Exposure" subtitle="Live concentration by family, strategy, instrument, and FX direction." priority="secondary" tone={summary.topHotspot ? budgetTone(summary.topHotspot.utilization_percent) : "neutral"}>
+            <Panel title="Exposure" subtitle="Live concentration by family, strategy, instrument, and FX direction." priority="secondary" tone={exposureUnavailable ? "negative" : summary.topHotspot ? budgetTone(summary.topHotspot.utilization_percent) : "neutral"}>
               <div className="risk-budget-grid">
                 <div className="risk-budget-card">
                   <span>Top hotspot</span>
@@ -302,10 +356,10 @@ export function RiskAllocationLive({
         )}
         center={(
           <>
-            <Panel title="Allocation Cycles" subtitle="Recent allocation batches, with constraint and degraded-state visibility." priority="primary" tone={summary.lastCycleStatus.tone}>
+            <Panel title="Allocation Cycles" subtitle="Recent allocation batches, with constraint and degraded-state visibility." priority="primary" tone={cyclesUnavailable ? "negative" : summary.lastCycleStatus.tone}>
               <CompactTable
                 rows={cycles}
-                emptyLabel="No recent allocation cycles."
+                emptyLabel={cyclesUnavailable ? "Allocation cycles unavailable." : "No recent allocation cycles."}
                 getRowTone={(row) => cycleStatus(row).tone}
                 getRowActive={(row) => row.cycle_id === selectedCycleId}
                 columns={[
@@ -385,10 +439,10 @@ export function RiskAllocationLive({
               </div>
             </Panel>
 
-            <Panel title="Execution Drift" subtitle="Where broker normalization, submission, or fills changed the intended allocation." priority="secondary" tone={summary.materialDriftCount > 0 ? "warning" : "positive"}>
+            <Panel title="Execution Drift" subtitle="Where broker normalization, submission, or fills changed the intended allocation." priority="secondary" tone={driftUnavailable ? "negative" : summary.materialDriftCount > 0 ? "warning" : "positive"}>
               <CompactTable
                 rows={drift.worst_intents.slice(0, 8)}
-                emptyLabel="No material drift cases within the current window."
+                emptyLabel={driftUnavailable ? "Execution drift unavailable." : "No material drift cases within the current window."}
                 getRowTone={(row) => row.max_percent_drift >= drift.drift_critical_percent ? "negative" : "warning"}
                 columns={[
                   {
@@ -434,7 +488,7 @@ export function RiskAllocationLive({
         )}
         right={(
           <>
-            <Panel title="Alerts" subtitle="Unresolved allocation and execution-truth issues, with operator workflow." priority="critical" tone={criticalAlerts.length ? "negative" : unresolvedAlerts.length ? "warning" : "positive"}>
+            <Panel title="Alerts" subtitle="Unresolved allocation and execution-truth issues, with operator workflow." priority="critical" tone={alertsUnavailable ? "negative" : criticalAlerts.length ? "negative" : unresolvedAlerts.length ? "warning" : "positive"}>
               <div className="risk-alert-toolbar">
                 <StatusPill label={`${criticalAlerts.length} critical`} tone={criticalAlerts.length ? "negative" : "positive"} />
                 <StatusPill label={`${unresolvedAlerts.length} unresolved`} tone={unresolvedAlerts.length ? "warning" : "positive"} />
@@ -490,14 +544,18 @@ export function RiskAllocationLive({
                     ) : null}
                   </article>
                 ))}
-                {!filteredAlerts.length ? <div className="console-empty console-empty--positive">No alerts match the current filters.</div> : null}
+                {!filteredAlerts.length ? (
+                  <div className={alertsUnavailable ? "console-empty" : "console-empty console-empty--positive"}>
+                    {alertsUnavailable ? "Allocation alerts unavailable." : "No alerts match the current filters."}
+                  </div>
+                ) : null}
               </div>
             </Panel>
 
-            <Panel title="Risk Truth" subtitle="Estimated vs submitted vs filled vs live-position risk, with confidence made explicit." priority="secondary" tone={summary.truthMix.degraded > 0 ? "negative" : summary.truthMix.provisional > 0 || summary.truthMix.estimated > 0 ? "warning" : "positive"}>
+            <Panel title="Risk Truth" subtitle="Estimated vs submitted vs filled vs live-position risk, with confidence made explicit." priority="secondary" tone={intentsUnavailable || exposureUnavailable ? "negative" : summary.truthMix.degraded > 0 ? "negative" : summary.truthMix.provisional > 0 || summary.truthMix.estimated > 0 ? "warning" : "positive"}>
               <CompactTable
                 rows={intents.slice(0, 10)}
-                emptyLabel="No allocation intents available."
+                emptyLabel={intentsUnavailable ? "Risk truth unavailable." : "No allocation intents available."}
                 getRowTone={(row) => truthConfidenceMeta(row.position?.risk_truth_confidence ?? row.risk_truth_confidence).tone}
                 columns={[
                   {

@@ -34,6 +34,14 @@ export default async function RiskPage() {
       initialCycles={cycles.data}
       initialIntents={intents.data}
       initialSelectedCycle={selectedCycle.data}
+      initialLoadErrors={{
+        exposure: exposure.error,
+        alerts: alerts.error,
+        drift: drift.error,
+        cycles: cycles.error,
+        intents: intents.error,
+        selectedCycle: selectedCycle.error,
+      }}
     />
   );
 }

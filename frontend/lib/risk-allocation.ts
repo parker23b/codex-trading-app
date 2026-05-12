@@ -1,4 +1,4 @@
-import {
+import type {
   AllocationAlert,
   AllocationCycle,
   AllocationDriftSummary,
@@ -7,9 +7,28 @@ import {
   DirectionalCurrencyExposureBucket,
   ExposureHotspot,
   RiskTruthConfidence,
-} from "@/lib/types";
+} from "./types";
 
 export type RiskTone = "neutral" | "positive" | "warning" | "negative" | "inactive";
+export type RiskDataSection = "exposure" | "alerts" | "drift" | "cycles" | "intents" | "selectedCycle";
+export type RiskLoadErrors = Partial<Record<RiskDataSection, string | null>>;
+
+const RISK_DATA_SECTION_LABELS: Record<RiskDataSection, string> = {
+  exposure: "exposure",
+  alerts: "alerts",
+  drift: "execution drift",
+  cycles: "allocation cycles",
+  intents: "risk truth",
+  selectedCycle: "selected cycle",
+};
+
+export type RiskLoadQuality = {
+  degraded: boolean;
+  unavailableSections: RiskDataSection[];
+  headline: string;
+  detail: string;
+  sectionUnavailable: (section: RiskDataSection) => boolean;
+};
 
 export type RiskSummaryItem = {
   label: string;
@@ -31,6 +50,25 @@ export type RiskAllocationSummary = {
     utilizationPercent?: number | null;
   }>;
 };
+
+export function buildRiskLoadQuality(errors: RiskLoadErrors = {}): RiskLoadQuality {
+  const unavailableSections = (Object.entries(errors) as Array<[RiskDataSection, string | null | undefined]>)
+    .filter(([, error]) => Boolean(error))
+    .map(([section]) => section);
+
+  const sectionLabels = unavailableSections.map((section) => RISK_DATA_SECTION_LABELS[section]);
+  const detail = sectionLabels.length
+    ? `Backend risk reads failed for ${sectionLabels.join(", ")}. Values from those sections are unavailable, not zero or healthy truth.`
+    : "All risk read sections loaded from backend responses.";
+
+  return {
+    degraded: unavailableSections.length > 0,
+    unavailableSections,
+    headline: unavailableSections.length > 0 ? "Risk data unavailable" : "Risk data current",
+    detail,
+    sectionUnavailable: (section: RiskDataSection) => unavailableSections.includes(section),
+  };
+}
 
 export type RiskConsoleSummary = {
   openRiskPercent: number;
