@@ -1,0 +1,26 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { test } from "node:test";
+
+const frontendRoot = path.resolve(import.meta.dirname, "..");
+
+test("AUDIT-UI-004 allocation alert mutation failures keep backend error detail visible", () => {
+  const source = readFileSync(path.join(frontendRoot, "components", "risk", "risk-allocation-live.tsx"), "utf8");
+
+  assert.match(source, /alertMutationState/);
+  assert.match(source, /setAlertMutationState/);
+  assert.match(source, /catch\s*\(\s*error\s*\)/);
+  assert.match(source, /mutationErrorMessage/);
+  assert.match(source, /alertMutation\.error/);
+  assert.match(source, /Mutation failed/);
+  assert.doesNotMatch(source, /startTransition\s*\(\s*async\s*\(\s*\)\s*=>/);
+});
+
+test("AUDIT-UI-004 allocation alert mutation success refreshes backend truth before success copy", () => {
+  const source = readFileSync(path.join(frontendRoot, "components", "risk", "risk-allocation-live.tsx"), "utf8");
+
+  assert.match(source, /await\s+getAllocationAlerts\(\{\s*limit:\s*60,\s*refresh:\s*true\s*\}\)/);
+  assert.match(source, /Mutation confirmed/);
+  assert.match(source, /setAlerts\(nextAlerts\)/);
+});

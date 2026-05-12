@@ -334,7 +334,7 @@ export async function getBrokerAuthStatus(): Promise<BrokerAuthStatus> {
     const telemetry = await getOperationalTelemetry();
     return {
       state: telemetry.broker_connected ? "connected" : "disconnected",
-      label: telemetry.broker_connected ? "IG Connected" : "IG Disconnected",
+      label: telemetry.broker_connected ? "Telemetry Connected" : "Telemetry Disconnected",
       detail: telemetry.broker_connected
         ? telemetry.broker_latency_ms != null
           ? `Connectivity derived from system telemetry · ${telemetry.broker_latency_ms.toFixed(0)}ms`

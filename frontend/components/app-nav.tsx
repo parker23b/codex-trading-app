@@ -25,6 +25,10 @@ const links = [
   { href: "/strategies", label: "Strategies" },
 ];
 
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
 function indicatorTone(value: "positive" | "warning" | "negative" | "neutral") {
   const borderColor =
     value === "positive"
@@ -58,27 +62,46 @@ export function AppNav() {
   const [broker, setBroker] = useState(EMPTY_BROKER_AUTH_STATUS);
   const [streamHealth, setStreamHealth] = useState(EMPTY_STREAM_HEALTH_STATUS);
   const [controlPlane, setControlPlane] = useState(EMPTY_CONTROL_PLANE_SUMMARY);
+  const [streamLoadError, setStreamLoadError] = useState<string | null>("Stream health has not loaded yet.");
+  const [controlPlaneLoadError, setControlPlaneLoadError] = useState<string | null>("Control-plane health has not loaded yet.");
 
   useEffect(() => {
     let cancelled = false;
 
     const refresh = async () => {
-      try {
-        const [nextBroker, nextStreamHealth, nextControlPlane] = await Promise.all([
-          getBrokerAuthStatus(),
-          getStreamHealth(),
-          getControlPlaneSummary(),
-        ]);
+      const [nextBroker, nextStreamHealth, nextControlPlane] = await Promise.allSettled([
+        getBrokerAuthStatus(),
+        getStreamHealth(),
+        getControlPlaneSummary(),
+      ]);
 
-        if (cancelled) {
-          return;
-        }
+      if (cancelled) {
+        return;
+      }
 
-        setBroker(nextBroker);
-        setStreamHealth(nextStreamHealth);
-        setControlPlane(nextControlPlane);
-      } catch {
-        // Keep last known header status if refresh fails.
+      if (nextBroker.status === "fulfilled") {
+        setBroker(nextBroker.value);
+      } else {
+        setBroker({
+          ...EMPTY_BROKER_AUTH_STATUS,
+          detail: errorMessage(nextBroker.reason, "Broker telemetry could not be loaded."),
+        });
+      }
+
+      if (nextStreamHealth.status === "fulfilled") {
+        setStreamHealth(nextStreamHealth.value);
+        setStreamLoadError(null);
+      } else {
+        setStreamHealth(EMPTY_STREAM_HEALTH_STATUS);
+        setStreamLoadError(errorMessage(nextStreamHealth.reason, "Stream health could not be loaded."));
+      }
+
+      if (nextControlPlane.status === "fulfilled") {
+        setControlPlane(nextControlPlane.value);
+        setControlPlaneLoadError(null);
+      } else {
+        setControlPlane(EMPTY_CONTROL_PLANE_SUMMARY);
+        setControlPlaneLoadError(errorMessage(nextControlPlane.reason, "Control-plane health could not be loaded."));
       }
     };
 
@@ -91,7 +114,29 @@ export function AppNav() {
     };
   }, []);
 
-  const healthTone = !controlPlane.effective_autonomous_control_enabled || controlPlane.misaligned_count > 0
+  const healthLabel = controlPlaneLoadError
+    ? "Unknown"
+    : controlPlane.misaligned_count > 0
+      ? `${controlPlane.misaligned_count} mismatches`
+      : !controlPlane.effective_autonomous_control_enabled
+        ? "Paused"
+        : "Nominal";
+  const healthDetail = controlPlaneLoadError
+    ? `Health unavailable: ${controlPlaneLoadError}`
+    : "Control-plane health loaded from backend summary.";
+  const streamLabel = streamLoadError
+    ? "Unknown"
+    : streamHealth.connected
+      ? "Connected"
+      : streamHealth.enabled
+        ? "Interrupted"
+        : "Disabled";
+  const streamDetail = streamLoadError
+    ? `Stream health unavailable: ${streamLoadError}`
+    : streamHealth.last_status ?? "Stream health loaded from backend.";
+  const healthTone = controlPlaneLoadError
+    ? "negative"
+    : !controlPlane.effective_autonomous_control_enabled || controlPlane.misaligned_count > 0
     ? "warning"
     : broker.state === "unavailable" || !streamHealth.connected
       ? "negative"
@@ -139,9 +184,9 @@ export function AppNav() {
       </nav>
 
       <div className="flex min-w-0 flex-wrap items-center justify-end gap-[6px] max-[720px]:order-2">
-        <div className={indicatorTone(healthTone).className} style={indicatorTone(healthTone).style}>
+        <div className={indicatorTone(healthTone).className} style={indicatorTone(healthTone).style} title={healthDetail}>
           <span className="text-[0.68rem] uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">Health</span>
-          <strong>{controlPlane.misaligned_count > 0 ? `${controlPlane.misaligned_count} mismatches` : "Nominal"}</strong>
+          <strong>{healthLabel}</strong>
         </div>
         <div
           className={
@@ -154,16 +199,18 @@ export function AppNav() {
               broker.state === "connected" ? "positive" : broker.state === "disconnected" ? "warning" : "negative",
             ).style
           }
+          title={broker.detail}
         >
           <span className="text-[0.68rem] uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">Broker</span>
           <strong>{broker.label}</strong>
         </div>
         <div
-          className={indicatorTone(streamHealth.connected ? "positive" : streamHealth.enabled ? "negative" : "neutral").className}
-          style={indicatorTone(streamHealth.connected ? "positive" : streamHealth.enabled ? "negative" : "neutral").style}
+          className={indicatorTone(streamLoadError ? "negative" : streamHealth.connected ? "positive" : streamHealth.enabled ? "negative" : "neutral").className}
+          style={indicatorTone(streamLoadError ? "negative" : streamHealth.connected ? "positive" : streamHealth.enabled ? "negative" : "neutral").style}
+          title={streamDetail}
         >
           <span className="text-[0.68rem] uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">Stream</span>
-          <strong>{streamHealth.connected ? "Connected" : streamHealth.enabled ? "Interrupted" : "Disabled"}</strong>
+          <strong>{streamLabel}</strong>
         </div>
         <div className="flex min-w-0 min-w-[82px] flex-col gap-[2px] rounded-[12px] border border-[color:var(--glass-stroke)] bg-[image:var(--glass-surface-soft)] px-2 py-[7px] shadow-[var(--shadow-soft)]">
           <span className="text-[0.68rem] uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">Env</span>

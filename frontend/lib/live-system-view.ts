@@ -989,7 +989,7 @@ function buildTrustRail(resources: LiveDataResources, anomalies: LiveAnomalyItem
       value: brokerValue,
       tone: brokerValue === "CONNECTED" ? "positive" : brokerValue === "DISCONNECTED" ? "warning" : "inactive",
       meta: resources.errors.brokerAuth ?? resources.brokerAuth.detail,
-      source: "Broker-confirmed",
+      source: "Telemetry-derived broker state",
     },
     {
       id: "stream",

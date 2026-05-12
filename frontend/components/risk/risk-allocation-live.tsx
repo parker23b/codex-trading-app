@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   acknowledgeAllocationAlert,
@@ -43,6 +43,13 @@ type RiskAllocationLiveProps = {
   initialLoadErrors?: RiskLoadErrors;
 };
 
+type AlertMutationState = {
+  action: "acknowledge" | "resolve";
+  error: string | null;
+  pending: boolean;
+  success: string | null;
+};
+
 function budgetTone(utilization?: number | null) {
   if (utilization == null) {
     return "inactive" as const;
@@ -74,6 +81,10 @@ function topBuckets(buckets: ExposureBucket[], limit = 5) {
     .slice(0, limit);
 }
 
+function mutationErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Mutation failed before backend truth could be refreshed.";
+}
+
 export function RiskAllocationLive({
   initialExposure,
   initialAlerts,
@@ -94,7 +105,7 @@ export function RiskAllocationLive({
   const [alertStateFilter, setAlertStateFilter] = useState<"all" | "OPEN" | "ACKNOWLEDGED" | "RESOLVED">("all");
   const [alertTypeFilter, setAlertTypeFilter] = useState("");
   const [loadErrors, setLoadErrors] = useState<RiskLoadErrors>(initialLoadErrors);
-  const [isPending, startTransition] = useTransition();
+  const [alertMutationState, setAlertMutationState] = useState<Record<number, AlertMutationState>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -183,7 +194,16 @@ export function RiskAllocationLive({
   const intentsUnavailable = loadQuality.sectionUnavailable("intents");
 
   async function mutateAlert(alertId: number, action: "acknowledge" | "resolve") {
-    startTransition(async () => {
+    setAlertMutationState((current) => ({
+      ...current,
+      [alertId]: {
+        action,
+        error: null,
+        pending: true,
+        success: null,
+      },
+    }));
+    try {
       if (action === "acknowledge") {
         await acknowledgeAllocationAlert(alertId);
       } else {
@@ -191,7 +211,26 @@ export function RiskAllocationLive({
       }
       const nextAlerts = await getAllocationAlerts({ limit: 60, refresh: true });
       setAlerts(nextAlerts);
-    });
+      setAlertMutationState((current) => ({
+        ...current,
+        [alertId]: {
+          action,
+          error: null,
+          pending: false,
+          success: "Mutation confirmed after backend alert truth refreshed.",
+        },
+      }));
+    } catch (error) {
+      setAlertMutationState((current) => ({
+        ...current,
+        [alertId]: {
+          action,
+          error: `Mutation failed: ${mutationErrorMessage(error)}`,
+          pending: false,
+          success: null,
+        },
+      }));
+    }
   }
 
   return (
@@ -514,36 +553,42 @@ export function RiskAllocationLive({
                 />
               </div>
               <div className="detail-stack">
-                {filteredAlerts.map((alert) => (
-                  <article key={alert.id} className={`risk-alert-card risk-alert-card--${alertSeverityTone(alert.severity)}`}>
-                    <div className="risk-alert-card__title">
-                      <div className="cell-stack">
-                        <strong>{alert.title}</strong>
-                        <span className="console-subtle">{alert.message}</span>
+                {filteredAlerts.map((alert) => {
+                  const alertMutation = alertMutationState[alert.id];
+                  const alertMutationPending = Boolean(alertMutation?.pending);
+                  return (
+                    <article key={alert.id} className={`risk-alert-card risk-alert-card--${alertSeverityTone(alert.severity)}`}>
+                      <div className="risk-alert-card__title">
+                        <div className="cell-stack">
+                          <strong>{alert.title}</strong>
+                          <span className="console-subtle">{alert.message}</span>
+                        </div>
+                        <StatusPill label={alert.state.toLowerCase()} tone={alertSeverityTone(alert.severity)} />
                       </div>
-                      <StatusPill label={alert.state.toLowerCase()} tone={alertSeverityTone(alert.severity)} />
-                    </div>
-                    <div className="risk-alert-card__meta">
-                      <span>{`${alert.severity} · recurrence ${alert.recurrence_count} · escalation ${alert.escalation_level}`}</span>
-                      <span>{formatRelativeDuration(alert.last_seen_at)} ago</span>
-                    </div>
-                    <div className="risk-alert-card__meta">
-                      <span>{`Intents ${alert.related_intent_ids.length} · Cycles ${alert.related_cycle_ids.length} · Executions ${alert.related_execution_ids.length}`}</span>
-                    </div>
-                    {alert.state !== "RESOLVED" ? (
-                      <div className="console-inline-actions">
-                        {alert.state === "OPEN" ? (
-                          <button type="button" className="console-button console-button--ghost" disabled={isPending} onClick={() => void mutateAlert(alert.id, "acknowledge")}>
-                            Acknowledge
+                      <div className="risk-alert-card__meta">
+                        <span>{`${alert.severity} · recurrence ${alert.recurrence_count} · escalation ${alert.escalation_level}`}</span>
+                        <span>{formatRelativeDuration(alert.last_seen_at)} ago</span>
+                      </div>
+                      <div className="risk-alert-card__meta">
+                        <span>{`Intents ${alert.related_intent_ids.length} · Cycles ${alert.related_cycle_ids.length} · Executions ${alert.related_execution_ids.length}`}</span>
+                      </div>
+                      {alertMutation?.error ? <div className="status-note status-note--inline">{alertMutation.error}</div> : null}
+                      {alertMutation?.success ? <div className="status-note status-note--inline">{alertMutation.success}</div> : null}
+                      {alert.state !== "RESOLVED" ? (
+                        <div className="console-inline-actions">
+                          {alert.state === "OPEN" ? (
+                            <button type="button" className="console-button console-button--ghost" disabled={alertMutationPending} onClick={() => void mutateAlert(alert.id, "acknowledge")}>
+                              {alertMutationPending && alertMutation?.action === "acknowledge" ? "Acknowledging..." : "Acknowledge"}
+                            </button>
+                          ) : null}
+                          <button type="button" className="console-button" disabled={alertMutationPending} onClick={() => void mutateAlert(alert.id, "resolve")}>
+                            {alertMutationPending && alertMutation?.action === "resolve" ? "Resolving..." : "Resolve"}
                           </button>
-                        ) : null}
-                        <button type="button" className="console-button" disabled={isPending} onClick={() => void mutateAlert(alert.id, "resolve")}>
-                          Resolve
-                        </button>
-                      </div>
-                    ) : null}
-                  </article>
-                ))}
+                        </div>
+                      ) : null}
+                    </article>
+                  );
+                })}
                 {!filteredAlerts.length ? (
                   <div className={alertsUnavailable ? "console-empty" : "console-empty console-empty--positive"}>
                     {alertsUnavailable ? "Allocation alerts unavailable." : "No alerts match the current filters."}
