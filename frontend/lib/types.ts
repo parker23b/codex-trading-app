@@ -615,7 +615,7 @@ export type DashboardSnapshot = {
 
 export type MarketCategory = "forex" | "indices" | "commodities" | "stocks" | "crypto";
 
-export type MarketStatus = "OPEN" | "CLOSED" | "LIMITED";
+export type MarketStatus = "OPEN" | "CLOSED" | "LIMITED" | "UNAVAILABLE";
 
 export type ActivityLevel = "LOW" | "MEDIUM" | "HIGH";
 

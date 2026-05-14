@@ -10,7 +10,10 @@ function readFrontendFile(relativePath) {
 }
 
 function extractConstObject(source, name) {
-  const start = source.indexOf(`export const ${name}`);
+  let start = source.indexOf(`export const ${name}`);
+  if (start === -1) {
+    start = source.indexOf(`const ${name}`);
+  }
   assert.notEqual(start, -1, `${name} export should exist`);
   const bodyStart = source.indexOf("{", start);
   assert.notEqual(bodyStart, -1, `${name} object should start`);
@@ -47,4 +50,17 @@ test("AUDIT-UI-007 backend-unavailable control fallbacks are explicit and fail c
   assert.doesNotMatch(controlFallback, /open_risk_management_state:\s*"NO_OPEN_RISK"/);
 
   assert.match(limitsFallback, /autonomous_control_enabled:\s*false/);
+});
+
+test("AUDIT-UI-007 backend-unavailable market overview fallback is explicit, not limited market truth", () => {
+  const marketsPageSource = readFrontendFile("app/markets/page.tsx");
+  const marketFallback = extractConstObject(marketsPageSource, "EMPTY_FOREX_OVERVIEW");
+
+  assert.match(marketFallback, /status:\s*"UNAVAILABLE"/);
+  assert.match(marketFallback, /headline:\s*"Backend unavailable"/);
+  assert.match(marketFallback, /detail:\s*"Market overview could not be loaded\. Counts are unavailable, not zero market truth\."/);
+  assert.match(marketFallback, /nextTransitionAt:\s*new Date\(0\)\.toISOString\(\)/);
+  assert.match(marketFallback, /nextTransitionLabel:\s*"Unavailable"/);
+  assert.doesNotMatch(marketFallback, /status:\s*"LIMITED"/);
+  assert.doesNotMatch(marketFallback, /Load on demand|Refreshes|avoid overusing IG REST endpoints|Date\.now\(\)/);
 });
