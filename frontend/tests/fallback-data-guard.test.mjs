@@ -52,6 +52,20 @@ test("AUDIT-UI-007 backend-unavailable control fallbacks are explicit and fail c
   assert.match(limitsFallback, /autonomous_control_enabled:\s*false/);
 });
 
+test("AUDIT-UI-007 backend-unavailable telemetry fallback does not assert no open risk", () => {
+  const apiSource = readFrontendFile("lib/api.ts");
+  const telemetryFallback = extractConstObject(apiSource, "EMPTY_OPERATIONAL_TELEMETRY");
+
+  assert.match(telemetryFallback, /status:\s*"unknown"/);
+  assert.match(telemetryFallback, /entry_eligible:\s*false/);
+  assert.match(telemetryFallback, /exit_eligible:\s*false/);
+  assert.match(telemetryFallback, /entry_block_reason:\s*"backend_unavailable"/);
+  assert.match(telemetryFallback, /exit_block_reason:\s*"backend_unavailable"/);
+  assert.match(telemetryFallback, /open_risk_management_state:\s*"UNAVAILABLE"/);
+  assert.match(telemetryFallback, /open_risk_management_reason:\s*"Operational telemetry could not be loaded\."/);
+  assert.doesNotMatch(telemetryFallback, /open_risk_management_state:\s*"NO_OPEN_RISK"/);
+});
+
 test("AUDIT-UI-007 backend-unavailable market overview fallback is explicit, not limited market truth", () => {
   const marketsPageSource = readFrontendFile("app/markets/page.tsx");
   const marketFallback = extractConstObject(marketsPageSource, "EMPTY_FOREX_OVERVIEW");
