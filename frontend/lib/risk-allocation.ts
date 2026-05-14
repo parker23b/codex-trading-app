@@ -174,11 +174,18 @@ export function truthConfidenceMeta(value?: RiskTruthConfidence | null): {
         tone: "negative",
         detail: "Fill truth is incomplete or inconsistent; post-trade risk remains degraded.",
       };
+    case "SIMULATED_LOCAL_FILL":
+      return {
+        label: "Simulated",
+        tone: "warning",
+        detail: "Risk comes from a local simulated fill and is not broker-confirmed truth.",
+      };
+    case "UNKNOWN":
     default:
       return {
         label: "Unknown",
-        tone: "inactive",
-        detail: "Risk truth confidence is unavailable.",
+        tone: "negative",
+        detail: "Risk truth confidence is explicitly unknown or unavailable.",
       };
   }
 }
@@ -280,10 +287,12 @@ function classifyTruthMix(intents: AllocationIntent[]) {
           mix.estimated += 1;
           break;
         case "INCOMPLETE_DEGRADED":
+        case "SIMULATED_LOCAL_FILL":
+        case "UNKNOWN":
           mix.degraded += 1;
           break;
         default:
-          mix.estimated += 1;
+          mix.degraded += 1;
           break;
       }
     });

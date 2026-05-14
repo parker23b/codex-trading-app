@@ -943,7 +943,9 @@ export type RiskTruthConfidence =
   | "PARTIAL_FILL_PROVISIONAL"
   | "SUBMITTED_EXECUTABLE_ESTIMATE"
   | "ALLOCATION_INTENT_ONLY"
-  | "INCOMPLETE_DEGRADED";
+  | "INCOMPLETE_DEGRADED"
+  | "SIMULATED_LOCAL_FILL"
+  | "UNKNOWN";
 
 export type AllocationCycle = {
   cycle_id: string;

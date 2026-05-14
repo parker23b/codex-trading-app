@@ -242,13 +242,31 @@ function summarizeReason(value?: string | null) {
 }
 
 function executionTone(execution: Execution): LiveTone {
-  if (execution.status === "FAILED" || execution.requires_manual_review) {
+  if (execution.requires_manual_review) {
     return "negative";
   }
-  if (execution.status === "RISK_REJECTED" || execution.status === "CANCELLED" || execution.status === "FILL_PARTIAL") {
-    return "warning";
+
+  switch (execution.status) {
+    case "FAILED":
+    case "NEEDS_MANUAL_REVIEW":
+      return "negative";
+    case "SUBMISSION_PENDING":
+    case "SIGNAL_GENERATED":
+    case "RISK_APPROVED":
+    case "RISK_REJECTED":
+    case "ORDER_SUBMITTED":
+    case "ORDER_ACKNOWLEDGED":
+    case "FILL_PARTIAL":
+    case "CLOSE_REQUESTED":
+    case "CANCELLED":
+      return "warning";
+    case "FILL_FULL":
+    case "POSITION_OPENED":
+    case "CLOSE_CONFIRMED":
+      return "positive";
+    default:
+      return "inactive";
   }
-  return "positive";
 }
 
 function executionMessage(execution: Execution) {
@@ -257,23 +275,25 @@ function executionMessage(execution: Execution) {
   const direction = readableDirection(execution.details.direction as "BUY" | "SELL" | null | undefined) === "short" ? "short" : "long";
 
   switch (execution.status) {
+    case "SUBMISSION_PENDING":
+      return `${strategy} has pending broker submission for ${instrument}`;
     case "SIGNAL_GENERATED":
       return `${strategy} flagged ${instrument} for ${direction} entry`;
     case "RISK_APPROVED":
-      return `${strategy} cleared risk gates on ${instrument}`;
+      return `${strategy} has allocation approval recorded for ${instrument}`;
     case "RISK_REJECTED":
       return `${strategy} signal was rejected on ${instrument}`;
     case "ORDER_SUBMITTED":
-      return `${strategy} submitted ${instrument} to execution`;
+      return `${strategy} submitted ${instrument} and is awaiting broker confirmation`;
     case "ORDER_ACKNOWLEDGED":
-      return `Execution accepted ${strategy} on ${instrument}`;
+      return `Broker acknowledged ${strategy} on ${instrument}; fill truth is pending`;
     case "FILL_PARTIAL":
       return `${strategy} partially filled ${instrument}`;
     case "FILL_FULL":
     case "POSITION_OPENED":
       return `${strategy} entered ${direction} ${instrument}`;
     case "CLOSE_REQUESTED":
-      return `${strategy} requested exit on ${instrument}`;
+      return `${strategy} requested exit on ${instrument}; close truth is pending`;
     case "CLOSE_CONFIRMED":
       return `${strategy} closed ${instrument}`;
     case "FAILED":
@@ -283,7 +303,7 @@ function executionMessage(execution: Execution) {
     case "NEEDS_MANUAL_REVIEW":
       return `${strategy} needs execution review on ${instrument}`;
     default:
-      return `${strategy} updated ${instrument}`;
+      return `${strategy} reported unsupported execution state on ${instrument}`;
   }
 }
 
