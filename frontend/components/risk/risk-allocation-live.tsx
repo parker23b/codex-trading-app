@@ -30,6 +30,7 @@ import type {
   AllocationExposureSummary,
   AllocationIntent,
   ExposureBucket,
+  RiskTruthConfidence,
 } from "@/lib/types";
 import { CompactTable, Panel, SplitPanel, StatusPill, StatusStrip } from "@/components/console/primitives";
 
@@ -43,7 +44,7 @@ type RiskAllocationLiveProps = {
   initialLoadErrors?: RiskLoadErrors;
 };
 
-type AlertMutationState = {
+export type AlertMutationState = {
   action: "acknowledge" | "resolve";
   error: string | null;
   pending: boolean;
@@ -83,6 +84,68 @@ function topBuckets(buckets: ExposureBucket[], limit = 5) {
 
 function mutationErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Mutation failed before backend truth could be refreshed.";
+}
+
+export function RiskTruthConfidencePill({ confidence }: { confidence?: RiskTruthConfidence | null }) {
+  const meta = truthConfidenceMeta(confidence);
+  return <StatusPill label={meta.label} tone={meta.tone} title={meta.detail} />;
+}
+
+export function RiskAlertCard({
+  alert,
+  mutation,
+  onAcknowledge,
+  onResolve,
+}: {
+  alert: AllocationAlert;
+  mutation?: AlertMutationState;
+  onAcknowledge: (alertId: number) => void;
+  onResolve: (alertId: number) => void;
+}) {
+  const mutationPending = Boolean(mutation?.pending);
+
+  return (
+    <article className={`risk-alert-card risk-alert-card--${alertSeverityTone(alert.severity)}`}>
+      <div className="risk-alert-card__title">
+        <div className="cell-stack">
+          <strong>{alert.title}</strong>
+          <span className="console-subtle">{alert.message}</span>
+        </div>
+        <StatusPill label={alert.state.toLowerCase()} tone={alertSeverityTone(alert.severity)} />
+      </div>
+      <div className="risk-alert-card__meta">
+        <span>{`${alert.severity} · recurrence ${alert.recurrence_count} · escalation ${alert.escalation_level}`}</span>
+        <span>{formatRelativeDuration(alert.last_seen_at)} ago</span>
+      </div>
+      <div className="risk-alert-card__meta">
+        <span>{`Intents ${alert.related_intent_ids.length} · Cycles ${alert.related_cycle_ids.length} · Executions ${alert.related_execution_ids.length}`}</span>
+      </div>
+      {mutation?.error ? <div className="status-note status-note--inline">{mutation.error}</div> : null}
+      {mutation?.success ? <div className="status-note status-note--inline">{mutation.success}</div> : null}
+      {alert.state !== "RESOLVED" ? (
+        <div className="console-inline-actions">
+          {alert.state === "OPEN" ? (
+            <button
+              type="button"
+              className="console-button console-button--ghost"
+              disabled={mutationPending}
+              onClick={() => onAcknowledge(alert.id)}
+            >
+              {mutationPending && mutation?.action === "acknowledge" ? "Acknowledging..." : "Acknowledge"}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="console-button"
+            disabled={mutationPending}
+            onClick={() => onResolve(alert.id)}
+          >
+            {mutationPending && mutation?.action === "resolve" ? "Resolving..." : "Resolve"}
+          </button>
+        </div>
+      ) : null}
+    </article>
+  );
 }
 
 export function RiskAllocationLive({
@@ -555,38 +618,14 @@ export function RiskAllocationLive({
               <div className="detail-stack">
                 {filteredAlerts.map((alert) => {
                   const alertMutation = alertMutationState[alert.id];
-                  const alertMutationPending = Boolean(alertMutation?.pending);
                   return (
-                    <article key={alert.id} className={`risk-alert-card risk-alert-card--${alertSeverityTone(alert.severity)}`}>
-                      <div className="risk-alert-card__title">
-                        <div className="cell-stack">
-                          <strong>{alert.title}</strong>
-                          <span className="console-subtle">{alert.message}</span>
-                        </div>
-                        <StatusPill label={alert.state.toLowerCase()} tone={alertSeverityTone(alert.severity)} />
-                      </div>
-                      <div className="risk-alert-card__meta">
-                        <span>{`${alert.severity} · recurrence ${alert.recurrence_count} · escalation ${alert.escalation_level}`}</span>
-                        <span>{formatRelativeDuration(alert.last_seen_at)} ago</span>
-                      </div>
-                      <div className="risk-alert-card__meta">
-                        <span>{`Intents ${alert.related_intent_ids.length} · Cycles ${alert.related_cycle_ids.length} · Executions ${alert.related_execution_ids.length}`}</span>
-                      </div>
-                      {alertMutation?.error ? <div className="status-note status-note--inline">{alertMutation.error}</div> : null}
-                      {alertMutation?.success ? <div className="status-note status-note--inline">{alertMutation.success}</div> : null}
-                      {alert.state !== "RESOLVED" ? (
-                        <div className="console-inline-actions">
-                          {alert.state === "OPEN" ? (
-                            <button type="button" className="console-button console-button--ghost" disabled={alertMutationPending} onClick={() => void mutateAlert(alert.id, "acknowledge")}>
-                              {alertMutationPending && alertMutation?.action === "acknowledge" ? "Acknowledging..." : "Acknowledge"}
-                            </button>
-                          ) : null}
-                          <button type="button" className="console-button" disabled={alertMutationPending} onClick={() => void mutateAlert(alert.id, "resolve")}>
-                            {alertMutationPending && alertMutation?.action === "resolve" ? "Resolving..." : "Resolve"}
-                          </button>
-                        </div>
-                      ) : null}
-                    </article>
+                    <RiskAlertCard
+                      key={alert.id}
+                      alert={alert}
+                      mutation={alertMutation}
+                      onAcknowledge={(alertId) => void mutateAlert(alertId, "acknowledge")}
+                      onResolve={(alertId) => void mutateAlert(alertId, "resolve")}
+                    />
                   );
                 })}
                 {!filteredAlerts.length ? (
@@ -616,10 +655,7 @@ export function RiskAllocationLive({
                   {
                     key: "confidence",
                     header: "Truth",
-                    render: (row) => {
-                      const meta = truthConfidenceMeta(row.position?.risk_truth_confidence ?? row.risk_truth_confidence);
-                      return <StatusPill label={meta.label} tone={meta.tone} title={meta.detail} />;
-                    },
+                    render: (row) => <RiskTruthConfidencePill confidence={row.position?.risk_truth_confidence ?? row.risk_truth_confidence} />,
                   },
                   {
                     key: "risk-stages",

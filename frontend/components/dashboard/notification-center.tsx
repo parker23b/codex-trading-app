@@ -8,7 +8,7 @@ import { BrokerAuthStatus, Execution, StreamHealthStatus } from "@/lib/types";
 
 type NotificationTone = "positive" | "warning" | "negative" | "neutral";
 
-type NotificationItem = {
+export type NotificationItem = {
   id: string;
   tone: NotificationTone;
   category: string;
@@ -27,10 +27,21 @@ type NotificationCenterProps = {
 
 const DISMISSED_STORAGE_KEY = "trading-platform-dismissed-notifications";
 
-function buildExecutionNotification(execution: Execution): NotificationItem {
+export function buildExecutionNotification(execution: Execution): NotificationItem {
   const timestamp = execution.last_transition_at;
 
   switch (execution.status) {
+    case "SUBMISSION_PENDING":
+      return {
+        id: `execution-${execution.id}`,
+        tone: "warning",
+        category: execution.phase === "ENTRY" ? "Entry Pending" : "Exit Pending",
+        title: execution.phase === "ENTRY" ? "Entry pending broker submission" : "Exit pending broker submission",
+        detail: `${buildExecutionDetail(execution)} • Manual review if this does not resolve.`,
+        timestamp,
+        strategyName: execution.strategy_name,
+        instrument: execution.instrument,
+      };
     case "FAILED":
       return {
         id: `execution-${execution.id}`,
@@ -89,9 +100,20 @@ function buildExecutionNotification(execution: Execution): NotificationItem {
     case "ORDER_SUBMITTED":
       return {
         id: `execution-${execution.id}`,
-        tone: "neutral",
+        tone: "warning",
         category: execution.phase === "ENTRY" ? "Entry Working" : "Exit Working",
         title: execution.phase === "ENTRY" ? "Entry order submitted" : "Exit order submitted",
+        detail: buildExecutionDetail(execution),
+        timestamp,
+        strategyName: execution.strategy_name,
+        instrument: execution.instrument,
+      };
+    case "ORDER_ACKNOWLEDGED":
+      return {
+        id: `execution-${execution.id}`,
+        tone: "warning",
+        category: execution.phase === "ENTRY" ? "Entry Acknowledged" : "Exit Acknowledged",
+        title: execution.phase === "ENTRY" ? "Entry acknowledged, awaiting final fill" : "Exit acknowledged, awaiting final close",
         detail: buildExecutionDetail(execution),
         timestamp,
         strategyName: execution.strategy_name,
@@ -151,7 +173,7 @@ function buildSystemNotifications(brokerAuth: BrokerAuthStatus, streamHealth: St
   return items;
 }
 
-function NotificationCard({
+export function NotificationCard({
   notification,
   onDismiss,
 }: {

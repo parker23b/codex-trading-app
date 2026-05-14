@@ -12,7 +12,8 @@ test("AUDIT-UI-004 allocation alert mutation failures keep backend error detail 
   assert.match(source, /setAlertMutationState/);
   assert.match(source, /catch\s*\(\s*error\s*\)/);
   assert.match(source, /mutationErrorMessage/);
-  assert.match(source, /alertMutation\.error/);
+  assert.match(source, /mutation\?\.error/);
+  assert.match(source, /RiskAlertCard/);
   assert.match(source, /Mutation failed/);
   assert.doesNotMatch(source, /startTransition\s*\(\s*async\s*\(\s*\)\s*=>/);
 });
