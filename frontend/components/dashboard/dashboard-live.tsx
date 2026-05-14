@@ -376,6 +376,8 @@ export function DashboardLive({
   const runningCount = runtimeRows.length;
   const degradedCount = strategyExceptions.length;
   const pausedCount = Math.max(controlPlane.families.length - runningCount - degradedCount, 0);
+  const openRiskState = controlPlane.open_risk_management_state;
+  const openRiskUnavailable = openRiskState == null || openRiskState === "UNAVAILABLE" || openRiskState === "UNKNOWN";
   const healthTone =
     errors.controlPlane || errors.brokerAuth
       ? "inactive"
@@ -486,13 +488,15 @@ export function DashboardLive({
               },
               {
                 label: "Open Risk",
-                value: errors.dashboard || errors.operatingLimits ? "-" : controlPlane.open_risk_management_state ?? formatPercent(dashboard.openRisk),
+                value: errors.dashboard || errors.operatingLimits ? "-" : openRiskState ?? formatPercent(dashboard.openRisk),
                 tone:
                   errors.dashboard || errors.operatingLimits
                     ? "inactive"
-                    : controlPlane.open_risk_management_state === "UNMANAGED_OPEN_RISK"
+                    : openRiskUnavailable
+                      ? "inactive"
+                    : openRiskState === "UNMANAGED_OPEN_RISK"
                       ? "negative"
-                      : controlPlane.open_risk_management_state === "EXITS_ONLY"
+                      : openRiskState === "EXITS_ONLY"
                         ? "warning"
                         : dashboard.openRisk > operatingLimits.risk.max_open_risk_percent
                           ? "negative"
@@ -620,20 +624,24 @@ export function DashboardLive({
                         tone={
                           errors.controlPlane
                             ? "inactive"
-                            : controlPlane.open_risk_management_state === "UNMANAGED_OPEN_RISK"
+                            : openRiskUnavailable
+                              ? "inactive"
+                            : openRiskState === "UNMANAGED_OPEN_RISK"
                               ? "negative"
-                              : controlPlane.open_risk_management_state === "EXITS_ONLY"
+                              : openRiskState === "EXITS_ONLY"
                                 ? "warning"
                                 : "positive"
                         }
                         title={
                           errors.controlPlane
                             ? `Open-risk state unknown. ${errors.controlPlane}`
-                            : controlPlane.open_risk_management_state === "UNMANAGED_OPEN_RISK"
+                            : openRiskUnavailable
+                              ? `Open-risk state unavailable. ${controlPlane.open_risk_management_reason ?? "Control-plane state did not provide open-risk truth."}`
+                            : openRiskState === "UNMANAGED_OPEN_RISK"
                               ? `Unmanaged open risk. ${controlPlane.open_risk_management_reason ?? "Open positions are no longer under active automated exit management."}`
-                              : controlPlane.open_risk_management_state === "EXITS_ONLY"
+                              : openRiskState === "EXITS_ONLY"
                                 ? `Exit-only management. ${controlPlane.open_risk_management_reason ?? "Existing positions remain managed while new entries stay suppressed."}`
-                                : `Open-risk state: ${controlPlane.open_risk_management_state ?? "NO_OPEN_RISK"}.`
+                                : `Open-risk state: ${openRiskState}.`
                         }
                       />
                     </div>

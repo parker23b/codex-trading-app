@@ -103,6 +103,8 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
   const selectedFamily =
     summary.families.find((family) => family.strategy_name === selectedStrategyName) ?? exceptionFamilies[0] ?? null;
   const selectedTone = selectedFamily ? familyTone(summary, selectedFamily) : "inactive";
+  const openRiskState = summary.open_risk_management_state;
+  const openRiskUnavailable = openRiskState == null || openRiskState === "UNAVAILABLE" || openRiskState === "UNKNOWN";
 
   const refreshSummary = async () => {
     const nextSummary = await getControlPlaneSummary();
@@ -198,13 +200,15 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
           },
           {
             label: "Open Risk",
-            value: summaryError ? "-" : summary.open_risk_management_state ?? "NO_OPEN_RISK",
+            value: summaryError ? "-" : openRiskState ?? "UNAVAILABLE",
             tone:
               summaryError
                 ? "inactive"
-                : summary.open_risk_management_state === "UNMANAGED_OPEN_RISK"
+                : openRiskUnavailable
+                  ? "inactive"
+                : openRiskState === "UNMANAGED_OPEN_RISK"
                   ? "negative"
-                  : summary.open_risk_management_state === "EXITS_ONLY"
+                  : openRiskState === "EXITS_ONLY"
                     ? "warning"
                     : "positive",
           },

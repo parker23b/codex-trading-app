@@ -82,9 +82,9 @@ export const EMPTY_COVERAGE_SUMMARY: CoverageSummary = {
 };
 
 export const EMPTY_CONTROL_PLANE_SUMMARY: ControlPlaneSummary = {
-  autonomous_control_enabled: true,
-  configured_autonomous_control_enabled: true,
-  effective_autonomous_control_enabled: true,
+  autonomous_control_enabled: false,
+  configured_autonomous_control_enabled: false,
+  effective_autonomous_control_enabled: false,
   autonomy_override_active: false,
   autonomy_override_value: null,
   autonomy_override_reason: null,
@@ -94,10 +94,10 @@ export const EMPTY_CONTROL_PLANE_SUMMARY: ControlPlaneSummary = {
   broker_connectivity_state: "DISCONNECTED",
   entry_eligible: false,
   exit_eligible: false,
-  entry_block_reason: "data_disconnected",
-  exit_block_reason: "data_disconnected",
-  open_risk_management_state: "NO_OPEN_RISK",
-  open_risk_management_reason: null,
+  entry_block_reason: "backend_unavailable",
+  exit_block_reason: "backend_unavailable",
+  open_risk_management_state: "UNAVAILABLE",
+  open_risk_management_reason: "Control-plane state could not be loaded.",
   counts: {},
   misaligned_count: 0,
   families: [],
@@ -138,7 +138,7 @@ export const EMPTY_OPERATIONAL_TELEMETRY: OperationalTelemetry = {
 };
 
 export const EMPTY_SYSTEM_OPERATING_LIMITS: SystemOperatingLimits = {
-  autonomous_control_enabled: true,
+  autonomous_control_enabled: false,
   risk: {
     max_open_positions: 0,
     max_positions_per_strategy: 0,
