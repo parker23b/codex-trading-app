@@ -64,3 +64,11 @@ test("AUDIT-UI-007 backend-unavailable market overview fallback is explicit, not
   assert.doesNotMatch(marketFallback, /status:\s*"LIMITED"/);
   assert.doesNotMatch(marketFallback, /Load on demand|Refreshes|avoid overusing IG REST endpoints|Date\.now\(\)/);
 });
+
+test("AUDIT-UI-007 live-view derived confidence cannot be high with unavailable sources", () => {
+  const liveModelSource = readFrontendFile("lib/live-system-view.ts");
+
+  assert.match(liveModelSource, /missingSourceCount === 0[\s\S]*confidence = "HIGH"/);
+  assert.match(liveModelSource, /missingSourceCount \? `\$\{missingSourceCount\} source/);
+  assert.doesNotMatch(liveModelSource, /missingSourceCount <= 1[\s\S]*confidence = "HIGH"/);
+});

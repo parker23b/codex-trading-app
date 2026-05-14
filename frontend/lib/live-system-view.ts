@@ -915,7 +915,7 @@ function buildTrustRail(resources: LiveDataResources, anomalies: LiveAnomalyItem
   let confidence = "UNKNOWN";
   let confidenceTone: LiveTone = "inactive";
   const missingSourceCount = Object.values(resources.errors).filter(Boolean).length;
-  if (missingSourceCount <= 1 && liveFreshness === "LIVE" && executionIntegrity === "OK") {
+  if (missingSourceCount === 0 && liveFreshness === "LIVE" && executionIntegrity === "OK") {
     confidence = "HIGH";
     confidenceTone = "positive";
   } else if (missingSourceCount <= 3 && liveFreshness !== "STALE") {
