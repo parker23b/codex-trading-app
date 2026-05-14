@@ -5,9 +5,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import {
-  EMPTY_BROKER_AUTH_STATUS,
-  EMPTY_CONTROL_PLANE_SUMMARY,
-  EMPTY_STREAM_HEALTH_STATUS,
+  UNAVAILABLE_BROKER_AUTH_STATUS,
+  UNAVAILABLE_CONTROL_PLANE_SUMMARY,
+  UNAVAILABLE_STREAM_HEALTH_STATUS,
   getBrokerAuthStatus,
   getControlPlaneSummary,
   getStreamHealth,
@@ -59,9 +59,9 @@ function activeNavLinkStyle(isActive: boolean): CSSProperties | undefined {
 
 export function AppNav() {
   const pathname = usePathname();
-  const [broker, setBroker] = useState(EMPTY_BROKER_AUTH_STATUS);
-  const [streamHealth, setStreamHealth] = useState(EMPTY_STREAM_HEALTH_STATUS);
-  const [controlPlane, setControlPlane] = useState(EMPTY_CONTROL_PLANE_SUMMARY);
+  const [broker, setBroker] = useState(UNAVAILABLE_BROKER_AUTH_STATUS);
+  const [streamHealth, setStreamHealth] = useState(UNAVAILABLE_STREAM_HEALTH_STATUS);
+  const [controlPlane, setControlPlane] = useState(UNAVAILABLE_CONTROL_PLANE_SUMMARY);
   const [streamLoadError, setStreamLoadError] = useState<string | null>("Stream health has not loaded yet.");
   const [controlPlaneLoadError, setControlPlaneLoadError] = useState<string | null>("Control-plane health has not loaded yet.");
 
@@ -83,7 +83,7 @@ export function AppNav() {
         setBroker(nextBroker.value);
       } else {
         setBroker({
-          ...EMPTY_BROKER_AUTH_STATUS,
+          ...UNAVAILABLE_BROKER_AUTH_STATUS,
           detail: errorMessage(nextBroker.reason, "Broker telemetry could not be loaded."),
         });
       }
@@ -92,7 +92,7 @@ export function AppNav() {
         setStreamHealth(nextStreamHealth.value);
         setStreamLoadError(null);
       } else {
-        setStreamHealth(EMPTY_STREAM_HEALTH_STATUS);
+        setStreamHealth(UNAVAILABLE_STREAM_HEALTH_STATUS);
         setStreamLoadError(errorMessage(nextStreamHealth.reason, "Stream health could not be loaded."));
       }
 
@@ -100,7 +100,7 @@ export function AppNav() {
         setControlPlane(nextControlPlane.value);
         setControlPlaneLoadError(null);
       } else {
-        setControlPlane(EMPTY_CONTROL_PLANE_SUMMARY);
+        setControlPlane(UNAVAILABLE_CONTROL_PLANE_SUMMARY);
         setControlPlaneLoadError(errorMessage(nextControlPlane.reason, "Control-plane health could not be loaded."));
       }
     };
@@ -212,9 +212,12 @@ export function AppNav() {
           <span className="text-[0.68rem] uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">Stream</span>
           <strong>{streamLabel}</strong>
         </div>
-        <div className="flex min-w-0 min-w-[82px] flex-col gap-[2px] rounded-[12px] border border-[color:var(--glass-stroke)] bg-[image:var(--glass-surface-soft)] px-2 py-[7px] shadow-[var(--shadow-soft)]">
-          <span className="text-[0.68rem] uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">Env</span>
-          <strong>Demo</strong>
+        <div
+          className="flex min-w-0 min-w-[82px] flex-col gap-[2px] rounded-[12px] border border-[color:var(--glass-stroke)] bg-[image:var(--glass-surface-soft)] px-2 py-[7px] shadow-[var(--shadow-soft)]"
+          title="Account environment is unavailable; no backend account source is loaded in this nav summary."
+        >
+          <span className="text-[0.68rem] uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">Account Env</span>
+          <strong>Unknown</strong>
         </div>
         <ThemeToggle variant="nav" />
       </div>

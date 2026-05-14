@@ -1,8 +1,8 @@
 import { MarketOverviewDashboard } from "@/components/markets/market-overview-dashboard";
-import { EMPTY_MARKET_CATALOGUE, EMPTY_STRATEGY_WATCHLIST, getMarketCatalogue, getMarketOverview, getStrategyWatchlist, loadWithMeta } from "@/lib/api";
+import { UNAVAILABLE_MARKET_CATALOGUE, UNAVAILABLE_STRATEGY_WATCHLIST, getMarketCatalogue, getMarketOverview, getStrategyWatchlist, loadWithMeta } from "@/lib/api";
 import { MarketCategoryOverviewResponse } from "@/lib/types";
 
-const EMPTY_FOREX_OVERVIEW: MarketCategoryOverviewResponse = {
+const UNAVAILABLE_FOREX_OVERVIEW: MarketCategoryOverviewResponse = {
   generatedAt: new Date(0).toISOString(),
   summary: {
     category: "forex",
@@ -22,18 +22,18 @@ const EMPTY_FOREX_OVERVIEW: MarketCategoryOverviewResponse = {
 
 export default async function MarketsPage() {
   const [overview, catalogue, strategyWatchlist] = await Promise.all([
-    loadWithMeta(() => getMarketOverview("forex"), EMPTY_FOREX_OVERVIEW),
-    loadWithMeta(() => getMarketCatalogue(), EMPTY_MARKET_CATALOGUE),
-    loadWithMeta(() => getStrategyWatchlist(), EMPTY_STRATEGY_WATCHLIST),
+    loadWithMeta(() => getMarketOverview("forex")),
+    loadWithMeta(() => getMarketCatalogue()),
+    loadWithMeta(() => getStrategyWatchlist()),
   ]);
 
   return (
     <MarketOverviewDashboard
-      initialOverview={overview.data}
+      initialOverview={overview.data ?? UNAVAILABLE_FOREX_OVERVIEW}
       initialOverviewError={overview.error}
-      initialCatalogue={catalogue.data}
+      initialCatalogue={catalogue.data ?? UNAVAILABLE_MARKET_CATALOGUE}
       initialCatalogueError={catalogue.error}
-      initialStrategyWatchlist={strategyWatchlist.data}
+      initialStrategyWatchlist={strategyWatchlist.data ?? UNAVAILABLE_STRATEGY_WATCHLIST}
       initialStrategyWatchlistError={strategyWatchlist.error}
     />
   );

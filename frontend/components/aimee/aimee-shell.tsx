@@ -21,7 +21,7 @@ import {
 import { askOperationalQuestion } from "@/lib/api";
 import { formatPercent } from "@/lib/format";
 
-const EMPTY_SNAPSHOT: AimeeSnapshot = {
+const UNAVAILABLE_SNAPSHOT: AimeeSnapshot = {
   review: null,
   history: [],
   controlPlane: null,
@@ -36,7 +36,7 @@ export function AimeeShell() {
   const pathname = usePathname();
   const context = routeContextFromPath(pathname);
   const [isOpen, setIsOpen] = useState(false);
-  const [snapshot, setSnapshot] = useState<AimeeSnapshot>(EMPTY_SNAPSHOT);
+  const [snapshot, setSnapshot] = useState<AimeeSnapshot>(UNAVAILABLE_SNAPSHOT);
   const [isLoading, setIsLoading] = useState(true);
   const [loadingError, setLoadingError] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);

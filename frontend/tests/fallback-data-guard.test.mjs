@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
@@ -7,6 +7,18 @@ const frontendRoot = path.resolve(import.meta.dirname, "..");
 
 function readFrontendFile(relativePath) {
   return readFileSync(path.join(frontendRoot, relativePath), "utf8");
+}
+
+function listFrontendFiles(relativePath) {
+  const root = path.join(frontendRoot, relativePath);
+  const entries = readdirSync(root, { withFileTypes: true });
+  return entries.flatMap((entry) => {
+    const entryPath = path.join(relativePath, entry.name);
+    if (entry.isDirectory()) {
+      return listFrontendFiles(entryPath);
+    }
+    return entryPath;
+  });
 }
 
 function extractConstObject(source, name) {
@@ -33,10 +45,38 @@ function extractConstObject(source, name) {
   assert.fail(`${name} object should end`);
 }
 
+function findLoadWithMetaFallbackCalls(source) {
+  const violations = [];
+  let start = source.indexOf("loadWithMeta(");
+  while (start !== -1) {
+    const argsStart = source.indexOf("(", start);
+    let depth = 0;
+    let topLevelCommaCount = 0;
+    for (let index = argsStart; index < source.length; index += 1) {
+      const character = source[index];
+      if (character === "(" || character === "{" || character === "[") {
+        depth += 1;
+      } else if (character === ")" || character === "}" || character === "]") {
+        depth -= 1;
+        if (depth === 0) {
+          if (topLevelCommaCount > 0) {
+            violations.push(source.slice(start, index + 1));
+          }
+          break;
+        }
+      } else if (character === "," && depth === 1) {
+        topLevelCommaCount += 1;
+      }
+    }
+    start = source.indexOf("loadWithMeta(", start + 1);
+  }
+  return violations;
+}
+
 test("AUDIT-UI-007 backend-unavailable control fallbacks are explicit and fail closed", () => {
   const apiSource = readFrontendFile("lib/api.ts");
-  const controlFallback = extractConstObject(apiSource, "EMPTY_CONTROL_PLANE_SUMMARY");
-  const limitsFallback = extractConstObject(apiSource, "EMPTY_SYSTEM_OPERATING_LIMITS");
+  const controlFallback = extractConstObject(apiSource, "UNAVAILABLE_CONTROL_PLANE_SUMMARY");
+  const limitsFallback = extractConstObject(apiSource, "UNAVAILABLE_SYSTEM_OPERATING_LIMITS");
 
   assert.match(controlFallback, /autonomous_control_enabled:\s*false/);
   assert.match(controlFallback, /configured_autonomous_control_enabled:\s*false/);
@@ -54,7 +94,7 @@ test("AUDIT-UI-007 backend-unavailable control fallbacks are explicit and fail c
 
 test("AUDIT-UI-007 backend-unavailable telemetry fallback does not assert no open risk", () => {
   const apiSource = readFrontendFile("lib/api.ts");
-  const telemetryFallback = extractConstObject(apiSource, "EMPTY_OPERATIONAL_TELEMETRY");
+  const telemetryFallback = extractConstObject(apiSource, "UNAVAILABLE_OPERATIONAL_TELEMETRY");
 
   assert.match(telemetryFallback, /status:\s*"unknown"/);
   assert.match(telemetryFallback, /entry_eligible:\s*false/);
@@ -66,9 +106,74 @@ test("AUDIT-UI-007 backend-unavailable telemetry fallback does not assert no ope
   assert.doesNotMatch(telemetryFallback, /open_risk_management_state:\s*"NO_OPEN_RISK"/);
 });
 
+test("AUDIT-UI-007 nav does not hardcode demo environment without backend source truth", () => {
+  const navSource = readFrontendFile("components/app-nav.tsx");
+
+  assert.match(navSource, /Account Env/);
+  assert.match(navSource, /Unknown/);
+  assert.match(navSource, /Account environment is unavailable/);
+  assert.doesNotMatch(navSource, /<strong>\s*Demo\s*<\/strong>/);
+});
+
+test("AUDIT-UI-007 API client does not expose silent fallback helper", () => {
+  const apiSource = readFrontendFile("lib/api.ts");
+
+  assert.doesNotMatch(apiSource, /export async function withFallback/);
+  assert.match(apiSource, /export async function loadWithMeta/);
+});
+
+test("AUDIT-UI-007 loadWithMeta does not accept caller-provided backend-shaped fallback data", () => {
+  const apiSource = readFrontendFile("lib/api.ts");
+  const productionSources = listFrontendFiles("app")
+    .concat(listFrontendFiles("components"))
+    .concat(listFrontendFiles("lib"))
+    .filter((filePath) => /\.(tsx?|mjs)$/.test(filePath) && !filePath.startsWith("tests/"));
+
+  assert.match(apiSource, /export type LoadResult<T> = \{\s*data: T \| null;/);
+  assert.match(apiSource, /export async function loadWithMeta<T>\(loader: \(\) => Promise<T>\): Promise<LoadResult<T>>/);
+  assert.doesNotMatch(apiSource, /loadWithMeta<T>\(loader: \(\) => Promise<T>, fallback: T\)/);
+  assert.doesNotMatch(apiSource, /export const EMPTY_/);
+
+  const violations = productionSources.flatMap((filePath) =>
+    findLoadWithMetaFallbackCalls(readFrontendFile(filePath)).map((call) => `${filePath}: ${call}`),
+  );
+  assert.deepEqual(violations, []);
+
+  const emptyFallbackNames = productionSources.flatMap((filePath) => {
+    const source = readFrontendFile(filePath);
+    return Array.from(source.matchAll(/\bEMPTY_[A-Z0-9_]+\b/g), (match) => `${filePath}: ${match[0]}`);
+  });
+  assert.deepEqual(emptyFallbackNames, []);
+});
+
+test("AUDIT-UI-007 production modules do not import mock demo fake or fixture backend data", () => {
+  const productionSources = listFrontendFiles("app")
+    .concat(listFrontendFiles("components"))
+    .concat(listFrontendFiles("lib"))
+    .filter((filePath) => /\.(tsx?|mjs)$/.test(filePath) && !filePath.startsWith("tests/"));
+  const forbiddenImportPattern = /^\s*import\s+(?:[^"']+\s+from\s+)?["'][^"']*(?:mock|demo|fake|fixture|fixtures)[^"']*["'];?/gim;
+
+  const violations = productionSources.flatMap((filePath) => {
+    const source = readFrontendFile(filePath);
+    return Array.from(source.matchAll(forbiddenImportPattern), (match) => `${filePath}: ${match[0].trim()}`);
+  });
+
+  assert.deepEqual(violations, []);
+});
+
+test("AUDIT-UI-007 dashboard summaries do not default missing open risk to no risk", () => {
+  const autonomySource = readFrontendFile("components/dashboard/autonomy-overview.tsx");
+  const stripSource = readFrontendFile("components/dashboard/control-plane-strip.tsx");
+
+  assert.match(autonomySource, /open_risk_management_state \?\? "UNAVAILABLE"/);
+  assert.match(stripSource, /open_risk_management_state \?\? "UNAVAILABLE"/);
+  assert.doesNotMatch(autonomySource, /open_risk_management_state \?\? "NO_OPEN_RISK"/);
+  assert.doesNotMatch(stripSource, /open_risk_management_state \?\? "NO_OPEN_RISK"/);
+});
+
 test("AUDIT-UI-007 backend-unavailable market overview fallback is explicit, not limited market truth", () => {
   const marketsPageSource = readFrontendFile("app/markets/page.tsx");
-  const marketFallback = extractConstObject(marketsPageSource, "EMPTY_FOREX_OVERVIEW");
+  const marketFallback = extractConstObject(marketsPageSource, "UNAVAILABLE_FOREX_OVERVIEW");
 
   assert.match(marketFallback, /status:\s*"UNAVAILABLE"/);
   assert.match(marketFallback, /headline:\s*"Backend unavailable"/);

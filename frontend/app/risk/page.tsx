@@ -1,7 +1,7 @@
 import { RiskAllocationLive } from "@/components/risk/risk-allocation-live";
 import {
-  EMPTY_ALLOCATION_DRIFT_SUMMARY,
-  EMPTY_ALLOCATION_EXPOSURE_SUMMARY,
+  UNAVAILABLE_ALLOCATION_DRIFT_SUMMARY,
+  UNAVAILABLE_ALLOCATION_EXPOSURE_SUMMARY,
   getAllocationAlerts,
   getAllocationCycle,
   getAllocationCycles,
@@ -10,29 +10,27 @@ import {
   getAllocationIntents,
   loadWithMeta,
 } from "@/lib/api";
-import type { AllocationAlert, AllocationCycle, AllocationIntent } from "@/lib/types";
-
 export default async function RiskPage() {
   const [exposure, alerts, drift, cycles, intents] = await Promise.all([
-    loadWithMeta(() => getAllocationExposureSummary(), EMPTY_ALLOCATION_EXPOSURE_SUMMARY),
-    loadWithMeta(() => getAllocationAlerts({ limit: 60 }), [] as AllocationAlert[]),
-    loadWithMeta(() => getAllocationDriftSummary({ limit: 30, windowMinutes: 720 }), EMPTY_ALLOCATION_DRIFT_SUMMARY),
-    loadWithMeta(() => getAllocationCycles(24), [] as AllocationCycle[]),
-    loadWithMeta(() => getAllocationIntents({ limit: 60 }), [] as AllocationIntent[]),
+    loadWithMeta(() => getAllocationExposureSummary()),
+    loadWithMeta(() => getAllocationAlerts({ limit: 60 })),
+    loadWithMeta(() => getAllocationDriftSummary({ limit: 30, windowMinutes: 720 })),
+    loadWithMeta(() => getAllocationCycles(24)),
+    loadWithMeta(() => getAllocationIntents({ limit: 60 })),
   ]);
 
-  const selectedCycleId = cycles.data[0]?.cycle_id;
+  const selectedCycleId = cycles.data?.[0]?.cycle_id;
   const selectedCycle = selectedCycleId
-    ? await loadWithMeta(() => getAllocationCycle(selectedCycleId), null)
+    ? await loadWithMeta(() => getAllocationCycle(selectedCycleId))
     : { data: null, error: null };
 
   return (
     <RiskAllocationLive
-      initialExposure={exposure.data}
-      initialAlerts={alerts.data}
-      initialDrift={drift.data}
-      initialCycles={cycles.data}
-      initialIntents={intents.data}
+      initialExposure={exposure.data ?? UNAVAILABLE_ALLOCATION_EXPOSURE_SUMMARY}
+      initialAlerts={alerts.data ?? []}
+      initialDrift={drift.data ?? UNAVAILABLE_ALLOCATION_DRIFT_SUMMARY}
+      initialCycles={cycles.data ?? []}
+      initialIntents={intents.data ?? []}
       initialSelectedCycle={selectedCycle.data}
       initialLoadErrors={{
         exposure: exposure.error,

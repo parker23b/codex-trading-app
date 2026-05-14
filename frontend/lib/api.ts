@@ -36,14 +36,14 @@ const OPERATOR_API_TOKEN = process.env.NEXT_PUBLIC_OPERATOR_API_TOKEN;
 const REQUEST_TIMEOUT_MS = 1500;
 const MARKET_REQUEST_TIMEOUT_MS = 12000;
 
-export const EMPTY_BROKER_AUTH_STATUS: BrokerAuthStatus = {
+export const UNAVAILABLE_BROKER_AUTH_STATUS: BrokerAuthStatus = {
   state: "unavailable",
   label: "Broker Unavailable",
   detail: "Broker status could not be loaded.",
   position_count: 0,
 };
 
-export const EMPTY_STREAM_HEALTH_STATUS: StreamHealthStatus = {
+export const UNAVAILABLE_STREAM_HEALTH_STATUS: StreamHealthStatus = {
   enabled: false,
   connected: false,
   dependency_ready: false,
@@ -53,7 +53,7 @@ export const EMPTY_STREAM_HEALTH_STATUS: StreamHealthStatus = {
   last_error: "Stream health could not be loaded.",
 };
 
-export const EMPTY_COVERAGE_SUMMARY: CoverageSummary = {
+export const UNAVAILABLE_COVERAGE_SUMMARY: CoverageSummary = {
   streaming: {
     active_instruments: [],
     execution_readiness: [],
@@ -81,7 +81,7 @@ export const EMPTY_COVERAGE_SUMMARY: CoverageSummary = {
   },
 };
 
-export const EMPTY_CONTROL_PLANE_SUMMARY: ControlPlaneSummary = {
+export const UNAVAILABLE_CONTROL_PLANE_SUMMARY: ControlPlaneSummary = {
   autonomous_control_enabled: false,
   configured_autonomous_control_enabled: false,
   effective_autonomous_control_enabled: false,
@@ -103,7 +103,7 @@ export const EMPTY_CONTROL_PLANE_SUMMARY: ControlPlaneSummary = {
   families: [],
 };
 
-export const EMPTY_OPERATIONAL_TELEMETRY: OperationalTelemetry = {
+export const UNAVAILABLE_OPERATIONAL_TELEMETRY: OperationalTelemetry = {
   status: "unknown",
   last_heartbeat: new Date(0).toISOString(),
   heartbeat_age_ms: null,
@@ -137,7 +137,7 @@ export const EMPTY_OPERATIONAL_TELEMETRY: OperationalTelemetry = {
   strategies_paused_by_health: 0,
 };
 
-export const EMPTY_SYSTEM_OPERATING_LIMITS: SystemOperatingLimits = {
+export const UNAVAILABLE_SYSTEM_OPERATING_LIMITS: SystemOperatingLimits = {
   autonomous_control_enabled: false,
   risk: {
     max_open_positions: 0,
@@ -186,7 +186,7 @@ export const EMPTY_SYSTEM_OPERATING_LIMITS: SystemOperatingLimits = {
   screening: [],
 };
 
-export const EMPTY_DASHBOARD_SNAPSHOT: DashboardSnapshot = {
+export const UNAVAILABLE_DASHBOARD_SNAPSHOT: DashboardSnapshot = {
   accountValue: null,
   accountValuePercent: null,
   dailyPnl: null,
@@ -198,7 +198,7 @@ export const EMPTY_DASHBOARD_SNAPSHOT: DashboardSnapshot = {
   runningStrategies: [],
 };
 
-export const EMPTY_ALLOCATION_DRIFT_SUMMARY: AllocationDriftSummary = {
+export const UNAVAILABLE_ALLOCATION_DRIFT_SUMMARY: AllocationDriftSummary = {
   window_minutes: 0,
   drift_warning_percent: 0,
   drift_critical_percent: 0,
@@ -209,7 +209,7 @@ export const EMPTY_ALLOCATION_DRIFT_SUMMARY: AllocationDriftSummary = {
   by_instrument: [],
 };
 
-export const EMPTY_ALLOCATION_EXPOSURE_SUMMARY: AllocationExposureSummary = {
+export const UNAVAILABLE_ALLOCATION_EXPOSURE_SUMMARY: AllocationExposureSummary = {
   totals: {
     reserved_risk_percent: 0,
     live_risk_percent: 0,
@@ -230,7 +230,7 @@ export const EMPTY_ALLOCATION_EXPOSURE_SUMMARY: AllocationExposureSummary = {
   notes: {},
 };
 
-export const EMPTY_MARKET_CATALOGUE: MarketCatalogueResponse = {
+export const UNAVAILABLE_MARKET_CATALOGUE: MarketCatalogueResponse = {
   generated_at: new Date(0).toISOString(),
   instruments: [],
   summary: {
@@ -241,7 +241,7 @@ export const EMPTY_MARKET_CATALOGUE: MarketCatalogueResponse = {
   },
 };
 
-export const EMPTY_STRATEGY_WATCHLIST: StrategyWatchlistResponse = {
+export const UNAVAILABLE_STRATEGY_WATCHLIST: StrategyWatchlistResponse = {
   generated_at: new Date(0).toISOString(),
   limit: 0,
   active_count: 0,
@@ -252,7 +252,7 @@ export const EMPTY_STRATEGY_WATCHLIST: StrategyWatchlistResponse = {
   instruments: [],
 };
 
-export const EMPTY_FEED_STATE_RESPONSE: FeedStateResponse = {
+export const UNAVAILABLE_FEED_STATE_RESPONSE: FeedStateResponse = {
   generated_at: new Date(0).toISOString(),
   instruments: [],
 };
@@ -260,7 +260,7 @@ export const EMPTY_FEED_STATE_RESPONSE: FeedStateResponse = {
 type BackendMode = "live";
 
 export type LoadResult<T> = {
-  data: T;
+  data: T | null;
   error: string | null;
 };
 
@@ -508,15 +508,7 @@ export async function getAllocationExposureSummary(): Promise<AllocationExposure
   return request<AllocationExposureSummary>("/allocation/exposure");
 }
 
-export async function withFallback<T>(loader: () => Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await loader();
-  } catch {
-    return fallback;
-  }
-}
-
-export async function loadWithMeta<T>(loader: () => Promise<T>, fallback: T): Promise<LoadResult<T>> {
+export async function loadWithMeta<T>(loader: () => Promise<T>): Promise<LoadResult<T>> {
   try {
     return {
       data: await loader(),
@@ -525,7 +517,7 @@ export async function loadWithMeta<T>(loader: () => Promise<T>, fallback: T): Pr
   } catch (error) {
     const message = error instanceof HttpError ? error.detail ?? error.message : error instanceof Error ? error.message : "Request failed";
     return {
-      data: fallback,
+      data: null,
       error: message,
     };
   }

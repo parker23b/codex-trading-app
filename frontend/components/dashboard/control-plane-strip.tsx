@@ -23,6 +23,8 @@ function formatTime(value?: string | null) {
 
 export function ControlPlaneStrip({ summary }: ControlPlaneStripProps) {
   const mismatches = summary.families.filter((family) => family.alignment.status === "MISMATCH").slice(0, 4);
+  const openRiskState = summary.open_risk_management_state ?? "UNAVAILABLE";
+  const openRiskUnavailable = openRiskState === "UNAVAILABLE" || openRiskState === "UNKNOWN";
   const openRiskFamilies = summary.families
     .filter((family) => family.deployment?.open_risk_management_state === "UNMANAGED_OPEN_RISK")
     .slice(0, 4);
@@ -74,7 +76,7 @@ export function ControlPlaneStrip({ summary }: ControlPlaneStripProps) {
         </div>
         <div className="summary-grid__item">
           <span className="eyebrow">Open Risk</span>
-          <strong>{summary.open_risk_management_state ?? "NO_OPEN_RISK"}</strong>
+          <strong>{openRiskState}</strong>
         </div>
         <div className="summary-grid__item">
           <span className="eyebrow">Full AUTO</span>
@@ -107,6 +109,11 @@ export function ControlPlaneStrip({ summary }: ControlPlaneStripProps) {
                 Exits are blocked{summary.exit_block_reason ? ` · ${summary.exit_block_reason.replaceAll("_", " ")}` : ""}.
               </div>
             ) : null}
+            {openRiskUnavailable ? (
+              <div className="status-note status-note--inline">
+                Open-risk management state is unavailable; do not treat this summary as no open risk.
+              </div>
+            ) : null}
             {openRiskFamilies.length ? openRiskFamilies.map((family) => (
               <div className="status-note status-note--inline" key={`open-risk-${family.strategy_name}`}>
                 {family.strategy_name} · unmanaged open risk · {family.deployment?.open_risk_management_reason ?? "positions are no longer under active automated exit management"}
@@ -127,7 +134,7 @@ export function ControlPlaneStrip({ summary }: ControlPlaneStripProps) {
                 {family.strategy_name} · {family.deployment?.state?.toLowerCase() ?? "unknown"} · {family.deployment?.blocked_reason ?? family.deployment?.degraded_reason ?? family.deployment?.suitability_reason ?? "state transition recorded"}
               </div>
             )) : null}
-            {!mismatches.length && !stressedFamilies.length && !openRiskFamilies.length && !exitsOnlyFamilies.length && summary.entry_eligible !== false && summary.exit_eligible !== false ? (
+            {!mismatches.length && !stressedFamilies.length && !openRiskFamilies.length && !exitsOnlyFamilies.length && !openRiskUnavailable && summary.entry_eligible !== false && summary.exit_eligible !== false ? (
               <div className="status-note status-note--inline">No current control-plane exceptions are visible.</div>
             ) : null}
           </div>

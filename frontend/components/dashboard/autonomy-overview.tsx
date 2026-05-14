@@ -15,13 +15,16 @@ type AutonomyOverviewProps = {
 
 function buildNarrative(summary: ControlPlaneSummary, streamHealth: StreamHealthStatus, brokerAuth: BrokerAuthStatus) {
   const blockedOrDegraded = (summary.counts.BLOCKED ?? 0) + (summary.counts.DEGRADED ?? 0);
-  const openRiskState = summary.open_risk_management_state ?? "NO_OPEN_RISK";
+  const openRiskState = summary.open_risk_management_state ?? "UNAVAILABLE";
 
   if (openRiskState === "UNMANAGED_OPEN_RISK") {
     return "Open positions are present without active automated exit management. Treat this as a control-plane priority ahead of generic autonomy or deployment labels.";
   }
   if (openRiskState === "EXITS_ONLY") {
     return "Open risk is still under automated management, but only for exits. New entries are intentionally suppressed while the runtime protects existing positions.";
+  }
+  if (openRiskState === "UNAVAILABLE" || openRiskState === "UNKNOWN") {
+    return "Open-risk management state is unavailable. Treat risk status as unverified until backend control-plane truth is loaded.";
   }
   if (!summary.effective_autonomous_control_enabled) {
     return "Autonomy is authorized off. The system can still observe and reconcile state, but it is not permitted to auto-deploy new strategy families.";
@@ -55,6 +58,7 @@ export function AutonomyOverview({
   positionCount,
 }: AutonomyOverviewProps) {
   const blockedOrDegraded = (summary.counts.BLOCKED ?? 0) + (summary.counts.DEGRADED ?? 0);
+  const openRiskState = summary.open_risk_management_state ?? "UNAVAILABLE";
   const narrative = buildNarrative(summary, streamHealth, brokerAuth);
 
   return (
@@ -88,7 +92,7 @@ export function AutonomyOverview({
         </div>
         <div className="summary-grid__item">
           <span className="eyebrow">Open Risk</span>
-          <strong>{summary.open_risk_management_state ?? "NO_OPEN_RISK"}</strong>
+          <strong>{openRiskState}</strong>
         </div>
       </div>
 
