@@ -166,7 +166,8 @@ export function computeSystemTone(snapshot: AimeeSnapshot): Tone {
 
 export function buildSystemSummary(snapshot: AimeeSnapshot, context: RouteContext) {
   const controlPlaneUnavailable = context === "control-plane" && !snapshot.controlPlane;
-  const telemetryUnavailable = context === "operate" && !snapshot.telemetry;
+  const telemetryUnavailable =
+    (context === "operate" || context === "events" || context === "strategies") && !snapshot.telemetry;
   const sourceWarningCount = (controlPlaneUnavailable ? 1 : 0) + (telemetryUnavailable ? 1 : 0);
   const tone = controlPlaneUnavailable || telemetryUnavailable ? "warning" : computeSystemTone(snapshot);
   const leadObservation = snapshot.review?.derived_observations[0] ?? null;
@@ -177,6 +178,8 @@ export function buildSystemSummary(snapshot: AimeeSnapshot, context: RouteContex
   let headline = "Awaiting a fresh operating picture.";
   if (controlPlaneUnavailable) {
     headline = "Control-plane source unavailable.";
+  } else if (telemetryUnavailable) {
+    headline = "Telemetry source unavailable.";
   } else if (leadObservation) {
     headline = leadObservation.label;
   } else if (review) {
@@ -190,6 +193,10 @@ export function buildSystemSummary(snapshot: AimeeSnapshot, context: RouteContex
     detail = telemetryUnavailable
       ? `Open risk ${formatPercent(review.facts.open_risk_percent)} across ${formatCount("position", review.facts.open_positions_count)}. Telemetry source unavailable; stream, broker, and freshness truth cannot be verified.`
       : `Open risk ${formatPercent(review.facts.open_risk_percent)} across ${formatCount("position", review.facts.open_positions_count)}.`;
+  } else if (context === "events" && telemetryUnavailable) {
+    detail = "Telemetry source unavailable; event records can be listed, but live reconciliation, order-failure, and stream fault-line counts cannot be verified.";
+  } else if (context === "strategies" && telemetryUnavailable) {
+    detail = "Strategy health cannot be verified because telemetry source truth is unavailable.";
   } else if (context === "control-plane" && controlPlane) {
     detail = `${formatCount("misalignment", controlPlane.misaligned_count)} across ${formatCount("family", controlPlane.families.length)}.`;
   } else if (context === "coverage" && snapshot.coverage) {
@@ -221,6 +228,8 @@ export function buildSystemSummary(snapshot: AimeeSnapshot, context: RouteContex
               ? controlPlane
                 ? String(controlPlane.misaligned_count)
                 : "Unknown"
+              : telemetryUnavailable
+                ? "Unknown"
               : telemetry?.stream_last_tick_at
                 ? formatRelativeDuration(telemetry.stream_last_tick_at)
                 : "n/a",
@@ -416,6 +425,7 @@ export function buildWhatMatters(snapshot: AimeeSnapshot, context: RouteContext)
 
   if (context === "events") {
     const recentWarnings = snapshot.events.filter((event) => event.severity !== "info");
+    const telemetryUnavailable = !snapshot.telemetry;
     return [
       {
         id: "events-latest",
@@ -434,14 +444,20 @@ export function buildWhatMatters(snapshot: AimeeSnapshot, context: RouteContext)
       {
         id: "events-recon",
         title: "Operational fault lines",
-        detail: `${formatCount("reconciliation issue", snapshot.telemetry?.reconciliation_mismatches ?? 0)} and ${formatCount("order failure", snapshot.telemetry?.order_failures_last_5m ?? 0)} live.`,
+        detail: telemetryUnavailable
+          ? "Operational fault-line telemetry cannot be verified because the telemetry source is unavailable."
+          : `${formatCount("reconciliation issue", snapshot.telemetry?.reconciliation_mismatches ?? 0)} and ${formatCount("order failure", snapshot.telemetry?.order_failures_last_5m ?? 0)} live.`,
         meta:
-          snapshot.telemetry?.feed_source_state === "POLLING_FALLBACK"
+          telemetryUnavailable
+            ? "Telemetry unavailable"
+          : snapshot.telemetry?.feed_source_state === "POLLING_FALLBACK"
             ? "Polling fallback active"
             : snapshot.telemetry?.stream_connected
               ? "Stream connected"
               : "Stream disconnected",
-        tone: (snapshot.telemetry?.reconciliation_mismatches ?? 0) > 0 || (snapshot.telemetry?.order_failures_last_5m ?? 0) > 0 ? "negative" : "neutral",
+        tone: telemetryUnavailable
+          ? "warning"
+          : (snapshot.telemetry?.reconciliation_mismatches ?? 0) > 0 || (snapshot.telemetry?.order_failures_last_5m ?? 0) > 0 ? "negative" : "neutral",
       },
       {
         id: "events-route",
@@ -455,27 +471,39 @@ export function buildWhatMatters(snapshot: AimeeSnapshot, context: RouteContext)
   if (context === "strategies") {
     const runningCount = snapshot.strategies.filter((strategy) => strategy.status === "RUNNING").length;
     const warningStrategies = snapshot.strategies.filter((strategy) => strategy.warning_message);
+    const telemetry = snapshot.telemetry;
+    const telemetryUnavailable = telemetry === null;
     return [
       {
         id: "str-running",
         title: "Runtime coverage",
-        detail: `${formatCount("running strategy", runningCount)}; ${formatCount("stale runtime", snapshot.telemetry?.stale_runtime_count ?? 0)} flagged.`,
+        detail: telemetryUnavailable
+          ? `${formatCount("running strategy", runningCount)} reported by the strategy snapshot; stale-runtime telemetry is unavailable.`
+          : `${formatCount("running strategy", runningCount)}; ${formatCount("stale runtime", telemetry.stale_runtime_count)} flagged.`,
         meta: `${formatCount("configured strategy", snapshot.strategies.length)} total`,
-        tone: runningCount > 0 ? "neutral" : "warning",
+        tone: telemetryUnavailable || runningCount === 0 ? "warning" : "neutral",
       },
       {
         id: "str-warning",
         title: "Strategy warnings",
-        detail: warningStrategies.length ? warningStrategies.slice(0, 2).map((strategy) => strategy.name).join(", ") : "No strategy-level warnings are currently surfaced.",
+        detail: telemetryUnavailable
+          ? "Strategy health cannot be verified without live telemetry source truth."
+          : warningStrategies.length
+            ? warningStrategies.slice(0, 2).map((strategy) => strategy.name).join(", ")
+            : "No strategy-level warnings are currently surfaced.",
         meta: String(warningStrategies.length),
-        tone: warningStrategies.length ? "warning" : "positive",
+        tone: telemetryUnavailable || warningStrategies.length ? "warning" : "positive",
       },
       {
         id: "str-health",
         title: "Health pauses",
-        detail: `${formatCount("strategy paused by health", snapshot.telemetry?.strategies_paused_by_health ?? 0)} right now.`,
-        meta: `${formatCount("order rejection", snapshot.telemetry?.rejected_orders_last_5m ?? 0)} in the last 5m`,
-        tone: (snapshot.telemetry?.strategies_paused_by_health ?? 0) > 0 ? "warning" : "neutral",
+        detail: telemetryUnavailable
+          ? "Health-pause telemetry is unavailable; do not infer zero paused strategies."
+          : `${formatCount("strategy paused by health", telemetry.strategies_paused_by_health)} right now.`,
+        meta: telemetryUnavailable
+          ? "Telemetry unavailable"
+          : `${formatCount("order rejection", telemetry.rejected_orders_last_5m)} in the last 5m`,
+        tone: telemetryUnavailable || (telemetry?.strategies_paused_by_health ?? 0) > 0 ? "warning" : "neutral",
       },
       {
         id: "str-review",
@@ -506,11 +534,16 @@ export function buildWhatMatters(snapshot: AimeeSnapshot, context: RouteContext)
 export function buildWarningItems(snapshot: AimeeSnapshot, context?: RouteContext): WarningItem[] {
   const items: WarningItem[] = [];
 
-  if (context === "operate" && !snapshot.telemetry) {
+  if ((context === "operate" || context === "events" || context === "strategies") && !snapshot.telemetry) {
     items.push({
       id: "telemetry-unavailable",
       title: "Telemetry source unavailable",
-      detail: "AIMEE cannot verify stream, broker, market-data freshness, or live operational telemetry.",
+      detail:
+        context === "strategies"
+          ? "AIMEE cannot verify strategy health, stale runtimes, health pauses, or recent order rejections."
+          : context === "events"
+            ? "AIMEE cannot verify live reconciliation, order-failure, broker, or stream fault-line telemetry."
+            : "AIMEE cannot verify stream, broker, market-data freshness, or live operational telemetry.",
       tone: "warning",
     });
   }

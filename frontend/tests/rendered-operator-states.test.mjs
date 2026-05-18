@@ -32,6 +32,14 @@ function compileRenderedModules() {
     ].join("\n"),
   );
   writeFileSync(
+    path.join(tempRoot, "next-navigation-stub.js"),
+    [
+      "function useRouter() { return { refresh() {}, push() {}, replace() {} }; }",
+      "module.exports = { useRouter };",
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(
     configPath,
     JSON.stringify({
       compilerOptions: {
@@ -63,6 +71,8 @@ function compileRenderedModules() {
         path.join(frontendRoot, "components", "markets", "market-overview-dashboard.tsx"),
         path.join(frontendRoot, "components", "dashboard", "notification-center.tsx"),
         path.join(frontendRoot, "components", "risk", "risk-allocation-live.tsx"),
+        path.join(frontendRoot, "components", "strategy", "strategy-live.tsx"),
+        path.join(frontendRoot, "components", "testing", "reset-history-button.tsx"),
         path.join(frontendRoot, "components", "console", "primitives.tsx"),
         path.join(frontendRoot, "lib", "api.ts"),
         path.join(frontendRoot, "lib", "execution-notifications.ts"),
@@ -97,6 +107,9 @@ function withCompiledAliases(outDir, fn) {
     }
     if (request === "next/link") {
       return path.join(path.dirname(outDir), "next-link-stub.js");
+    }
+    if (request === "next/navigation") {
+      return path.join(path.dirname(outDir), "next-navigation-stub.js");
     }
     return originalResolveFilename.call(this, request, parent, isMain, options);
   };
@@ -335,6 +348,47 @@ function baseControlPlaneSummary(overrides = {}) {
   };
 }
 
+function baseStrategy(overrides = {}) {
+  return {
+    name: "Breakout",
+    description: "Momentum breakout strategy",
+    instrument: "CS.D.EURUSD.MINI.IP",
+    status: "RUNNING",
+    current_pnl: 0,
+    last_price: 1.08,
+    price_status: "LIVE",
+    price_error: null,
+    last_price_updated_at: "2026-05-17T10:00:00.000Z",
+    trade_count: 0,
+    win_rate: 0,
+    account_type: "DEMO",
+    position_size: 1,
+    risk_per_trade: 1,
+    active_instruments: ["CS.D.EURUSD.MINI.IP"],
+    authorized: true,
+    evaluating_instrument_count: 1,
+    candidates_generated_today: 0,
+    candidates_promoted_today: 0,
+    candidates_blocked_today: 0,
+    active_runtime_count: 1,
+    open_position_count: 0,
+    warning_message: null,
+    warning_instrument: null,
+    warning_status: null,
+    active_runtimes: [],
+    open_positions: [],
+    instrument_options: [
+      {
+        epic: "CS.D.EURUSD.MINI.IP",
+        label: "EUR/USD",
+        category: "Forex",
+      },
+    ],
+    parameters: [],
+    ...overrides,
+  };
+}
+
 function unavailableLiveErrors(message = "Backend source unavailable.") {
   return {
     positions: message,
@@ -455,6 +509,46 @@ test("AUDIT-UI-002 rendered allocation risk truth marks simulated and unknown as
   }
 });
 
+test("AUDIT-UI-006 rendered risk budget cards do not convert unavailable exposure into zero-risk truth", () => {
+  const { tempRoot, outDir } = compileRenderedModules();
+  try {
+    withCompiledAliases(outDir, () => {
+      const risk = require(path.join(outDir, "components", "risk", "risk-allocation-live.js"));
+      const api = require(path.join(outDir, "lib", "api.js"));
+
+      const html = renderComponent(risk.RiskAllocationLive, {
+        initialExposure: api.UNAVAILABLE_ALLOCATION_EXPOSURE_SUMMARY,
+        initialAlerts: [],
+        initialDrift: api.UNAVAILABLE_ALLOCATION_DRIFT_SUMMARY,
+        initialCycles: [],
+        initialIntents: [],
+        initialSelectedCycle: null,
+        initialLoadErrors: {
+          exposure: "Allocation exposure backend unavailable.",
+          alerts: null,
+          drift: null,
+          cycles: null,
+          intents: null,
+          selectedCycle: null,
+        },
+      });
+
+      assert.match(html, /Total portfolio risk[\s\S]{0,220}<strong>Unavailable<\/strong>/i);
+      assert.match(html, /Reserved vs live[\s\S]{0,220}<strong>Unavailable<\/strong>/i);
+      assert.match(html, /Top hotspot[\s\S]{0,220}<strong>Unavailable<\/strong>/i);
+      assert.match(html, /Directional net bias[\s\S]{0,220}<strong>Unavailable<\/strong>/i);
+      assert.match(html, /Exposure read failed/i);
+      assert.match(html, /Currency exposure unavailable because the exposure read failed/i);
+      assert.doesNotMatch(html, /Total portfolio risk[\s\S]{0,220}<strong>0\.0%<\/strong>/i);
+      assert.doesNotMatch(html, /0\.0% headroom remaining/i);
+      assert.doesNotMatch(html, /0 reserved intents · 0 positions/i);
+      assert.doesNotMatch(html, /undefined\. Currency exposure/i);
+    });
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("AUDIT-UI-006 rendered AIMEE control-plane summary treats missing source as unavailable truth", () => {
   const { tempRoot, outDir } = compileRenderedModules();
   try {
@@ -559,6 +653,88 @@ test("AUDIT-UI-006 rendered AIMEE operate summary does not look healthy without 
       assert.doesNotMatch(html, /Healthy/);
       assert.doesNotMatch(html, /Streaming disconnected/);
       assert.doesNotMatch(html, /No high-signal warnings are currently active/i);
+    });
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("AUDIT-UI-006 rendered AIMEE strategies summary does not convert missing telemetry into zero-health truth", () => {
+  const { tempRoot, outDir } = compileRenderedModules();
+  try {
+    withCompiledAliases(outDir, () => {
+      const aimee = require(path.join(outDir, "components", "aimee", "aimee-overview.js"));
+      const utils = require(path.join(outDir, "components", "aimee", "utils.js"));
+      const snapshot = unavailableAimeeSnapshot({
+        strategies: [baseStrategy({ active_runtime_count: 1, open_position_count: 1 })],
+      });
+
+      const html = renderComponent(aimee.AimeeOverview, {
+        isExpanded: true,
+        onToggle: () => {},
+        systemSummary: utils.buildSystemSummary(snapshot, "strategies"),
+        compactMetric: "1 strategy",
+        attentionCount: utils.buildWarningItems(snapshot, "strategies").length,
+        updatedAt: snapshot.updatedAt,
+        whatMatters: utils.buildWhatMatters(snapshot, "strategies"),
+        warningItems: utils.buildWarningItems(snapshot, "strategies"),
+        recentChanges: utils.buildRecentChanges(snapshot),
+      });
+
+      assert.match(html, /Telemetry source unavailable/i);
+      assert.match(html, /Strategy health cannot be verified/i);
+      assert.match(html, /Degraded/i);
+      assert.doesNotMatch(html, /0 stale runtime/i);
+      assert.doesNotMatch(html, /0 order rejection/i);
+      assert.doesNotMatch(html, /No strategy-level warnings are currently surfaced/i);
+    });
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("AUDIT-UI-006 rendered AIMEE events summary does not convert missing telemetry into disconnected-zero truth", () => {
+  const { tempRoot, outDir } = compileRenderedModules();
+  try {
+    withCompiledAliases(outDir, () => {
+      const aimee = require(path.join(outDir, "components", "aimee", "aimee-overview.js"));
+      const utils = require(path.join(outDir, "components", "aimee", "utils.js"));
+      const snapshot = unavailableAimeeSnapshot({
+        events: [
+          {
+            id: 1,
+            event_type: "health.stream_stale",
+            category: "health",
+            severity: "warning",
+            title: "Stream stale",
+            message: "Stream freshness degraded.",
+            source: "runtime",
+            strategy_name: null,
+            instrument: null,
+            correlation_id: null,
+            payload_json: {},
+            created_at: "2026-05-17T10:00:00.000Z",
+          },
+        ],
+      });
+
+      const html = renderComponent(aimee.AimeeOverview, {
+        isExpanded: true,
+        onToggle: () => {},
+        systemSummary: utils.buildSystemSummary(snapshot, "events"),
+        compactMetric: "1 event",
+        attentionCount: utils.buildWarningItems(snapshot, "events").length,
+        updatedAt: snapshot.updatedAt,
+        whatMatters: utils.buildWhatMatters(snapshot, "events"),
+        warningItems: utils.buildWarningItems(snapshot, "events"),
+        recentChanges: utils.buildRecentChanges(snapshot),
+      });
+
+      assert.match(html, /Telemetry source unavailable/i);
+      assert.match(html, /Operational fault-line telemetry cannot be verified/i);
+      assert.doesNotMatch(html, /0 reconciliation issue/i);
+      assert.doesNotMatch(html, /0 order failure/i);
+      assert.doesNotMatch(html, /Stream disconnected/i);
     });
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
@@ -877,14 +1053,81 @@ test("AUDIT-UI-006 rendered markets dashboard does not turn unavailable sources 
         initialStrategyWatchlistError: "Strategy watchlist unavailable.",
       });
 
+      assert.match(html, /Catalogue<\/span><\/div><strong[^>]*>Unavailable<\/strong>/i);
       assert.match(html, /Catalogue[\s\S]{0,260}Unavailable/i);
       assert.match(html, /Shortlist[\s\S]{0,260}Unavailable/i);
       assert.match(html, /Live[\s\S]{0,260}Unavailable/i);
       assert.match(html, /Market overview could not be loaded/i);
       assert.match(html, /Counts are unavailable, not zero market truth/i);
+      assert.doesNotMatch(html, /Catalogue<\/span><\/div><strong[^>]*>0<\/strong>/i);
       assert.doesNotMatch(html, /Catalogue[\s\S]{0,260}Available markets/i);
       assert.doesNotMatch(html, /Shortlist[\s\S]{0,260}operator interest/i);
       assert.doesNotMatch(html, /Live[\s\S]{0,260}Streaming\/evaluating/i);
+    });
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("AUDIT-UI-006 rendered strategy open-position runtime keeps stop action provenance visible", () => {
+  const { tempRoot, outDir } = compileRenderedModules();
+  try {
+    withCompiledAliases(outDir, () => {
+      const strategy = require(path.join(outDir, "components", "strategy", "strategy-live.js"));
+      const api = require(path.join(outDir, "lib", "api.js"));
+
+      const html = renderComponent(strategy.StrategyLive, {
+        initialStrategies: [
+          baseStrategy({
+            open_position_count: 1,
+            active_runtimes: [
+              {
+                strategy_name: "Breakout",
+                instrument: "CS.D.EURUSD.MINI.IP",
+                runtime_key: "Breakout:CS.D.EURUSD.MINI.IP",
+                has_open_position: true,
+                broker_reference: "BROKER-OPEN-1",
+                direction: "BUY",
+                current_price: 1.08,
+                unrealized_pnl: null,
+              },
+            ],
+          }),
+        ],
+        initialExecutions: [],
+        initialBrokerAuth: api.UNAVAILABLE_BROKER_AUTH_STATUS,
+        initialStreamHealth: api.UNAVAILABLE_STREAM_HEALTH_STATUS,
+        initialErrors: {
+          strategies: null,
+          executions: null,
+          brokerAuth: "Broker status unavailable.",
+          streamHealth: "Stream health unavailable.",
+        },
+      });
+
+      assert.match(html, /BUY position/i);
+      assert.match(html, /BROKER-OPEN-1/i);
+      assert.match(html, /Stopping this runtime does not close broker-confirmed open risk/i);
+      assert.match(html, /Stop Runtime/i);
+      assert.doesNotMatch(html, />Stop<\/button>/i);
+    });
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("AUDIT-UI-006 rendered test reset control is visibly test-only and destructive", () => {
+  const { tempRoot, outDir } = compileRenderedModules();
+  try {
+    withCompiledAliases(outDir, () => {
+      const reset = require(path.join(outDir, "components", "testing", "reset-history-button.js"));
+
+      const html = renderComponent(reset.ResetHistoryButton, {});
+
+      assert.match(html, /Test-only destructive reset/i);
+      assert.match(html, /Clears persisted trades, executions, reviews, events, closed positions, and stopped runtimes/i);
+      assert.match(html, /Clear Test History/i);
+      assert.doesNotMatch(html, /<button[^>]*>Clear Test History<\/button>/i);
     });
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });

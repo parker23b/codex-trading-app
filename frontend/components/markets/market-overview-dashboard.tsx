@@ -190,7 +190,12 @@ export function MarketOverviewDashboard({
     <main className="console-page console-page--dense">
       <StatusStrip
         items={[
-          { label: "Catalogue", value: catalogue.summary.total_count, tone: catalogueError ? "inactive" : "neutral", meta: catalogueError ?? "available markets" },
+          {
+            label: "Catalogue",
+            value: catalogueError ? "Unavailable" : catalogue.summary.total_count,
+            tone: catalogueError ? "inactive" : "neutral",
+            meta: catalogueError ?? "available markets",
+          },
           {
             label: "Shortlist",
             value: catalogueError ? "Unavailable" : catalogue.summary.shortlisted_count,

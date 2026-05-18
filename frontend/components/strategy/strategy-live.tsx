@@ -399,7 +399,15 @@ export function StrategyLive({
                   key: "state",
                   header: "State",
                   render: (row) =>
-                    row.has_open_position ? <StatusPill label={`${row.direction ?? "live"} position`} tone="warning" /> : <StatusPill label="watching" tone="positive" />,
+                    row.has_open_position ? (
+                      <div className="cell-stack">
+                        <StatusPill label={`${row.direction ?? "live"} position`} tone="warning" />
+                        <span className="muted">{row.broker_reference ?? "broker reference unavailable"}</span>
+                        <span className="muted">Stopping this runtime does not close broker-confirmed open risk.</span>
+                      </div>
+                    ) : (
+                      <StatusPill label="watching" tone="positive" />
+                    ),
                 },
                 {
                   key: "pnl",
@@ -414,9 +422,14 @@ export function StrategyLive({
                       type="button"
                       className="console-button console-button--ghost"
                       disabled={pending}
+                      title={
+                        row.has_open_position
+                          ? "Stops the runtime process only; broker-confirmed open risk remains visible for exit management."
+                          : "Stops this runtime."
+                      }
                       onClick={() => stopRuntime(selectedStrategy.name, row.instrument)}
                     >
-                      Stop
+                      Stop Runtime
                     </button>
                   ),
                 },

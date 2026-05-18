@@ -403,13 +403,13 @@ export function RiskAllocationLive({
               <div className="risk-budget-grid">
                 <div className="risk-budget-card">
                   <span>Total portfolio risk</span>
-                  <strong>{formatPercent(summary.totalActiveRiskPercent)}</strong>
-                  <em>{`${formatPercent(summary.remainingPortfolioRiskPercent)} headroom remaining`}</em>
+                  <strong>{exposureUnavailable ? "Unavailable" : formatPercent(summary.totalActiveRiskPercent)}</strong>
+                  <em>{exposureUnavailable ? "Exposure read failed" : `${formatPercent(summary.remainingPortfolioRiskPercent)} headroom remaining`}</em>
                 </div>
                 <div className="risk-budget-card">
                   <span>Reserved vs live</span>
-                  <strong>{`${formatPercent(summary.reservedRiskPercent)} / ${formatPercent(summary.openRiskPercent)}`}</strong>
-                  <em>{`${exposure.totals.reserved_intent_count} reserved intents · ${exposure.totals.open_position_count} positions`}</em>
+                  <strong>{exposureUnavailable ? "Unavailable" : `${formatPercent(summary.reservedRiskPercent)} / ${formatPercent(summary.openRiskPercent)}`}</strong>
+                  <em>{exposureUnavailable ? "Exposure read failed" : `${exposure.totals.reserved_intent_count} reserved intents · ${exposure.totals.open_position_count} positions`}</em>
                 </div>
               </div>
               <CompactTable
@@ -429,13 +429,13 @@ export function RiskAllocationLive({
               <div className="risk-budget-grid">
                 <div className="risk-budget-card">
                   <span>Top hotspot</span>
-                  <strong>{formatHotspotLabel(summary.topHotspot)}</strong>
-                  <em>Highest current budget pressure</em>
+                  <strong>{exposureUnavailable ? "Unavailable" : formatHotspotLabel(summary.topHotspot)}</strong>
+                  <em>{exposureUnavailable ? "Exposure read failed" : "Highest current budget pressure"}</em>
                 </div>
                 <div className="risk-budget-card">
                   <span>Directional net bias</span>
-                  <strong>{formatDirectionalBias(summary.dominantNetCurrency)}</strong>
-                  <em>Derived from pair direction and currency side</em>
+                  <strong>{exposureUnavailable ? "Unavailable" : formatDirectionalBias(summary.dominantNetCurrency)}</strong>
+                  <em>{exposureUnavailable ? "Exposure read failed" : "Derived from pair direction and currency side"}</em>
                 </div>
               </div>
               <CompactTable
@@ -450,8 +450,9 @@ export function RiskAllocationLive({
                 ]}
               />
               <div className="status-note">
-                {exposure.notes.currency_directional_exactness}. Currency exposure is more truthful than the old gross-only view,
-                but it is still not institutional factor analytics.
+                {exposureUnavailable
+                  ? "Currency exposure unavailable because the exposure read failed."
+                  : `${exposure.notes.currency_directional_exactness}. Currency exposure is more truthful than the old gross-only view, but it is still not institutional factor analytics.`}
               </div>
             </Panel>
           </>
@@ -684,17 +685,21 @@ export function RiskAllocationLive({
               />
             </Panel>
 
-            <Panel title="Live Exposure Hotspots" subtitle="Which books are closest to their current risk budget." priority="passive" tone={summary.topHotspot ? budgetTone(summary.topHotspot.utilization_percent) : "neutral"}>
+            <Panel title="Live Exposure Hotspots" subtitle="Which books are closest to their current risk budget." priority="passive" tone={exposureUnavailable ? "negative" : summary.topHotspot ? budgetTone(summary.topHotspot.utilization_percent) : "neutral"}>
               <div className="risk-group-grid">
                 <div className="risk-group-card">
                   <span>Strategy pressure</span>
-                  {topStrategies.slice(0, 4).map((bucket) => (
+                  {exposureUnavailable ? (
+                    <strong>Unavailable</strong>
+                  ) : topStrategies.slice(0, 4).map((bucket) => (
                     <strong key={bucket.name}>{`${bucket.name}: ${formatPercent(bucket.total_risk_percent)} (${formatPercent(bucket.utilization_percent ?? 0)})`}</strong>
                   ))}
                 </div>
                 <div className="risk-group-card">
                   <span>Instrument pressure</span>
-                  {topInstruments.slice(0, 4).map((bucket) => (
+                  {exposureUnavailable ? (
+                    <strong>Unavailable</strong>
+                  ) : topInstruments.slice(0, 4).map((bucket) => (
                     <strong key={bucket.name}>{`${formatInstrumentLabel(bucket.name)}: ${formatPercent(bucket.total_risk_percent)} (${formatPercent(bucket.utilization_percent ?? 0)})`}</strong>
                   ))}
                 </div>

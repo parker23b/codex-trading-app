@@ -9,6 +9,7 @@ export function ResetHistoryButton() {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const descriptionId = "test-history-reset-description";
 
   const handleReset = () => {
     const confirmed = window.confirm(
@@ -33,8 +34,11 @@ export function ResetHistoryButton() {
 
   return (
     <div className="events-filters__actions">
-      <button type="button" className="button secondary" disabled={pending} onClick={handleReset}>
-        {pending ? "Clearing..." : "Clear Test History"}
+      <div className="status-note status-note--inline" id={descriptionId}>
+        <strong>Test-only destructive reset.</strong> Clears persisted trades, executions, reviews, events, closed positions, and stopped runtimes.
+      </div>
+      <button type="button" className="button secondary" disabled={pending} onClick={handleReset} aria-describedby={descriptionId}>
+        {pending ? "Clearing..." : "Clear Test History (Test Only)"}
       </button>
       {statusMessage ? <div className="status-note status-note--inline">{statusMessage}</div> : null}
     </div>
