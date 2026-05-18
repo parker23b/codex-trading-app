@@ -4,10 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
+from app.api.audit import persist_required_domain_event
 from app.db.session import get_session
 from app.models.strategy_governance import GovernanceApprovalState
 from app.services.control_plane_service import ControlPlaneService
-from app.services.domain_event_service import domain_event_service
 from app.services.operator_control_service import OperatorControlService
 from app.services.strategy_deployment_manager_service import (
     StrategyDeploymentManagerService,
@@ -87,7 +87,11 @@ def update_operator_control_state(
         enabled=payload.autonomous_control_enabled,
         reason=payload.reason,
     )
-    domain_event_service.record_event(
+    persist_required_domain_event(
+        session=session,
+        failure_detail=(
+            "Operator control was updated, but durable audit persistence failed."
+        ),
         event_type="operator.autonomy_override_updated",
         category="operator",
         severity="info",
@@ -120,7 +124,11 @@ def get_control_plane_strategy_detail(
 @router.post("/control-plane/reconcile")
 def reconcile_control_plane(session: Session = Depends(get_session)) -> dict[str, int]:
     result = StrategyDeploymentManagerService(session).reconcile()
-    domain_event_service.record_event(
+    persist_required_domain_event(
+        session=session,
+        failure_detail=(
+            "Control plane reconciliation completed, but durable audit persistence failed."
+        ),
         event_type="control_plane.reconciled",
         category="strategy",
         severity="info",
@@ -176,7 +184,11 @@ def update_strategy_governance(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
         ) from exc
-    domain_event_service.record_event(
+    persist_required_domain_event(
+        session=session,
+        failure_detail=(
+            "Strategy governance was updated, but durable audit persistence failed."
+        ),
         event_type="operator.governance_updated",
         category="operator",
         severity="info",

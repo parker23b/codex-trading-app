@@ -165,22 +165,31 @@ export function computeSystemTone(snapshot: AimeeSnapshot): Tone {
 }
 
 export function buildSystemSummary(snapshot: AimeeSnapshot, context: RouteContext) {
-  const tone = computeSystemTone(snapshot);
+  const controlPlaneUnavailable = context === "control-plane" && !snapshot.controlPlane;
+  const telemetryUnavailable = context === "operate" && !snapshot.telemetry;
+  const sourceWarningCount = (controlPlaneUnavailable ? 1 : 0) + (telemetryUnavailable ? 1 : 0);
+  const tone = controlPlaneUnavailable || telemetryUnavailable ? "warning" : computeSystemTone(snapshot);
   const leadObservation = snapshot.review?.derived_observations[0] ?? null;
   const review = snapshot.review;
   const telemetry = snapshot.telemetry;
   const controlPlane = snapshot.controlPlane;
 
   let headline = "Awaiting a fresh operating picture.";
-  if (leadObservation) {
+  if (controlPlaneUnavailable) {
+    headline = "Control-plane source unavailable.";
+  } else if (leadObservation) {
     headline = leadObservation.label;
   } else if (review) {
     headline = tone === "positive" ? "System operating within expected bounds." : "Signals are mixed; review key exceptions.";
   }
 
   let detail = `Context: ${routeLabel(context)}.`;
-  if (context === "operate" && review) {
-    detail = `Open risk ${formatPercent(review.facts.open_risk_percent)} across ${formatCount("position", review.facts.open_positions_count)}.`;
+  if (controlPlaneUnavailable) {
+    detail = "AIMEE cannot verify governance, runtime alignment, or open-risk state from the current snapshot.";
+  } else if (context === "operate" && review) {
+    detail = telemetryUnavailable
+      ? `Open risk ${formatPercent(review.facts.open_risk_percent)} across ${formatCount("position", review.facts.open_positions_count)}. Telemetry source unavailable; stream, broker, and freshness truth cannot be verified.`
+      : `Open risk ${formatPercent(review.facts.open_risk_percent)} across ${formatCount("position", review.facts.open_positions_count)}.`;
   } else if (context === "control-plane" && controlPlane) {
     detail = `${formatCount("misalignment", controlPlane.misaligned_count)} across ${formatCount("family", controlPlane.families.length)}.`;
   } else if (context === "coverage" && snapshot.coverage) {
@@ -200,7 +209,7 @@ export function buildSystemSummary(snapshot: AimeeSnapshot, context: RouteContex
     detail,
     indicators: [
       { label: "Status", value: STATUS_LABEL[tone] },
-      { label: "Warnings", value: String(snapshot.review?.warnings.length ?? 0) },
+      { label: "Warnings", value: String((snapshot.review?.warnings.length ?? 0) + sourceWarningCount) },
       {
         label: context === "operate" ? "Open Risk" : context === "control-plane" ? "Mismatches" : "Freshness",
         value:
@@ -209,7 +218,9 @@ export function buildSystemSummary(snapshot: AimeeSnapshot, context: RouteContex
               ? formatPercent(review.facts.open_risk_percent)
               : "n/a"
             : context === "control-plane"
-              ? String(controlPlane?.misaligned_count ?? 0)
+              ? controlPlane
+                ? String(controlPlane.misaligned_count)
+                : "Unknown"
               : telemetry?.stream_last_tick_at
                 ? formatRelativeDuration(telemetry.stream_last_tick_at)
                 : "n/a",
@@ -260,19 +271,42 @@ export function buildWhatMatters(snapshot: AimeeSnapshot, context: RouteContext)
               ? "Price freshness is below the current execution threshold."
               : telemetry?.stream_last_tick_at
                 ? `Last live tick ${formatRelativeDuration(telemetry.stream_last_tick_at)} ago.`
-                : "Stream freshness is unavailable.",
+                : telemetry
+                  ? "Stream freshness is unavailable."
+                  : "Telemetry source unavailable; stream, broker, and freshness truth cannot be verified.",
         meta:
           telemetry?.feed_source_state === "POLLING_FALLBACK"
             ? "Polling fallback active"
             : telemetry?.stream_connected
               ? "Streaming connected"
-              : "Streaming disconnected",
+              : telemetry
+                ? "Streaming disconnected"
+                : "Telemetry unavailable",
         tone:
           telemetry?.feed_source_state === "POLLING_FALLBACK" || telemetry?.feed_source_state === "STALE"
             ? "warning"
             : telemetry?.stream_connected
               ? "positive"
               : "negative",
+      },
+    ];
+  }
+
+  if (context === "control-plane" && !controlPlane) {
+    return [
+      {
+        id: "cp-source-unavailable",
+        title: "Control-plane source unavailable",
+        detail: "AIMEE cannot verify governance, runtime alignment, or open-risk state from this snapshot.",
+        meta: "Source unavailable",
+        tone: "warning",
+      },
+      {
+        id: "cp-open-risk-unavailable",
+        title: "Open-risk state unavailable",
+        detail: "Open-risk management must be treated as unknown until the control-plane source is available.",
+        meta: "UNKNOWN",
+        tone: "warning",
       },
     ];
   }
@@ -286,6 +320,8 @@ export function buildWhatMatters(snapshot: AimeeSnapshot, context: RouteContext)
     const exitsOnlyFamilies = controlPlane.families.filter(
       (family) => family.deployment?.open_risk_management_state === "EXITS_ONLY",
     );
+    const openRiskState = controlPlane.open_risk_management_state ?? "UNKNOWN";
+    const openRiskUnavailable = openRiskState === "UNAVAILABLE" || openRiskState === "UNKNOWN";
     return [
       {
         id: "cp-mismatch",
@@ -311,14 +347,18 @@ export function buildWhatMatters(snapshot: AimeeSnapshot, context: RouteContext)
       {
         id: "cp-open-risk",
         title: "Open-risk management",
-        detail: unmanagedRiskFamilies.length
+        detail: openRiskUnavailable
+          ? (controlPlane.open_risk_management_reason ?? "Open-risk state unavailable; AIMEE cannot verify whether open broker risk is managed.")
+          : unmanagedRiskFamilies.length
           ? unmanagedRiskFamilies.slice(0, 2).map((family) => family.strategy_name).join(", ")
           : exitsOnlyFamilies.length
             ? exitsOnlyFamilies.slice(0, 2).map((family) => `${family.strategy_name} (exits only)`).join(", ")
             : "No unmanaged or exit-only open risk is currently surfaced.",
-        meta: controlPlane.open_risk_management_state ?? "NO_OPEN_RISK",
+        meta: openRiskState,
         tone:
-          unmanagedRiskFamilies.length > 0
+          openRiskUnavailable
+            ? "warning"
+            : unmanagedRiskFamilies.length > 0
             ? "negative"
             : exitsOnlyFamilies.length > 0
               ? "warning"
@@ -463,8 +503,26 @@ export function buildWhatMatters(snapshot: AimeeSnapshot, context: RouteContext)
   ];
 }
 
-export function buildWarningItems(snapshot: AimeeSnapshot): WarningItem[] {
+export function buildWarningItems(snapshot: AimeeSnapshot, context?: RouteContext): WarningItem[] {
   const items: WarningItem[] = [];
+
+  if (context === "operate" && !snapshot.telemetry) {
+    items.push({
+      id: "telemetry-unavailable",
+      title: "Telemetry source unavailable",
+      detail: "AIMEE cannot verify stream, broker, market-data freshness, or live operational telemetry.",
+      tone: "warning",
+    });
+  }
+
+  if (context === "control-plane" && !snapshot.controlPlane) {
+    items.push({
+      id: "control-plane-unavailable",
+      title: "Control-plane source unavailable",
+      detail: "AIMEE cannot verify governance, runtime alignment, or open-risk state.",
+      tone: "warning",
+    });
+  }
 
   snapshot.review?.warnings.forEach((warning) => {
     items.push({
@@ -518,6 +576,19 @@ export function buildWarningItems(snapshot: AimeeSnapshot): WarningItem[] {
         tone: "warning",
       });
     }
+  }
+
+  if (
+    context === "control-plane" &&
+    (snapshot.controlPlane?.open_risk_management_state === "UNAVAILABLE" ||
+      snapshot.controlPlane?.open_risk_management_state === "UNKNOWN")
+  ) {
+    items.push({
+      id: "open-risk-unavailable",
+      title: "Open-risk state unavailable",
+      detail: snapshot.controlPlane.open_risk_management_reason ?? "Control-plane open-risk truth is unknown.",
+      tone: "warning",
+    });
   }
 
   return items.slice(0, 5);

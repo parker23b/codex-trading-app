@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
+from app.api.audit import persist_required_domain_event
 from app.core.runtime import runtime_manager
 from app.db.session import get_session
-from app.services.domain_event_service import domain_event_service
 from app.services.strategy_service import StrategyService
 
 router = APIRouter()
@@ -52,7 +52,11 @@ def start_strategy(
             detail=str(exc),
         ) from exc
     engine = runtime_manager.get_engine(payload.strategy_name, payload.instrument)
-    domain_event_service.record_event(
+    persist_required_domain_event(
+        session=session,
+        failure_detail=(
+            "Strategy runtime was started, but durable audit persistence failed."
+        ),
         event_type="operator.runtime_started",
         category="operator",
         severity="info",
@@ -84,7 +88,11 @@ def stop_strategy(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
-    domain_event_service.record_event(
+    persist_required_domain_event(
+        session=session,
+        failure_detail=(
+            "Strategy runtime was stopped, but durable audit persistence failed."
+        ),
         event_type="operator.runtime_stopped",
         category="operator",
         severity="info",
@@ -126,7 +134,11 @@ def start_strategy_by_name(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
     engine = runtime_manager.get_engine(name, instrument)
-    domain_event_service.record_event(
+    persist_required_domain_event(
+        session=session,
+        failure_detail=(
+            "Strategy runtime was started, but durable audit persistence failed."
+        ),
         event_type="operator.runtime_started",
         category="operator",
         severity="info",
@@ -165,7 +177,11 @@ def stop_strategy_by_name(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
         ) from exc
-    domain_event_service.record_event(
+    persist_required_domain_event(
+        session=session,
+        failure_detail=(
+            "Strategy runtime was stopped, but durable audit persistence failed."
+        ),
         event_type="operator.runtime_stopped",
         category="operator",
         severity="info",

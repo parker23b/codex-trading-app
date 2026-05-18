@@ -159,7 +159,7 @@ export function AimeeShell() {
     () => buildWhatMatters(snapshot, context),
     [context, snapshot],
   );
-  const warningItems = useMemo(() => buildWarningItems(snapshot), [snapshot]);
+  const warningItems = useMemo(() => buildWarningItems(snapshot, context), [context, snapshot]);
   const recentChanges = useMemo(() => buildRecentChanges(snapshot), [snapshot]);
   const suggestedQuestions = SUGGESTED_QUESTIONS[context];
 
@@ -170,7 +170,9 @@ export function AimeeShell() {
         ? `${formatPercent(snapshot.review.facts.open_risk_percent)} risk`
         : "Risk n/a"
       : context === "control-plane"
-        ? `${snapshot.controlPlane?.misaligned_count ?? 0} mismatches`
+        ? snapshot.controlPlane
+          ? `${snapshot.controlPlane.misaligned_count} mismatches`
+          : "Mismatches unknown"
         : `${attentionCount} warnings`;
 
   const submitQuestion = async (question: string) => {

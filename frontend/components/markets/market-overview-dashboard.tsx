@@ -191,14 +191,24 @@ export function MarketOverviewDashboard({
       <StatusStrip
         items={[
           { label: "Catalogue", value: catalogue.summary.total_count, tone: catalogueError ? "inactive" : "neutral", meta: catalogueError ?? "available markets" },
-          { label: "Shortlist", value: catalogue.summary.shortlisted_count, tone: "neutral", meta: "operator interest" },
+          {
+            label: "Shortlist",
+            value: catalogueError ? "Unavailable" : catalogue.summary.shortlisted_count,
+            tone: catalogueError ? "inactive" : "neutral",
+            meta: catalogueError ?? "operator interest",
+          },
           {
             label: "Strategy Watchlist",
-            value: `${normalWatchlistCount}/${strategyWatchlist.limit || "-"}`,
+            value: watchlistError ? "Unavailable" : `${normalWatchlistCount}/${strategyWatchlist.limit || "-"}`,
             tone: watchlistError ? "inactive" : strategyWatchlist.cap_exceeded_by_protective_coverage ? "warning" : normalWatchlistCount >= strategyWatchlist.limit ? "warning" : "positive",
             meta: watchlistError ?? (strategyWatchlist.cap_exceeded_by_protective_coverage ? `${strategyWatchlist.protective_count ?? 0} protective above normal capacity` : "normal eligible capacity"),
           },
-          { label: "Live", value: strategyWatchlist.streaming_count, tone: strategyWatchlist.streaming_count ? "positive" : "inactive", meta: "streaming now" },
+          {
+            label: "Live",
+            value: watchlistError ? "Unavailable" : strategyWatchlist.streaming_count,
+            tone: watchlistError ? "inactive" : strategyWatchlist.streaming_count ? "positive" : "inactive",
+            meta: watchlistError ?? "streaming now",
+          },
         ]}
       />
 
@@ -225,7 +235,12 @@ export function MarketOverviewDashboard({
       <SplitPanel
         className="layout-markets items-start"
         left={
-          <Panel title="Instrument Catalogue" subtitle="Available markets. Stars do not stream or trade." priority="primary" tone="neutral">
+          <Panel
+            title="Instrument Catalogue"
+            subtitle={catalogueError ? "Catalogue source unavailable. Stars do not stream or trade." : "Available markets. Stars do not stream or trade."}
+            priority="primary"
+            tone={catalogueError ? "inactive" : "neutral"}
+          >
             <CompactTable
               rows={filteredRows}
               emptyLabel={catalogueError ? "Catalogue unavailable." : "No instruments match the current filters."}
@@ -261,10 +276,10 @@ export function MarketOverviewDashboard({
           </Panel>
         }
         center={
-          <Panel title="Shortlist" subtitle="Operator interest only." priority="secondary" tone="neutral" actions={<div className="console-inline-actions"><button type="button" className="console-button console-button--ghost" disabled={!selectedRows.length || isPending} onClick={() => addToStrategyWatchlist(selectedRows.map((row) => row.instrument))}>Add Selected</button><button type="button" className="console-button" disabled={!addableShortlist.length || isPending} onClick={() => addToStrategyWatchlist(addableShortlist.map((row) => row.instrument))}>Add All Eligible</button></div>}>
+          <Panel title="Shortlist" subtitle={catalogueError ? "Shortlist source unavailable." : "Operator interest only."} priority="secondary" tone={catalogueError ? "inactive" : "neutral"} actions={<div className="console-inline-actions"><button type="button" className="console-button console-button--ghost" disabled={Boolean(catalogueError || watchlistError) || !selectedRows.length || isPending} onClick={() => addToStrategyWatchlist(selectedRows.map((row) => row.instrument))}>Add Selected</button><button type="button" className="console-button" disabled={Boolean(catalogueError || watchlistError) || !addableShortlist.length || isPending} onClick={() => addToStrategyWatchlist(addableShortlist.map((row) => row.instrument))}>Add All Eligible</button></div>}>
             <CompactTable
               rows={shortlistedRows}
-              emptyLabel="No shortlisted instruments yet."
+              emptyLabel={catalogueError ? "Shortlist unavailable." : "No shortlisted instruments yet."}
               getRowTone={(row) => (strategyRowsById.has(row.instrument) ? "positive" : "neutral")}
               columns={[
                 { key: "instrument", header: "Instrument", render: (row) => `${row.name} (${row.symbol})` },
@@ -289,7 +304,7 @@ export function MarketOverviewDashboard({
         }
         right={
           <div className="stack-layout">
-            <Panel title="Strategy Watchlist" subtitle="Eligible for backend streaming/evaluation." priority="critical" tone={strategyWatchlist.active_count ? "positive" : "inactive"} compact>
+            <Panel title="Strategy Watchlist" subtitle={watchlistError ? "Strategy watchlist source unavailable." : "Eligible for backend streaming/evaluation."} priority="critical" tone={watchlistError ? "inactive" : strategyWatchlist.active_count ? "positive" : "inactive"} compact>
               <CompactTable
                 dense
                 rows={strategyWatchlist.instruments}
@@ -312,12 +327,12 @@ export function MarketOverviewDashboard({
             </Panel>
             <Panel title="Operator Notes" priority="passive" tone="inactive" compact>
               <div className="metric-stack">
-                <div className="metric-stack__row"><span>Catalogue</span><strong>Available markets</strong></div>
-                <div className="metric-stack__row"><span>Shortlist</span><strong>Operator interest</strong></div>
-                <div className="metric-stack__row"><span>Strategy watchlist</span><strong>Stream eligible</strong></div>
-                <div className="metric-stack__row"><span>Live</span><strong>Streaming/evaluating</strong></div>
-                <div className="metric-stack__row"><span>Normal capacity</span><strong>{normalWatchlistCount}/{strategyWatchlist.limit || "-"}</strong></div>
-                <div className="metric-stack__row"><span>Protective coverage</span><strong>{strategyWatchlist.protective_count ?? 0} pinned separately</strong></div>
+                <div className="metric-stack__row"><span>Catalogue</span><strong>{catalogueError ? "Unavailable" : "Available markets"}</strong></div>
+                <div className="metric-stack__row"><span>Shortlist</span><strong>{catalogueError ? "Unavailable" : "Operator interest"}</strong></div>
+                <div className="metric-stack__row"><span>Strategy watchlist</span><strong>{watchlistError ? "Unavailable" : "Stream eligible"}</strong></div>
+                <div className="metric-stack__row"><span>Live</span><strong>{watchlistError ? "Unavailable" : "Streaming/evaluating"}</strong></div>
+                <div className="metric-stack__row"><span>Normal capacity</span><strong>{watchlistError ? "Unavailable" : `${normalWatchlistCount}/${strategyWatchlist.limit || "-"}`}</strong></div>
+                <div className="metric-stack__row"><span>Protective coverage</span><strong>{watchlistError ? "Unavailable" : `${strategyWatchlist.protective_count ?? 0} pinned separately`}</strong></div>
               </div>
               {overviewError || catalogueError || watchlistError ? <div className="console-alert console-alert--warning">{overviewError ?? catalogueError ?? watchlistError}<DataIndicator state="error" message={overviewError ?? catalogueError ?? watchlistError ?? "Market data unavailable."} /></div> : null}
               {statusMessage ? <div className="console-alert console-alert--neutral">{statusMessage}</div> : null}

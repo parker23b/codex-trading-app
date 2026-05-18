@@ -370,6 +370,12 @@ export function LiveSystemView({ initialData, initialErrors }: LiveSystemViewPro
   );
 
   const inspection = model.inspection[selectionLookupKey(selection)] ?? model.inspection.system;
+  const degradedSourceCount = model.dataWarnings.length;
+  const heroPosture = model.anomalies.length
+    ? `${model.anomalies.length} unusual signal${model.anomalies.length === 1 ? "" : "s"}`
+    : degradedSourceCount
+      ? `${degradedSourceCount} live source${degradedSourceCount === 1 ? "" : "s"} degraded`
+      : "Nominal live posture";
 
   return (
     <main className="console-page live-system-page">
@@ -383,7 +389,7 @@ export function LiveSystemView({ initialData, initialErrors }: LiveSystemViewPro
           </p>
         </div>
         <div className="live-system-hero__context" aria-live="polite">
-          <strong>{model.anomalies.length ? `${model.anomalies.length} unusual signal${model.anomalies.length === 1 ? "" : "s"}` : "Nominal live posture"}</strong>
+          <strong>{heroPosture}</strong>
           <span>{model.trustRail.find((item) => item.id === "updated")?.meta}</span>
         </div>
       </section>
@@ -700,8 +706,10 @@ export function LiveSystemView({ initialData, initialErrors }: LiveSystemViewPro
                     </button>
                   ))
                 ) : (
-                  <div className="live-empty-state live-empty-state--positive">
-                    No unusual activity is currently ranked above the screen’s attention threshold.
+                  <div className={`live-empty-state${degradedSourceCount ? "" : " live-empty-state--positive"}`}>
+                    {degradedSourceCount
+                      ? "Unusual activity cannot be fully evaluated while live sources are degraded."
+                      : "No unusual activity is currently ranked above the screen’s attention threshold."}
                   </div>
                 )}
               </div>

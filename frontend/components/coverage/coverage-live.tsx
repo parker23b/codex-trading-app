@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { CompactTable, DataIndicator, InspectorDrawer, Panel, SplitPanel, StatusPill, StatusStrip } from "@/components/console/primitives";
+import { CompactTable, DataIndicator, InspectorDrawer, Panel, SplitPanel, StatusPill, StatusStrip, type ConsoleTone } from "@/components/console/primitives";
 import { getCoverageSummary, getFeedState, getOperationalTelemetry, getSystemOperatingLimits } from "@/lib/api";
 import { formatInstrumentLabel, formatRelativeDuration } from "@/lib/format";
-import { CoverageSummary, FeedStateResponse, OperationalTelemetry, SystemOperatingLimits } from "@/lib/types";
+import { CoverageSummary, CoverageWatchlistEntry, FeedState, FeedStateResponse, OperationalTelemetry, SystemOperatingLimits } from "@/lib/types";
 
 type CoverageResourceErrors = {
   coverage: string | null;
@@ -30,6 +30,97 @@ function formatAge(ms?: number | null) {
     return `${ms.toFixed(0)}ms`;
   }
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function feedValueIncludes(feed: FeedState, ...tokens: string[]) {
+  const values = [
+    feed.stream_status,
+    feed.price_source,
+    feed.stream_reason?.code,
+    feed.stream_reason?.label,
+  ]
+    .filter(Boolean)
+    .map((value) => String(value).toUpperCase());
+
+  return tokens.some((token) => values.some((value) => value.includes(token)));
+}
+
+function coverageStreamDisplay(row: CoverageWatchlistEntry, feed?: FeedState) {
+  if (!feed) {
+    return row.streamed
+      ? {
+          label: "Stream state unknown",
+          tone: "warning" as const,
+          title: "No feed-state row was returned for this streamed instrument.",
+        }
+      : {
+          label: "Eligible",
+          tone: "inactive" as const,
+          title: "Instrument is in the watchlist but is not currently streaming.",
+        };
+  }
+
+  const reasonLabel = feed.stream_reason?.label;
+  const reasonDetail = feed.stream_reason?.operator_action;
+
+  if (feedValueIncludes(feed, "DISCONNECTED", "FAILED", "UNAVAILABLE")) {
+    return {
+      label: reasonLabel ?? "Disconnected",
+      tone: "negative" as const,
+      title: reasonDetail ?? "Live stream is disconnected or unavailable for this instrument.",
+    };
+  }
+
+  if (feedValueIncludes(feed, "POLL", "FALLBACK")) {
+    return {
+      label: reasonLabel ?? "Polling fallback",
+      tone: "warning" as const,
+      title: reasonDetail ?? "Fallback polling is active; this is not healthy live streaming.",
+    };
+  }
+
+  if (feedValueIncludes(feed, "STALE")) {
+    return {
+      label: reasonLabel ?? "Stale",
+      tone: "warning" as const,
+      title: reasonDetail ?? "The latest stream tick is stale for this instrument.",
+    };
+  }
+
+  if (feed.stream_connected && feed.streaming_now) {
+    return {
+      label: reasonLabel ?? "Streaming",
+      tone: "positive" as const,
+      title: reasonDetail ?? "Live streaming is active for this instrument.",
+    };
+  }
+
+  return {
+    label: reasonLabel ?? (row.streamed ? "Stream not live" : "Eligible"),
+    tone: row.streamed ? "warning" as const : "inactive" as const,
+    title: reasonDetail ?? "This instrument is not currently receiving healthy live stream ticks.",
+  };
+}
+
+function coverageWatchlistRowTone(row: CoverageWatchlistEntry, feed?: FeedState): ConsoleTone {
+  const streamTone = coverageStreamDisplay(row, feed).tone;
+  if (streamTone !== "positive") {
+    return streamTone;
+  }
+  if (row.status !== "ACTIVE") {
+    return "warning";
+  }
+  return "positive";
+}
+
+function coverageLastTickLabel(row: CoverageWatchlistEntry, feed?: FeedState) {
+  if (feed?.last_tick_age_ms != null) {
+    return formatAge(feed.last_tick_age_ms);
+  }
+  if (feed && !feed.streaming_now) {
+    return "No live tick";
+  }
+  return row.last_streamed_at ? `${formatRelativeDuration(row.last_streamed_at)} ago` : "never";
 }
 
 export function CoverageLive({ initialCoverage, initialTelemetry, initialOperatingLimits, initialFeedState, initialErrors }: CoverageLiveProps) {
@@ -154,26 +245,21 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
             <CompactTable
               rows={activeUniverseRows}
               emptyLabel={errors.coverage ? "Coverage feed unavailable." : "No active Tier 1 instruments."}
-              getRowTone={(row) => (!row.streamed ? "inactive" : row.status !== "ACTIVE" ? "warning" : "positive")}
+              getRowTone={(row) => coverageWatchlistRowTone(row, feedByInstrument.get(row.instrument))}
               columns={[
                 { key: "instrument", header: "Instrument", render: (row) => formatInstrumentLabel(row.instrument) },
                 {
                   key: "stream",
                   header: "Stream",
-                  render: (row) => (
-                    <StatusPill
-                      label={feedByInstrument.get(row.instrument)?.stream_reason?.label ?? (row.streamed ? "Streaming" : "Eligible")}
-                      tone={!row.streamed ? "inactive" : row.status !== "ACTIVE" ? "warning" : "positive"}
-                    />
-                  ),
+                  render: (row) => {
+                    const display = coverageStreamDisplay(row, feedByInstrument.get(row.instrument));
+                    return <StatusPill label={display.label} tone={display.tone} title={display.title} />;
+                  },
                 },
                 {
                   key: "tick",
                   header: "Last Tick",
-                  render: (row) => {
-                    const feed = feedByInstrument.get(row.instrument);
-                    return feed?.last_tick_age_ms != null ? formatAge(feed.last_tick_age_ms) : row.last_streamed_at ? `${formatRelativeDuration(row.last_streamed_at)} ago` : "never";
-                  },
+                  render: (row) => coverageLastTickLabel(row, feedByInstrument.get(row.instrument)),
                 },
                 {
                   key: "spread",

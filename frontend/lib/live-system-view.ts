@@ -967,7 +967,16 @@ function buildTrustRail(resources: LiveDataResources, anomalies: LiveAnomalyItem
     executionIntegrity === "FAILING" ||
     anomalies.some((item) => item.severityRank >= 4)
       ? "YES"
+      : missingSourceCount > 0
+        ? "UNKNOWN"
       : "NO";
+  const actionTone: LiveTone = actionRequired === "YES" ? "negative" : actionRequired === "UNKNOWN" ? "warning" : "positive";
+  const actionMeta =
+    actionRequired === "YES"
+      ? "A high-severity anomaly or failing execution signal is active"
+      : actionRequired === "UNKNOWN"
+        ? "Source coverage degraded; operator action cannot be ruled out"
+        : "Observation only";
 
   return [
     {
@@ -1031,8 +1040,8 @@ function buildTrustRail(resources: LiveDataResources, anomalies: LiveAnomalyItem
       id: "action",
       label: "Action Required",
       value: actionRequired,
-      tone: actionRequired === "YES" ? "negative" : "positive",
-      meta: actionRequired === "YES" ? "A high-severity anomaly or failing execution signal is active" : "Observation only",
+      tone: actionTone,
+      meta: actionMeta,
       source: "Derived",
     },
   ] satisfies LiveStatusChip[];

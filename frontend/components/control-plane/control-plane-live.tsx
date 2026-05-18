@@ -26,19 +26,43 @@ function formatTime(value?: string | null) {
 
 function familyTone(summary: ControlPlaneSummary, family: ControlPlaneFamily) {
   const deploymentState = family.deployment?.state;
-  if (family.deployment?.open_risk_management_state === "UNMANAGED_OPEN_RISK") {
+  const openRiskState = familyOpenRiskState(family);
+  if (openRiskState === "UNMANAGED_OPEN_RISK") {
     return "negative" as const;
+  }
+  if (familyOpenRiskUnavailable(family)) {
+    return "warning" as const;
   }
   if (!summary.effective_autonomous_control_enabled || family.governance.emergency_stop || deploymentState === "BLOCKED" || deploymentState === "EMERGENCY_STOPPED") {
     return "negative" as const;
   }
-  if (family.deployment?.open_risk_management_state === "EXITS_ONLY") {
+  if (openRiskState === "EXITS_ONLY") {
     return "warning" as const;
   }
   if (family.alignment.status !== "ALIGNED" || deploymentState === "DEGRADED") {
     return "warning" as const;
   }
   return "positive" as const;
+}
+
+function familyOpenRiskState(family: ControlPlaneFamily) {
+  return family.deployment?.open_risk_management_state ?? "UNAVAILABLE";
+}
+
+function familyOpenRiskUnavailable(family: ControlPlaneFamily) {
+  const state = familyOpenRiskState(family);
+  return state === "UNAVAILABLE" || state === "UNKNOWN";
+}
+
+function familyOpenRiskReason(family: ControlPlaneFamily) {
+  if (!familyOpenRiskUnavailable(family)) {
+    return family.deployment?.open_risk_management_reason ?? null;
+  }
+  return family.deployment?.open_risk_management_reason ?? "Open-risk state unavailable; do not treat this family as having no open risk.";
+}
+
+function familyOpenRiskLabel(family: ControlPlaneFamily) {
+  return familyOpenRiskUnavailable(family) ? "Open-risk state unavailable" : familyOpenRiskState(family);
 }
 
 export function ControlPlaneLive({ initialSummary, initialSummaryError }: ControlPlaneLiveProps) {
@@ -295,7 +319,11 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
               {
                 key: "open-risk",
                 header: "Risk",
-                render: (family) => family.deployment?.open_risk_management_state ?? "NO_OPEN_RISK",
+                render: (family) => (
+                  <span title={familyOpenRiskReason(family) ?? undefined}>
+                    {familyOpenRiskLabel(family)}
+                  </span>
+                ),
               },
             ]}
           />
@@ -318,7 +346,7 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
                   </div>
                   <div className="summary-bar__item">
                     <span>Control</span>
-                    <strong>{selectedFamily.deployment?.open_risk_management_state ?? selectedFamily.deployment?.state ?? "UNASSIGNED"}</strong>
+                    <strong>{familyOpenRiskLabel(selectedFamily)}</strong>
                     <em>{selectedFamily.deployment?.state ?? selectedFamily.alignment.status}</em>
                   </div>
                   <div className="summary-bar__item">
@@ -330,7 +358,7 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
 
                 <div className="detail-block">
                   <span className="console-kicker">Why This Is Priority</span>
-                  <p>{selectedFamily.deployment?.open_risk_management_reason || selectedFamily.deployment?.blocked_reason || selectedFamily.deployment?.degraded_reason || selectedFamily.alignment.reason}</p>
+                  <p>{familyOpenRiskReason(selectedFamily) || selectedFamily.deployment?.blocked_reason || selectedFamily.deployment?.degraded_reason || selectedFamily.alignment.reason}</p>
                 </div>
 
                 <div className="detail-block">
@@ -339,7 +367,7 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
                   <p>Governance: {selectedFamily.governance.approval_state}</p>
                   <p>Runtime: {selectedFamily.runtime.is_running ? `${selectedFamily.runtime.control_mode ?? "UNKNOWN"} / ${selectedFamily.runtime.runtime_mode ?? "NORMAL"} active` : "not running"}</p>
                   <p>Instrument: {selectedFamily.runtime.active_instrument ?? selectedFamily.deployment?.selected_instrument ?? "n/a"}</p>
-                  <p>Open risk: {selectedFamily.deployment?.open_risk_management_state ?? "NO_OPEN_RISK"}</p>
+                  <p>Open risk: {familyOpenRiskLabel(selectedFamily)}</p>
                   <p>Deployment: {selectedFamily.deployment?.state ?? "UNASSIGNED"}</p>
                 </div>
 

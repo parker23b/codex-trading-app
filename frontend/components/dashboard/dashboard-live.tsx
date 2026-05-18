@@ -119,6 +119,49 @@ function renderMetricOrUnavailable(
   );
 }
 
+function dashboardStreamStatus(controlPlane: ControlPlaneSummary, streamHealth: StreamHealthStatus) {
+  if (controlPlane.feed_source_state === "STALE") {
+    return {
+      value: "Stale",
+      tone: "warning" as const,
+      meta: "Feed stale. Price freshness is below the current execution threshold.",
+    };
+  }
+  if (controlPlane.feed_source_state === "POLLING_FALLBACK") {
+    return {
+      value: "Polling",
+      tone: "warning" as const,
+      meta: "Polling fallback is active; live streaming is not the entry source.",
+    };
+  }
+  if (controlPlane.feed_source_state === "DISCONNECTED") {
+    return {
+      value: "Disconnected",
+      tone: "negative" as const,
+      meta: "Feed disconnected. Live streaming and fallback freshness are unavailable.",
+    };
+  }
+  if (streamHealth.connected) {
+    return {
+      value: "Live",
+      tone: "positive" as const,
+      meta: streamHealth.last_status ?? "Streaming market data is connected.",
+    };
+  }
+  if (streamHealth.enabled) {
+    return {
+      value: "Interrupted",
+      tone: "negative" as const,
+      meta: streamHealth.last_status ?? "Streaming market data is interrupted.",
+    };
+  }
+  return {
+    value: "Unavailable",
+    tone: "inactive" as const,
+    meta: streamHealth.last_status ?? "Stream health is unavailable.",
+  };
+}
+
 export function DashboardLive({
   initialPositions,
   initialTrades,
@@ -378,6 +421,7 @@ export function DashboardLive({
   const pausedCount = Math.max(controlPlane.families.length - runningCount - degradedCount, 0);
   const openRiskState = controlPlane.open_risk_management_state;
   const openRiskUnavailable = openRiskState == null || openRiskState === "UNAVAILABLE" || openRiskState === "UNKNOWN";
+  const streamStatus = dashboardStreamStatus(controlPlane, streamHealth);
   const healthTone =
     errors.controlPlane || errors.brokerAuth
       ? "inactive"
@@ -470,15 +514,11 @@ export function DashboardLive({
                   <>
                     -<DataIndicator state="error" message={errors.streamHealth} />
                   </>
-                ) : streamHealth.connected ? (
-                  "Live"
-                ) : streamHealth.enabled ? (
-                  "Interrupted"
                 ) : (
-                  "Unavailable"
+                  streamStatus.value
                 ),
-                tone: errors.streamHealth ? "inactive" : streamHealth.connected ? "positive" : streamHealth.enabled ? "negative" : "inactive",
-                meta: errors.streamHealth ?? streamHealth.last_status ?? "no status",
+                tone: errors.streamHealth ? "inactive" : streamStatus.tone,
+                meta: errors.streamHealth ?? streamStatus.meta,
               },
               {
                 label: "Coverage",

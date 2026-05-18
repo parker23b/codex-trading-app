@@ -77,6 +77,68 @@ class DomainEventService:
             )
             return None
 
+    def record_event_in_session(
+        self,
+        *,
+        session: Session,
+        event_type: str,
+        category: str,
+        severity: str = "info",
+        error_type: str | None = None,
+        source: str,
+        title: str,
+        message: str | None = None,
+        correlation_id: str | None = None,
+        runtime_id: str | None = None,
+        strategy_name: str | None = None,
+        instrument: str | None = None,
+        position_id: int | None = None,
+        trade_id: int | None = None,
+        execution_id: int | None = None,
+        actor_type: str | None = None,
+        actor_id: str | None = None,
+        payload_json: dict[str, Any] | None = None,
+        created_at: datetime | None = None,
+    ) -> DomainEvent | None:
+        event = DomainEvent(
+            created_at=created_at or utc_now(),
+            event_type=event_type,
+            category=category,
+            severity=severity,
+            error_type=error_type,
+            source=source,
+            correlation_id=correlation_id,
+            runtime_id=runtime_id,
+            strategy_name=strategy_name,
+            instrument=instrument,
+            position_id=position_id,
+            trade_id=trade_id,
+            execution_id=execution_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            title=title,
+            message=message,
+            payload_json=payload_json or {},
+        )
+        try:
+            session.add(event)
+            session.commit()
+            session.refresh(event)
+            return event
+        except Exception:
+            session.rollback()
+            logger.exception(
+                "Failed to persist domain event in active session",
+                extra={
+                    "event_type": event_type,
+                    "category": category,
+                    "severity": severity,
+                    "source": source,
+                    "correlation_id": correlation_id,
+                },
+            )
+            return None
+
     def record_error(
         self,
         *,
