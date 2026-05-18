@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from app.db.session import get_session
-from app.core.ig_broker import IGBrokerError
+from app.core.broker import BrokerError
 from app.services.market_overview_service import MarketOverviewService
 from app.services.chart_service import ChartService
 from app.services.trade_service import TradeService
@@ -28,10 +28,10 @@ def get_market_overview(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
-    except IGBrokerError as exc:
+    except BrokerError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Unable to load market overview from IG: {exc}",
+            detail=f"Unable to load market overview from broker: {exc}",
         ) from exc
 
 

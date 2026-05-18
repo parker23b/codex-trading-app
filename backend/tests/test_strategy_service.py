@@ -19,6 +19,7 @@ from sqlmodel import select
 
 from app.core.broker import (
     BrokerOrderResult,
+    BrokerExecutionSource,
     BrokerOrderStatus,
     BrokerRiskSizingQuote,
 )
@@ -28,6 +29,7 @@ from app.models.trade import (
     Execution,
     ExecutionPhase,
     ExecutionStatus,
+    Position,
     TradeIntent,
     TradeIntentState,
 )
@@ -472,6 +474,90 @@ def test_audit_risk_002_execution_revalidates_account_before_submission(
     assert (
         intent.details["allocation_outcome"]["stage"] == "execution_revalidation_failed"
     )
+
+
+def test_audit_life_005_simulated_entry_persists_non_broker_provenance(
+    session, broker, fixed_now
+):
+    trade_service = TradeService(session)
+    runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
+    broker.place_order_outcomes.append(
+        BrokerOrderResult(
+            broker_reference="sim-entry-provenance",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.0,
+            executed_at=fixed_now + timedelta(seconds=1),
+            filled_size=0.2,
+            average_fill_price=100.0,
+            submitted_at=fixed_now,
+            acknowledged_at=fixed_now + timedelta(milliseconds=100),
+            execution_source=BrokerExecutionSource.SIMULATED_LOCAL_FILL,
+        )
+    )
+    intent = trade_service.create_trade_intent(
+        TradeIntent(
+            strategy_name=STRATEGY,
+            instrument=INSTRUMENT,
+            direction="BUY",
+            state=TradeIntentState.APPROVED.value,
+            signal_time=fixed_now,
+            proposed_size=0.2,
+            allocated_size=0.2,
+            proposed_risk_percent=0.1,
+            allocated_risk_percent=0.1,
+            estimated_risk_amount=100.0,
+        )
+    )
+    execution = trade_service.create_execution(
+        Execution(
+            trade_intent_id=intent.id,
+            strategy_name=STRATEGY,
+            instrument=INSTRUMENT,
+            phase=ExecutionPhase.ENTRY.value,
+            status=ExecutionStatus.SUBMISSION_PENDING.value,
+            client_request_id="ent-simulated-provenance",
+            signal_time=fixed_now,
+            requested_size=0.2,
+            requested_price=100.0,
+        )
+    )
+    engine = runtime_manager.start(strategy_name=STRATEGY, instrument=INSTRUMENT)
+
+    position = StrategyService._execute_entry_signal(
+        engine=engine,
+        signal=EntrySignal(
+            kind=SignalKind.ENTRY,
+            strategy_name=STRATEGY,
+            instrument=INSTRUMENT,
+            observed_price=100.0,
+            signal_at=fixed_now,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            risk_percent=0.1,
+            bid=99.9,
+            ask=100.1,
+            market_status="TRADEABLE",
+            tradable=True,
+        ),
+        intent=intent,
+        trade_service=trade_service,
+        execution=execution,
+    )
+
+    persisted_position = session.exec(select(Position)).one()
+    assert position.broker_reference == "sim-entry-provenance"
+    assert execution.details["broker_result"]["execution_source"] == (
+        BrokerExecutionSource.SIMULATED_LOCAL_FILL.value
+    )
+    assert intent.details["broker_result"]["execution_source"] == (
+        BrokerExecutionSource.SIMULATED_LOCAL_FILL.value
+    )
+    assert persisted_position.broker_sync_status == (
+        BrokerExecutionSource.SIMULATED_LOCAL_FILL.value
+    )
+    assert persisted_position.broker_open_confirmed_at is None
 
 
 def test_audit_risk_002_execution_blocks_material_account_equity_drift(

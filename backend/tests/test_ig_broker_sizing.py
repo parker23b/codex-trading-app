@@ -5,6 +5,7 @@ import pytest
 from app.core.broker import (
     AccountType,
     BrokerAccountSummary,
+    BrokerExecutionSource,
     BrokerOrderStatus,
     BrokerSizingMode,
     BrokerSizingPrecision,
@@ -151,6 +152,39 @@ def test_audit_life_001_ig_place_order_confirmation_timeout_returns_manual_revie
     assert result.filled_size is None
     assert result.requires_manual_review is True
     assert result.error_code == "BROKER_CONFIRMATION_TIMEOUT"
+
+
+def test_audit_life_005_ig_simulated_order_and_close_are_not_broker_confirmed():
+    broker = IGBroker(
+        AccountType.DEMO,
+        api_key=None,
+        username=None,
+        password=None,
+        account_id=None,
+        base_url="https://example.test/gateway/deal",
+        trading_enabled=False,
+    )
+
+    opened = broker.place_order(
+        OrderRequest(
+            instrument="CS.D.EURUSD.CFD.IP",
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.0,
+            strategy_name="mean_reversion",
+            client_request_id="sim-entry-1",
+        )
+    )
+    closed = broker.close_position(
+        "CS.D.EURUSD.CFD.IP",
+        broker_reference=opened.broker_reference,
+        client_request_id="sim-close-1",
+    )
+
+    assert opened.status is BrokerOrderStatus.FILLED
+    assert opened.execution_source is BrokerExecutionSource.SIMULATED_LOCAL_FILL
+    assert closed.status is BrokerOrderStatus.FILLED
+    assert closed.execution_source is BrokerExecutionSource.SIMULATED_LOCAL_CLOSE
 
 
 def test_ig_market_details_parse_sizing_semantics():

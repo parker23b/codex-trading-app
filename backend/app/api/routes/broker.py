@@ -3,7 +3,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
-from app.core.ig_broker import IGBrokerError
+from app.core.broker import BrokerError
 from app.services.broker_service import BrokerService
 
 router = APIRouter(prefix="/broker")
@@ -22,7 +22,7 @@ class BrokerPositionResponse(BaseModel):
 def list_broker_positions() -> list[BrokerPositionResponse]:
     try:
         positions = BrokerService().list_remote_positions()
-    except IGBrokerError as exc:
+    except BrokerError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
         ) from exc

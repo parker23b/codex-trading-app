@@ -5,11 +5,10 @@ from datetime import UTC, datetime
 
 from sqlmodel import Session
 
+from app.core.broker import BrokerError, BrokerMarketDetails
 from app.core.broker_factory import get_broker
 from app.core.config import get_settings
-from app.core.broker import BrokerMarketDetails
 from app.core.instrument_catalog import list_market_instruments
-from app.core.ig_broker import IGBrokerError
 from app.core.logging import get_logger
 from app.core.runtime import runtime_manager
 from app.strategies.base import ScreeningSnapshot
@@ -96,7 +95,7 @@ class MarketDataService:
                     market_details = await asyncio.to_thread(
                         trading_engine.broker.get_market_details, instrument
                     )
-                except IGBrokerError as exc:
+                except BrokerError as exc:
                     runtime_manager.set_price_error(instrument, str(exc))
                     logger.error(
                         "Market price unavailable",
@@ -144,7 +143,7 @@ class MarketDataService:
                     market_details = await asyncio.to_thread(
                         self.broker.get_market_details, instrument
                     )
-                except IGBrokerError as exc:
+                except BrokerError as exc:
                     logger.warning(
                         "Tier 2 market refresh failed",
                         extra={

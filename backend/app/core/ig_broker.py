@@ -15,6 +15,8 @@ from app.core.broker import (
     AccountType,
     Broker,
     BrokerAccountSummary,
+    BrokerError,
+    BrokerExecutionSource,
     BrokerMarketDetails,
     BrokerOrderResult,
     BrokerOrderStatus,
@@ -55,7 +57,7 @@ class IGStreamingCredentials:
     lightstreamer_endpoint: str
 
 
-class IGBrokerError(RuntimeError):
+class IGBrokerError(BrokerError):
     pass
 
 
@@ -809,6 +811,7 @@ class IGBroker(Broker):
             average_fill_price=order.price,
             submitted_at=submitted_at or executed_at,
             acknowledged_at=executed_at,
+            execution_source=BrokerExecutionSource.SIMULATED_LOCAL_FILL,
         )
 
     def _simulate_close_position(
@@ -858,6 +861,7 @@ class IGBroker(Broker):
             average_fill_price=position.open_price,
             submitted_at=submitted_at or now_utc(),
             acknowledged_at=now_utc(),
+            execution_source=BrokerExecutionSource.SIMULATED_LOCAL_CLOSE,
         )
 
     def _ensure_authenticated(self) -> None:

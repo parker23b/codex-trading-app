@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
 from datetime import timedelta
 
-from app.core.ig_broker import IGBrokerError
+from app.core.broker import BrokerError
 from app.models.trade import Position
 from app.services.broker_service import BrokerService
 from app.services.trade_service import TradeService
+
+
+BACKEND_APP_ROOT = Path(__file__).resolve().parents[1] / "app"
 
 
 def test_reconcile_positions_falls_back_to_local_positions_when_broker_unavailable(
@@ -30,7 +34,7 @@ def test_reconcile_positions_falls_back_to_local_positions_when_broker_unavailab
 
     broker.remote_positions = []
     broker.get_positions = lambda: (_ for _ in ()).throw(
-        IGBrokerError("Unable to reach IG API: timeout")
+        BrokerError("Broker positions unavailable: timeout")
     )
 
     positions = BrokerService().reconcile_positions(session)
@@ -39,3 +43,20 @@ def test_reconcile_positions_falls_back_to_local_positions_when_broker_unavailab
     assert positions[0].id == local_position.id
     assert positions[0].broker_reference == "broker-pos-1"
     assert trade_service.list_reconciliation_events(limit=10) == []
+
+
+def test_audit_broker_001_non_adapter_code_uses_broker_neutral_errors():
+    allowed = {
+        BACKEND_APP_ROOT / "core" / "ig_broker.py",
+        BACKEND_APP_ROOT / "services" / "ig_streaming_service.py",
+    }
+
+    offenders = []
+    for path in BACKEND_APP_ROOT.rglob("*.py"):
+        if path in allowed:
+            continue
+        source = path.read_text()
+        if "IGBrokerError" in source:
+            offenders.append(path.relative_to(BACKEND_APP_ROOT).as_posix())
+
+    assert offenders == []

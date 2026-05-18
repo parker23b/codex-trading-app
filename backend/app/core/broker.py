@@ -30,6 +30,12 @@ class BrokerOrderStatus(str, Enum):
     FAILED = "FAILED"
 
 
+class BrokerExecutionSource(str, Enum):
+    BROKER_CONFIRMED = "BROKER_CONFIRMED"
+    SIMULATED_LOCAL_FILL = "SIMULATED_LOCAL_FILL"
+    SIMULATED_LOCAL_CLOSE = "SIMULATED_LOCAL_CLOSE"
+
+
 class BrokerSizingPrecision(str, Enum):
     EXACT = "EXACT"
     APPROXIMATE = "APPROXIMATE"
@@ -82,6 +88,7 @@ class BrokerOrderResult:
     error_code: str | None = None
     error_message: str | None = None
     requires_manual_review: bool = False
+    execution_source: BrokerExecutionSource = BrokerExecutionSource.BROKER_CONFIRMED
 
 
 @dataclass(slots=True)
@@ -206,6 +213,10 @@ class Broker(ABC):
         self, instrument: str, requested_size: float
     ) -> BrokerSizeNormalization:
         raise NotImplementedError
+
+
+class BrokerError(RuntimeError):
+    """Broker-neutral exception for application services outside adapters."""
 
 
 def now_utc() -> datetime:

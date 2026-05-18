@@ -5,9 +5,8 @@ from datetime import UTC, datetime, timedelta
 
 from sqlmodel import Session
 
-from app.core.broker import BrokerMarketDetails
+from app.core.broker import BrokerError, BrokerMarketDetails
 from app.core.broker_factory import get_broker
-from app.core.ig_broker import IGBrokerError
 from app.core.instrument_catalog import InstrumentDefinition, list_market_instruments
 from app.core.runtime import runtime_manager
 from app.models.trade import Position, Trade
@@ -204,7 +203,7 @@ class MarketOverviewService:
             return "Venue is in a restricted session. Existing orders may be managed, but new entries are limited."
         if normalized == "SUSPENDED":
             return "Instrument is suspended by the venue."
-        return f"IG market status: {normalized}." if normalized else None
+        return f"Broker market status: {normalized}." if normalized else None
 
     def _is_active(
         self,
@@ -295,5 +294,5 @@ class MarketOverviewService:
         try:
             first_instrument = list_market_instruments()[0]
             self.broker.get_market_details(first_instrument.epic)
-        except IGBrokerError:
+        except BrokerError:
             raise

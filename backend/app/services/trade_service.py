@@ -596,10 +596,11 @@ class TradeService:
         return execution
 
     def record_broker_position(self, position: Position) -> Position:
-        if position.broker_open_confirmed_at is None:
-            position.broker_open_confirmed_at = position.open_time
-        position.broker_sync_status = "CONFIRMED"
-        position.last_reconciled_at = utc_now()
+        if position.broker_sync_status in {"PENDING", "CONFIRMED"}:
+            if position.broker_open_confirmed_at is None:
+                position.broker_open_confirmed_at = position.open_time
+            position.broker_sync_status = "CONFIRMED"
+            position.last_reconciled_at = utc_now()
         return self.upsert_position(position)
 
     def update_position_analytics(

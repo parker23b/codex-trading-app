@@ -4,9 +4,8 @@ from time import perf_counter
 
 from sqlmodel import Session
 
-from app.core.broker import BrokerAccountSummary, BrokerPosition
+from app.core.broker import BrokerAccountSummary, BrokerError, BrokerPosition
 from app.core.broker_factory import get_broker
-from app.core.ig_broker import IGBrokerError
 from app.core.logging import get_logger
 from app.models.trade import Position
 from app.services.health_service import get_health_service
@@ -51,7 +50,7 @@ class BrokerService:
         trade_service = TradeService(session)
         try:
             return ReconciliationService(trade_service).reconcile_open_positions()
-        except IGBrokerError as exc:
+        except BrokerError as exc:
             get_health_service().update_broker_state(connected=False)
             logger.error(
                 "Broker reconciliation unavailable; returning persisted local positions",

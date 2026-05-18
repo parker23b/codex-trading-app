@@ -6,7 +6,12 @@ from uuid import uuid4
 
 from sqlmodel import Session, select
 
-from app.core.broker import BrokerOrderStatus, BrokerSizingPrecision, OrderRequest
+from app.core.broker import (
+    BrokerExecutionSource,
+    BrokerOrderStatus,
+    BrokerSizingPrecision,
+    OrderRequest,
+)
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.signals import EntrySignal, ExitSignal, SignalCandidate, SignalStatus
@@ -2646,6 +2651,7 @@ class StrategyService:
             current_price=order.average_fill_price or order.price,
             unrealized_pnl=0.0,
             reason=f"{signal.strategy_name} entry approved",
+            broker_sync_status=StrategyService._position_sync_status_for_order(order),
         )
         persisted_position = trade_service.record_broker_position(
             engine.current_position
@@ -3090,6 +3096,37 @@ class StrategyService:
             health_service.record_order_failure()
 
     @staticmethod
+    def _broker_result_payload(
+        order, *, client_request_id: str | None
+    ) -> dict[str, object]:
+        return {
+            "status": order.status.value,
+            "execution_source": order.execution_source.value,
+            "client_request_id": client_request_id,
+            "broker_reference": order.broker_reference,
+            "requested_size": order.requested_size,
+            "filled_size": order.filled_size,
+            "average_fill_price": order.average_fill_price,
+            "submitted_at": order.submitted_at.isoformat()
+            if order.submitted_at is not None
+            else None,
+            "acknowledged_at": order.acknowledged_at.isoformat()
+            if order.acknowledged_at is not None
+            else None,
+            "executed_at": order.executed_at.isoformat(),
+            "reason": order.reason,
+            "error_code": order.error_code,
+            "error_message": order.error_message,
+            "requires_manual_review": order.requires_manual_review,
+        }
+
+    @staticmethod
+    def _position_sync_status_for_order(order) -> str:
+        if order.execution_source is BrokerExecutionSource.BROKER_CONFIRMED:
+            return "CONFIRMED"
+        return order.execution_source.value
+
+    @staticmethod
     def _transition_execution_from_broker_result(
         *,
         trade_service: TradeService,
@@ -3105,6 +3142,9 @@ class StrategyService:
             else {"broker_reference": order.broker_reference}
         )
         client_request_id = order.client_request_id or execution.client_request_id
+        broker_result = StrategyService._broker_result_payload(
+            order, client_request_id=client_request_id
+        )
         trade_service.transition_execution(
             execution,
             status=ExecutionStatus.ORDER_ACKNOWLEDGED,
@@ -3117,6 +3157,7 @@ class StrategyService:
             error_code=order.error_code,
             error_message=order.error_message,
             requires_manual_review=order.requires_manual_review,
+            details={"broker_result": broker_result},
         )
         if trade_intent is not None:
             trade_service.transition_trade_intent(
@@ -3124,18 +3165,11 @@ class StrategyService:
                 state=TradeIntentState.ACKNOWLEDGED,
                 execution_client_request_id=client_request_id,
                 acknowledged_at=order.acknowledged_at or order.executed_at,
+                details={"broker_result": broker_result},
                 **intent_broker_reference_kwargs,
             )
         if order.status in AMBIGUOUS_BROKER_ORDER_STATUSES:
-            broker_result = {
-                "status": order.status.value,
-                "confirmation_ambiguous": True,
-                "client_request_id": client_request_id,
-                "broker_reference": order.broker_reference,
-                "reason": order.reason,
-                "error_code": order.error_code,
-                "error_message": order.error_message,
-            }
+            broker_result = {**broker_result, "confirmation_ambiguous": True}
             trade_service.transition_execution(
                 execution,
                 status=ExecutionStatus.NEEDS_MANUAL_REVIEW,
@@ -3197,6 +3231,7 @@ class StrategyService:
             error_code=order.error_code,
             error_message=order.error_message,
             requires_manual_review=order.requires_manual_review,
+            details={"broker_result": broker_result},
         )
         if trade_intent is not None:
             intent_state = (
@@ -3236,7 +3271,8 @@ class StrategyService:
                         BrokerOrderStatus.CANCELLED,
                     },
                     fill_status=fill_status.value,
-                ),
+                )
+                | {"broker_result": broker_result},
                 **intent_broker_reference_kwargs,
             )
 
