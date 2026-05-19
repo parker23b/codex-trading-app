@@ -65,6 +65,7 @@ class RuntimeRecoveryService:
         outcomes: list[dict[str, str]] = []
 
         for runtime in runtimes:
+            previous_recovery_state = runtime.recovery_state
             runtime_manager.load_cached_price(
                 runtime.instrument,
                 price=runtime.last_price_seen,
@@ -176,7 +177,8 @@ class RuntimeRecoveryService:
                         "outcome": "recovery_required",
                     }
                 )
-                domain_event_service.record_event(
+                domain_event_service.record_event_in_session(
+                    session=self.session,
                     event_type="reconciliation.mismatch_detected",
                     category="reconciliation",
                     severity="warning",
@@ -189,6 +191,8 @@ class RuntimeRecoveryService:
                     payload_json={
                         "broker_reference": runtime.current_position_broker_reference,
                         "reason": "Persisted runtime references an open position that the broker did not confirm.",
+                        "previous_state": previous_recovery_state,
+                        "new_state": "RECOVERY_REQUIRED",
                     },
                 )
                 continue
@@ -297,7 +301,8 @@ class RuntimeRecoveryService:
                     "outcome": "resumed" if current_position is not None else "running",
                 }
             )
-            domain_event_service.record_event(
+            domain_event_service.record_event_in_session(
+                session=self.session,
                 event_type="strategy.runtime_started",
                 category="strategy",
                 severity="info",
@@ -314,6 +319,8 @@ class RuntimeRecoveryService:
                     "recovered": True,
                     "has_position": current_position is not None,
                     "recovery_outcome": outcomes[-1]["outcome"],
+                    "previous_state": previous_recovery_state,
+                    "new_state": "RUNNING",
                 },
             )
             logger.info(

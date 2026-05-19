@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, date, datetime
+
 from fastapi import HTTPException
 from sqlmodel import select
 
@@ -15,6 +17,15 @@ from app.api.routes.control_plane import (
     update_operator_control_state,
     update_strategy_governance,
 )
+from app.api.routes.ai_reviewer import (
+    OperationalQuestionRequest,
+    answer_operational_question,
+    get_daily_review,
+    get_operator_summary,
+    get_runtime_health_review,
+    get_strategy_review,
+    get_trade_postmortem,
+)
 from app.api.routes.strategies import (
     StartStrategyRequest,
     StopStrategyRequest,
@@ -25,7 +36,9 @@ from app.api.routes.strategies import (
 )
 from app.models.allocation_alert import AllocationAlert
 from app.models.domain_event import DomainEvent
+from app.models.review import GeneratedReviewRecord
 from app.models.strategy_governance import StrategyFamilyGovernance
+from app.models.trade import Trade
 from app.services.domain_event_service import domain_event_service
 
 
@@ -53,6 +66,25 @@ def _seed_allocation_alert(session, *, state: str = "OPEN") -> AllocationAlert:
     session.commit()
     session.refresh(alert)
     return alert
+
+
+def _seed_closed_trade(session) -> Trade:
+    trade = Trade(
+        strategy_name="mean_reversion",
+        instrument="CS.D.EURUSD.CFD.IP",
+        direction="BUY",
+        size=1.0,
+        open_price=1.1,
+        close_price=1.2,
+        open_time=datetime(2026, 4, 9, 9, 0, tzinfo=UTC),
+        close_time=datetime(2026, 4, 9, 10, 0, tzinfo=UTC),
+        pnl=100.0,
+        account_type="DEMO",
+    )
+    session.add(trade)
+    session.commit()
+    session.refresh(trade)
+    return trade
 
 
 def test_audit_api_008_operator_control_mutation_persists_domain_event(session):
@@ -255,3 +287,156 @@ def test_audit_test_002_default_fixture_still_allows_required_route_audit_events
     assert len(events) == 1
     assert events[0].event_type == "operator.governance_updated"
     assert governance_rows
+
+
+def test_audit_api_008_review_persist_true_routes_persist_domain_events(session):
+    trade = _seed_closed_trade(session)
+
+    operator_response = get_operator_summary(session=session, persist=True)
+    daily_response = get_daily_review(
+        review_date=date(2026, 4, 9), session=session, persist=True
+    )
+    strategy_response = get_strategy_review(
+        "mean_reversion", days=7, session=session, persist=True
+    )
+    runtime_response = get_runtime_health_review(
+        hours=24, session=session, persist=True
+    )
+    postmortem_response = get_trade_postmortem(
+        trade.id or 0, session=session, persist=True
+    )
+
+    records = session.exec(
+        select(GeneratedReviewRecord).order_by(GeneratedReviewRecord.id)
+    ).all()
+    events = _events(session)
+    assert [record.review_type for record in records] == [
+        "operator_summary",
+        "daily_review",
+        "strategy_review",
+        "runtime_health_review",
+        "trade_postmortem",
+    ]
+    assert [
+        operator_response.metadata.review_id,
+        daily_response.metadata.review_id,
+        strategy_response.metadata.review_id,
+        runtime_response.metadata.review_id,
+        postmortem_response.metadata.review_id,
+    ] == [record.id for record in records]
+    assert [event.event_type for event in events] == [
+        "operator.review_persisted",
+        "operator.review_persisted",
+        "operator.review_persisted",
+        "operator.review_persisted",
+        "operator.review_persisted",
+    ]
+    assert [event.source for event in events] == [
+        "api.reviews.operator_summary.persist",
+        "api.reviews.daily.persist",
+        "api.reviews.strategies.persist",
+        "api.reviews.runtime_health.persist",
+        "api.reviews.trades.postmortem.persist",
+    ]
+    assert {event.actor_type for event in events} == {"operator"}
+    assert {event.actor_id for event in events} == {"operator"}
+    assert [event.correlation_id for event in events] == [
+        f"review:{record.review_type}:{record.id}" for record in records
+    ]
+    assert events[2].strategy_name == "mean_reversion"
+    assert events[4].trade_id == trade.id
+    assert events[4].strategy_name == "mean_reversion"
+    assert events[4].instrument == "CS.D.EURUSD.CFD.IP"
+    for event, record in zip(events, records, strict=True):
+        assert event.category == "review"
+        assert event.payload_json["review_id"] == record.id
+        assert event.payload_json["review_type"] == record.review_type
+        assert event.payload_json["previous_state"] == "NOT_PERSISTED"
+        assert event.payload_json["new_state"] == "PERSISTED"
+        assert event.payload_json["generation_mode"] == record.generation_mode
+        assert "scope" in event.payload_json
+
+
+def test_audit_api_008_review_advisory_question_persists_domain_event(session):
+    response = answer_operational_question(
+        OperationalQuestionRequest(
+            question="What runtime risk needs attention?",
+            strategy_name="mean_reversion",
+            actor_id="desk-operator",
+        ),
+        session=session,
+    )
+
+    records = session.exec(select(GeneratedReviewRecord)).all()
+    events = _events(session)
+    assert len(records) == 1
+    assert records[0].review_type == "operational_question"
+    assert response.metadata.review_id == records[0].id
+    assert len(events) == 1
+    assert events[0].event_type == "operator.review_advisory_persisted"
+    assert events[0].source == "api.reviews.questions"
+    assert events[0].actor_type == "operator"
+    assert events[0].actor_id == "desk-operator"
+    assert events[0].strategy_name == "mean_reversion"
+    assert events[0].correlation_id == f"review:operational_question:{records[0].id}"
+    assert events[0].payload_json["review_id"] == records[0].id
+    assert events[0].payload_json["review_type"] == "operational_question"
+    assert events[0].payload_json["previous_state"] == "NOT_PERSISTED"
+    assert events[0].payload_json["new_state"] == "PERSISTED"
+    assert events[0].payload_json["question"] == "What runtime risk needs attention?"
+    assert events[0].payload_json["routed_review_type"] == "runtime_health_review"
+
+
+def test_audit_api_008_review_persist_true_returns_error_if_audit_persistence_fails(
+    session, monkeypatch
+):
+    monkeypatch.setattr(
+        domain_event_service,
+        "record_event_in_session",
+        lambda **_: None,
+        raising=False,
+    )
+
+    try:
+        get_operator_summary(session=session, persist=True)
+    except HTTPException as exc:
+        assert exc.status_code == 503
+        assert exc.detail == (
+            "Review was persisted, but durable audit persistence failed."
+        )
+    else:
+        raise AssertionError("Expected review audit failure to block clean success")
+
+    records = session.exec(select(GeneratedReviewRecord)).all()
+    assert len(records) == 1
+    assert records[0].review_type == "operator_summary"
+    assert _events(session) == []
+
+
+def test_audit_api_008_review_advisory_returns_error_if_audit_persistence_fails(
+    session, monkeypatch
+):
+    monkeypatch.setattr(
+        domain_event_service,
+        "record_event_in_session",
+        lambda **_: None,
+        raising=False,
+    )
+
+    try:
+        answer_operational_question(
+            OperationalQuestionRequest(question="What needs attention?"),
+            session=session,
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 503
+        assert exc.detail == (
+            "Advisory review was persisted, but durable audit persistence failed."
+        )
+    else:
+        raise AssertionError("Expected advisory audit failure to block clean success")
+
+    records = session.exec(select(GeneratedReviewRecord)).all()
+    assert len(records) == 1
+    assert records[0].review_type == "operational_question"
+    assert _events(session) == []

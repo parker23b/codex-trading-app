@@ -218,7 +218,8 @@ class ReconciliationService:
                     )
                 if is_adopted:
                     adopted_count += 1
-                    domain_event_service.record_event(
+                    domain_event_service.record_event_in_session(
+                        session=self.trade_service.session,
                         event_type="reconciliation.unmatched_remote_position",
                         category="reconciliation",
                         severity="warning",
@@ -231,11 +232,14 @@ class ReconciliationService:
                         payload_json={
                             **details,
                             "broker_reference": remote_position.broker_reference,
+                            "previous_state": "BROKER_ONLY",
+                            "new_state": "LOCAL_POSITION_ADOPTED",
                         },
                     )
                 else:
                     corrected_count += 1
-                    domain_event_service.record_event(
+                    domain_event_service.record_event_in_session(
+                        session=self.trade_service.session,
                         event_type="reconciliation.position_corrected",
                         category="reconciliation",
                         severity="info",
@@ -248,6 +252,8 @@ class ReconciliationService:
                         payload_json={
                             **details,
                             "broker_reference": remote_position.broker_reference,
+                            "previous_state": "LOCAL_POSITION_STALE",
+                            "new_state": "LOCAL_POSITION_BROKER_CONFIRMED",
                         },
                     )
             if matching_engine is not None:
@@ -329,6 +335,8 @@ class ReconciliationService:
                 "close_price": local_position.current_price
                 or local_position.open_price,
                 "forced_trade_id": forced_trade.id,
+                "previous_state": "LOCAL_POSITION_OPEN",
+                "new_state": "LOCAL_POSITION_FORCED_CLOSED",
             }
             self.trade_service.record_reconciliation_event(
                 event_type="LOCAL_POSITION_CLOSED_AFTER_BROKER_MISS",
@@ -339,7 +347,8 @@ class ReconciliationService:
                 local_position_id=local_position.id,
                 details=details,
             )
-            domain_event_service.record_event(
+            domain_event_service.record_event_in_session(
+                session=self.trade_service.session,
                 event_type="reconciliation.unmatched_local_position",
                 category="reconciliation",
                 severity="warning",
@@ -354,7 +363,8 @@ class ReconciliationService:
                     "broker_reference": local_position.broker_reference,
                 },
             )
-            domain_event_service.record_event(
+            domain_event_service.record_event_in_session(
+                session=self.trade_service.session,
                 event_type="reconciliation.position_corrected",
                 category="reconciliation",
                 severity="info",

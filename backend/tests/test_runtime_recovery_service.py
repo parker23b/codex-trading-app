@@ -5,12 +5,17 @@ from datetime import timedelta
 from sqlmodel import select
 
 from app.core.broker import OrderDirection
+from app.models.domain_event import DomainEvent
 from app.models.runtime import StrategyRuntimeState
 from app.models.trade import Position, TradeIntentState
 from app.services.runtime_recovery_service import RuntimeRecoveryService
 from app.services.trade_service import TradeService
 from tests.fakes import make_broker_position
 from app.core.runtime import runtime_manager
+
+
+def _domain_events(session) -> list[DomainEvent]:
+    return list(session.exec(select(DomainEvent).order_by(DomainEvent.id)))
 
 
 def test_runtime_recovery_creates_trade_intent_before_recreating_position(
@@ -166,6 +171,87 @@ def test_audit_life_003_stopped_runtime_recovers_remote_open_position(
     assert intents[0].state == TradeIntentState.RECOVERED_POSITION_ATTACHED.value
     assert intents[0].position_id == positions[0].id
     assert positions[0].trade_intent_id == intents[0].id
+
+
+def test_audit_test_002_runtime_recovery_resumed_runtime_persists_domain_event(
+    session, broker, fixed_now
+):
+    session.add(
+        StrategyRuntimeState(
+            runtime_id="runtime-recover-audit",
+            strategy_name="smoke_test_hold",
+            instrument="CS.D.EURUSD.MINI.IP",
+            status="RUNNING",
+            recovery_state="RECOVERY_REQUIRED",
+            current_position_broker_reference="recover-audit-pos-1",
+            last_price_seen=101.0,
+            last_price_seen_at=fixed_now - timedelta(seconds=5),
+        )
+    )
+    session.commit()
+    broker.remote_positions = [
+        make_broker_position(
+            broker_reference="recover-audit-pos-1",
+            instrument="CS.D.EURUSD.MINI.IP",
+            direction=OrderDirection.BUY,
+            size=0.4,
+            open_price=101.25,
+            opened_at=fixed_now - timedelta(minutes=3),
+        )
+    ]
+
+    outcomes = RuntimeRecoveryService(session).recover()
+
+    positions = TradeService(session).list_positions()
+    events = _domain_events(session)
+    assert any(outcome["outcome"] == "resumed" for outcome in outcomes)
+    assert len(positions) == 1
+    assert len(events) == 1
+    assert events[0].event_type == "strategy.runtime_started"
+    assert events[0].category == "strategy"
+    assert events[0].source == "runtime_recovery_service.recover"
+    assert events[0].runtime_id == "runtime-recover-audit"
+    assert events[0].strategy_name == "smoke_test_hold"
+    assert events[0].instrument == "CS.D.EURUSD.MINI.IP"
+    assert events[0].position_id == positions[0].id
+    assert events[0].payload_json["previous_state"] == "RECOVERY_REQUIRED"
+    assert events[0].payload_json["new_state"] == "RUNNING"
+    assert events[0].payload_json["recovered"] is True
+
+
+def test_audit_test_002_runtime_recovery_broker_mismatch_persists_domain_event(
+    session, broker, fixed_now
+):
+    session.add(
+        StrategyRuntimeState(
+            runtime_id="runtime-recover-mismatch-audit",
+            strategy_name="smoke_test_hold",
+            instrument="CS.D.EURUSD.MINI.IP",
+            status="RUNNING",
+            recovery_state="RUNNING",
+            current_position_broker_reference="missing-broker-audit",
+            last_price_seen=101.0,
+            last_price_seen_at=fixed_now - timedelta(seconds=5),
+        )
+    )
+    session.commit()
+    broker.remote_positions = []
+
+    outcomes = RuntimeRecoveryService(session).recover()
+
+    events = _domain_events(session)
+    assert any(outcome["outcome"] == "recovery_required" for outcome in outcomes)
+    assert len(events) == 1
+    assert events[0].event_type == "reconciliation.mismatch_detected"
+    assert events[0].category == "reconciliation"
+    assert events[0].severity == "warning"
+    assert events[0].source == "runtime_recovery_service.recover"
+    assert events[0].runtime_id == "runtime-recover-mismatch-audit"
+    assert events[0].strategy_name == "smoke_test_hold"
+    assert events[0].instrument == "CS.D.EURUSD.MINI.IP"
+    assert events[0].payload_json["broker_reference"] == "missing-broker-audit"
+    assert events[0].payload_json["previous_state"] == "RUNNING"
+    assert events[0].payload_json["new_state"] == "RECOVERY_REQUIRED"
 
 
 def test_audit_life_003_stopped_runtime_attaches_intent_to_confirmed_local_position(

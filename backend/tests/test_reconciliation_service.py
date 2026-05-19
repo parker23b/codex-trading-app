@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from sqlmodel import select
+
 from app.core.broker import OrderDirection
 from app.core.runtime import runtime_manager
+from app.models.domain_event import DomainEvent
 from app.models.trade import (
     Execution,
     ExecutionPhase,
@@ -16,6 +19,10 @@ from app.services.reconciliation_service import ReconciliationService
 from app.services.runtime_state_service import RuntimeStateService
 from app.services.trade_service import TradeService
 from tests.fakes import make_broker_position
+
+
+def _domain_events(session) -> list[DomainEvent]:
+    return list(session.exec(select(DomainEvent).order_by(DomainEvent.id)))
 
 
 def test_reconciliation_corrects_local_position_from_broker_truth(
@@ -348,6 +355,42 @@ def test_reconciliation_creates_explicit_adopted_trade_intent(
     assert intents[0].decision_reason_code == "UNPLANNED_POSITION_DETECTED"
 
 
+def test_audit_test_002_reconciliation_adoption_persists_domain_event(
+    session, broker, fixed_now
+):
+    trade_service = TradeService(session)
+    broker.remote_positions = [
+        make_broker_position(
+            broker_reference="broker-adopt-audit",
+            instrument="CS.D.EURUSD.MINI.IP",
+            direction=OrderDirection.BUY,
+            size=0.4,
+            open_price=103.0,
+            opened_at=fixed_now - timedelta(minutes=2),
+        )
+    ]
+
+    ReconciliationService(trade_service).reconcile_open_positions()
+
+    positions = trade_service.list_positions()
+    intents = trade_service.list_trade_intents(limit=10)
+    events = _domain_events(session)
+    assert len(positions) == 1
+    assert len(intents) == 1
+    assert len(events) == 1
+    assert events[0].event_type == "reconciliation.unmatched_remote_position"
+    assert events[0].category == "reconciliation"
+    assert events[0].severity == "warning"
+    assert events[0].source == "reconciliation_service.reconcile_open_positions"
+    assert events[0].strategy_name == "broker_sync"
+    assert events[0].instrument == "CS.D.EURUSD.MINI.IP"
+    assert events[0].position_id == positions[0].id
+    assert events[0].payload_json["broker_reference"] == "broker-adopt-audit"
+    assert events[0].payload_json["trade_intent_id"] == intents[0].id
+    assert events[0].payload_json["previous_state"] == "BROKER_ONLY"
+    assert events[0].payload_json["new_state"] == "LOCAL_POSITION_ADOPTED"
+
+
 def test_reconciliation_forced_close_creates_trade_and_intent_record(
     session, fixed_now
 ):
@@ -395,3 +438,65 @@ def test_reconciliation_forced_close_creates_trade_and_intent_record(
     assert refreshed_intent is not None
     assert refreshed_intent.state == TradeIntentState.FORCED_RECONCILIATION_CLOSE.value
     assert refreshed_intent.trade_id == trades[0].id
+
+
+def test_audit_test_002_reconciliation_forced_close_persists_domain_events(
+    session, fixed_now
+):
+    trade_service = TradeService(session)
+    current_position = Position(
+        strategy_name="smoke_test_hold",
+        broker_reference="missing-audit",
+        instrument="CS.D.EURUSD.MINI.IP",
+        direction="BUY",
+        size=0.2,
+        open_price=100.0,
+        open_time=fixed_now - timedelta(minutes=5),
+        current_price=99.5,
+        unrealized_pnl=-0.1,
+        account_type="DEMO",
+        is_open=True,
+        broker_sync_status="CONFIRMED",
+    )
+    intent = trade_service.create_trade_intent(
+        TradeIntent(
+            strategy_name="smoke_test_hold",
+            instrument="CS.D.EURUSD.MINI.IP",
+            direction="BUY",
+            state=TradeIntentState.POSITION_OPENED.value,
+            signal_time=current_position.open_time,
+            proposed_size=0.2,
+            allocated_size=0.2,
+            broker_reference="missing-audit",
+            decision_reason_code="approved",
+            decision_reason="Opened earlier.",
+            opened_at=current_position.open_time,
+        )
+    )
+    current_position.trade_intent_id = intent.id
+    persisted = trade_service.record_broker_position(current_position)
+
+    ReconciliationService(trade_service).reconcile_open_positions()
+
+    refreshed_intent = trade_service.get_trade_intent(intent.id)
+    trades = trade_service.list_trades()
+    events = _domain_events(session)
+    assert refreshed_intent is not None
+    assert len(trades) == 1
+    assert [event.event_type for event in events] == [
+        "reconciliation.unmatched_local_position",
+        "reconciliation.position_corrected",
+    ]
+    for event in events:
+        assert event.category == "reconciliation"
+        assert event.source == "reconciliation_service.reconcile_open_positions"
+        assert event.strategy_name == "smoke_test_hold"
+        assert event.instrument == "CS.D.EURUSD.MINI.IP"
+        assert event.position_id == persisted.id
+        assert event.payload_json["broker_reference"] == "missing-audit"
+        assert event.payload_json["trade_intent_id"] == intent.id
+        assert event.payload_json["forced_trade_id"] == trades[0].id
+        assert event.payload_json["previous_state"] == "LOCAL_POSITION_OPEN"
+        assert event.payload_json["new_state"] == "LOCAL_POSITION_FORCED_CLOSED"
+    assert events[0].severity == "warning"
+    assert events[1].severity == "info"
