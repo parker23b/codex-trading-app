@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, desc, select
@@ -487,6 +488,7 @@ class TradeService:
         self.session.add(execution)
         self.session.commit()
         self.session.refresh(execution)
+        self._record_execution_created_domain_event(execution)
         return execution
 
     def find_execution_by_client_request_id(
@@ -732,9 +734,8 @@ class TradeService:
         self.session.refresh(event)
         return event
 
-    @staticmethod
     def _record_execution_domain_event(
-        execution: Execution, *, previous_status: str | None
+        self, execution: Execution, *, previous_status: str | None
     ) -> None:
         if previous_status == execution.status:
             return
@@ -800,8 +801,11 @@ class TradeService:
         if event_metadata is None:
             return
 
-        domain_event_service.record_event(
-            event_type=str(event_metadata["event_type"]),
+        source = "trade_service.transition_execution"
+        event_type = str(event_metadata["event_type"])
+        event = domain_event_service.record_event_in_session(
+            session=self.session,
+            event_type=event_type,
             category=str(event_metadata["category"]),
             severity=str(event_metadata["severity"]),
             error_type=(
@@ -817,7 +821,7 @@ class TradeService:
                     else None
                 )
             ),
-            source="trade_service.transition_execution",
+            source=source,
             title=str(event_metadata["title"]),
             message=execution.error_message or execution.reason,
             correlation_id=execution.client_request_id,
@@ -826,24 +830,110 @@ class TradeService:
             position_id=execution.local_position_id,
             trade_id=execution.local_trade_id,
             execution_id=execution.id,
-            payload_json={
-                "trade_intent_id": execution.trade_intent_id,
-                "phase": execution.phase,
-                "status": execution.status,
-                "reason": execution.reason,
-                "error_code": execution.error_code,
-                "error_message": execution.error_message,
-                "broker_reference": execution.broker_reference,
-                "requested_size": execution.requested_size,
-                "filled_size": execution.filled_size,
-                "requested_price": execution.requested_price,
-                "average_fill_price": execution.average_fill_price,
-                "intended_risk_amount": execution.intended_risk_amount,
-                "submitted_risk_amount": execution.submitted_risk_amount,
-                "fill_derived_risk_amount": execution.fill_derived_risk_amount,
-                "risk_truth_confidence": execution.risk_truth_confidence,
-                "requires_manual_review": execution.requires_manual_review,
-                "details": execution.details or {},
-            },
+            actor_type="service",
+            actor_id="trade_service",
+            payload_json=self._execution_event_payload(
+                execution,
+                previous_state=previous_status,
+                new_state=execution.status,
+            ),
             created_at=execution.last_transition_at,
         )
+        if event is None:
+            self._mark_execution_audit_persistence_failure(
+                execution,
+                event_type=event_type,
+                source=source,
+                previous_status=previous_status,
+            )
+
+    def _record_execution_created_domain_event(self, execution: Execution) -> None:
+        if execution.status != ExecutionStatus.SUBMISSION_PENDING.value:
+            return
+        source = "trade_service.create_execution"
+        event_type = "execution.submission_pending_created"
+        event = domain_event_service.record_event_in_session(
+            session=self.session,
+            event_type=event_type,
+            category="execution",
+            severity="info",
+            source=source,
+            title="Execution attempt created",
+            message=execution.reason,
+            correlation_id=execution.client_request_id,
+            strategy_name=execution.strategy_name,
+            instrument=execution.instrument,
+            position_id=execution.local_position_id,
+            trade_id=execution.local_trade_id,
+            execution_id=execution.id,
+            actor_type="service",
+            actor_id="trade_service",
+            payload_json=self._execution_event_payload(
+                execution,
+                previous_state="NOT_CREATED",
+                new_state=execution.status,
+            ),
+            created_at=execution.last_transition_at,
+        )
+        if event is None:
+            self._mark_execution_audit_persistence_failure(
+                execution,
+                event_type=event_type,
+                source=source,
+                previous_status="NOT_CREATED",
+            )
+
+    @staticmethod
+    def _execution_event_payload(
+        execution: Execution,
+        *,
+        previous_state: str | None,
+        new_state: str,
+    ) -> dict[str, Any]:
+        return {
+            "trade_intent_id": execution.trade_intent_id,
+            "phase": execution.phase,
+            "previous_state": previous_state,
+            "new_state": new_state,
+            "status": execution.status,
+            "reason": execution.reason,
+            "error_code": execution.error_code,
+            "error_message": execution.error_message,
+            "broker_reference": execution.broker_reference,
+            "requested_size": execution.requested_size,
+            "filled_size": execution.filled_size,
+            "requested_price": execution.requested_price,
+            "average_fill_price": execution.average_fill_price,
+            "intended_risk_amount": execution.intended_risk_amount,
+            "submitted_risk_amount": execution.submitted_risk_amount,
+            "fill_derived_risk_amount": execution.fill_derived_risk_amount,
+            "risk_truth_confidence": execution.risk_truth_confidence,
+            "requires_manual_review": execution.requires_manual_review,
+            "details": execution.details or {},
+        }
+
+    def _mark_execution_audit_persistence_failure(
+        self,
+        execution: Execution,
+        *,
+        event_type: str,
+        source: str,
+        previous_status: str | None,
+    ) -> None:
+        details: dict[str, Any] = dict(execution.details or {})
+        failures = list(details.get("audit_event_failures") or [])
+        failures.append(
+            {
+                "event_type": event_type,
+                "source": source,
+                "previous_state": previous_status,
+                "new_state": execution.status,
+                "correlation_id": execution.client_request_id,
+            }
+        )
+        details["domain_event_persistence_failed"] = True
+        details["audit_event_failures"] = failures
+        execution.details = details
+        self.session.add(execution)
+        self.session.commit()
+        self.session.refresh(execution)

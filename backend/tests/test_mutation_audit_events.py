@@ -26,6 +26,13 @@ from app.api.routes.ai_reviewer import (
     get_strategy_review,
     get_trade_postmortem,
 )
+from app.api.routes.markets import (
+    BulkStrategyWatchlistRequest,
+    add_shortlist_item,
+    add_strategy_watchlist_items,
+    remove_shortlist_item,
+    remove_strategy_watchlist_item,
+)
 from app.api.routes.strategies import (
     StartStrategyRequest,
     StopStrategyRequest,
@@ -39,6 +46,7 @@ from app.models.domain_event import DomainEvent
 from app.models.review import GeneratedReviewRecord
 from app.models.strategy_governance import StrategyFamilyGovernance
 from app.models.trade import Trade
+from app.models.watchlist import OperatorShortlistEntry, WatchlistEntry
 from app.services.domain_event_service import domain_event_service
 
 
@@ -440,3 +448,156 @@ def test_audit_api_008_review_advisory_returns_error_if_audit_persistence_fails(
     assert len(records) == 1
     assert records[0].review_type == "operational_question"
     assert _events(session) == []
+
+
+def test_audit_api_008_shortlist_mutations_persist_domain_events(session):
+    added_response = add_shortlist_item("CS.D.EURUSD.CFD.IP", session)
+    removed_response = remove_shortlist_item("CS.D.EURUSD.CFD.IP", session)
+
+    entries = session.exec(select(OperatorShortlistEntry)).all()
+    events = _events(session)
+    assert added_response["status"] == "shortlisted"
+    assert removed_response == {
+        "status": "removed",
+        "instrument": "CS.D.EURUSD.CFD.IP",
+    }
+    assert entries == []
+    assert [event.event_type for event in events] == [
+        "operator.shortlist_item_added",
+        "operator.shortlist_item_removed",
+    ]
+    assert [event.source for event in events] == [
+        "api.markets.shortlist.add",
+        "api.markets.shortlist.remove",
+    ]
+    assert {event.actor_type for event in events} == {"operator"}
+    assert {event.actor_id for event in events} == {"api"}
+    assert [event.instrument for event in events] == [
+        "CS.D.EURUSD.CFD.IP",
+        "CS.D.EURUSD.CFD.IP",
+    ]
+    assert events[0].payload_json["previous_state"] == "NOT_SHORTLISTED"
+    assert events[0].payload_json["new_state"] == "SHORTLISTED"
+    assert events[0].payload_json["shortlist_entry_id"] is not None
+    assert events[1].payload_json["previous_state"] == "SHORTLISTED"
+    assert events[1].payload_json["new_state"] == "NOT_SHORTLISTED"
+    assert (
+        events[1].payload_json["shortlist_entry_id"]
+        == events[0].payload_json["shortlist_entry_id"]
+    )
+
+
+def test_audit_api_008_strategy_watchlist_mutations_persist_domain_events(session):
+    bulk_response = add_strategy_watchlist_items(
+        BulkStrategyWatchlistRequest(
+            instrument_ids=["CS.D.EURUSD.CFD.IP", "CS.D.GBPUSD.CFD.IP"]
+        ),
+        session,
+    )
+    remove_response = remove_strategy_watchlist_item("CS.D.EURUSD.CFD.IP", session)
+
+    rows = session.exec(
+        select(WatchlistEntry).order_by(WatchlistEntry.instrument)
+    ).all()
+    events = _events(session)
+    assert [item["instrument"] for item in bulk_response["added"]] == [
+        "CS.D.EURUSD.CFD.IP",
+        "CS.D.GBPUSD.CFD.IP",
+    ]
+    assert remove_response == {
+        "status": "removed",
+        "instrument": "CS.D.EURUSD.CFD.IP",
+    }
+    assert [event.event_type for event in events] == [
+        "operator.strategy_watchlist_bulk_added",
+        "operator.strategy_watchlist_item_removed",
+    ]
+    assert events[0].source == "api.markets.strategy_watchlist.bulk_add"
+    assert events[0].actor_type == "operator"
+    assert events[0].actor_id == "api"
+    assert events[0].payload_json["requested_instrument_ids"] == [
+        "CS.D.EURUSD.CFD.IP",
+        "CS.D.GBPUSD.CFD.IP",
+    ]
+    assert events[0].payload_json["previous_states"] == {
+        "CS.D.EURUSD.CFD.IP": "NOT_IN_STRATEGY_WATCHLIST",
+        "CS.D.GBPUSD.CFD.IP": "NOT_IN_STRATEGY_WATCHLIST",
+    }
+    assert events[0].payload_json["new_states"] == {
+        "CS.D.EURUSD.CFD.IP": "ACTIVE",
+        "CS.D.GBPUSD.CFD.IP": "ACTIVE",
+    }
+    assert events[0].payload_json["watchlist_entry_ids"]["CS.D.EURUSD.CFD.IP"]
+    assert events[0].payload_json["added_count"] == 2
+    assert events[0].payload_json["skipped_count"] == 0
+    assert events[1].source == "api.markets.strategy_watchlist.remove"
+    assert events[1].instrument == "CS.D.EURUSD.CFD.IP"
+    assert events[1].payload_json["previous_state"] == "ACTIVE"
+    assert events[1].payload_json["new_state"] == "COOLDOWN"
+    assert (
+        events[1].payload_json["watchlist_entry_id"]
+        == events[0].payload_json["watchlist_entry_ids"]["CS.D.EURUSD.CFD.IP"]
+    )
+    assert {row.instrument: row.status for row in rows} == {
+        "CS.D.EURUSD.CFD.IP": "COOLDOWN",
+        "CS.D.GBPUSD.CFD.IP": "ACTIVE",
+    }
+
+
+def test_audit_api_008_watchlist_mutation_returns_error_if_audit_persistence_fails(
+    session, monkeypatch
+):
+    monkeypatch.setattr(
+        domain_event_service,
+        "record_event_in_session",
+        lambda **_: None,
+        raising=False,
+    )
+
+    try:
+        add_shortlist_item("CS.D.EURUSD.CFD.IP", session)
+    except HTTPException as exc:
+        assert exc.status_code == 503
+        assert exc.detail == (
+            "Shortlist item was added, but durable audit persistence failed."
+        )
+    else:
+        raise AssertionError("Expected shortlist audit failure to block clean success")
+
+    entries = session.exec(select(OperatorShortlistEntry)).all()
+    assert [entry.instrument for entry in entries] == ["CS.D.EURUSD.CFD.IP"]
+    assert _events(session) == []
+
+
+def test_audit_api_008_strategy_watchlist_returns_error_if_audit_persistence_fails(
+    session, monkeypatch
+):
+    add_strategy_watchlist_items(
+        BulkStrategyWatchlistRequest(instrument_ids=["CS.D.EURUSD.CFD.IP"]),
+        session,
+    )
+    monkeypatch.setattr(
+        domain_event_service,
+        "record_event_in_session",
+        lambda **_: None,
+        raising=False,
+    )
+
+    try:
+        remove_strategy_watchlist_item("CS.D.EURUSD.CFD.IP", session)
+    except HTTPException as exc:
+        assert exc.status_code == 503
+        assert exc.detail == (
+            "Strategy watchlist item was removed, but durable audit persistence failed."
+        )
+    else:
+        raise AssertionError(
+            "Expected strategy-watchlist audit failure to block clean success"
+        )
+
+    rows = session.exec(select(WatchlistEntry)).all()
+    events = _events(session)
+    assert [row.status for row in rows] == ["COOLDOWN"]
+    assert [event.event_type for event in events] == [
+        "operator.strategy_watchlist_bulk_added"
+    ]
