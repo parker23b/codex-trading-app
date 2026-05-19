@@ -48,6 +48,7 @@ export type AlertMutationState = {
   action: "acknowledge" | "resolve";
   error: string | null;
   pending: boolean;
+  refreshError: string | null;
   success: string | null;
 };
 
@@ -122,6 +123,7 @@ export function RiskAlertCard({
       </div>
       {mutation?.error ? <div className="status-note status-note--inline">{mutation.error}</div> : null}
       {mutation?.success ? <div className="status-note status-note--inline">{mutation.success}</div> : null}
+      {mutation?.refreshError ? <div className="status-note status-note--inline">{mutation.refreshError}</div> : null}
       {alert.state !== "RESOLVED" ? (
         <div className="console-inline-actions">
           {alert.state === "OPEN" ? (
@@ -263,6 +265,7 @@ export function RiskAllocationLive({
         action,
         error: null,
         pending: true,
+        refreshError: null,
         success: null,
       },
     }));
@@ -272,6 +275,21 @@ export function RiskAllocationLive({
       } else {
         await resolveAllocationAlert(alertId);
       }
+    } catch (error) {
+      setAlertMutationState((current) => ({
+        ...current,
+        [alertId]: {
+          action,
+          error: `Mutation failed: ${mutationErrorMessage(error)}`,
+          pending: false,
+          refreshError: null,
+          success: null,
+        },
+      }));
+      return;
+    }
+
+    try {
       const nextAlerts = await getAllocationAlerts({ limit: 60, refresh: true });
       setAlerts(nextAlerts);
       setAlertMutationState((current) => ({
@@ -280,6 +298,7 @@ export function RiskAllocationLive({
           action,
           error: null,
           pending: false,
+          refreshError: null,
           success: "Mutation confirmed after backend alert truth refreshed.",
         },
       }));
@@ -288,9 +307,10 @@ export function RiskAllocationLive({
         ...current,
         [alertId]: {
           action,
-          error: `Mutation failed: ${mutationErrorMessage(error)}`,
+          error: null,
           pending: false,
-          success: null,
+          refreshError: `Refresh failed: ${mutationErrorMessage(error)}`,
+          success: "Mutation submitted, but backend alert truth could not be refreshed.",
         },
       }));
     }

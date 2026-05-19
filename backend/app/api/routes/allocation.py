@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
+from app.api.audit import persist_required_domain_event
 from app.db.session import get_session
+from app.models.allocation_alert import AllocationAlert
 from app.services.allocation_alert_service import AllocationAlertService
 from app.services.allocation_read_service import AllocationReadService
 
@@ -11,6 +13,41 @@ router = APIRouter(prefix="/allocation")
 
 class AlertActionRequest(BaseModel):
     actor_id: str = Field(default="operator")
+
+
+def _persist_alert_mutation_event(
+    *,
+    session: Session,
+    alert: AllocationAlert,
+    action: str,
+    previous_state: str,
+    actor_id: str,
+) -> None:
+    event_action = "acknowledged" if action == "acknowledge" else "resolved"
+    persist_required_domain_event(
+        session=session,
+        failure_detail=(
+            f"Allocation alert was {event_action}, but durable audit persistence failed."
+        ),
+        event_type=f"operator.allocation_alert_{event_action}",
+        category="risk",
+        source=f"api.allocation.alerts.{action}",
+        title=f"Allocation alert {event_action}",
+        message=alert.title,
+        actor_type="operator",
+        actor_id=actor_id,
+        payload_json={
+            "alert_id": alert.id,
+            "alert_key": alert.alert_key,
+            "alert_type": alert.alert_type,
+            "severity": alert.severity,
+            "previous_state": previous_state,
+            "state": alert.state,
+            "related_intent_ids": alert.related_intent_ids,
+            "related_cycle_ids": alert.related_cycle_ids,
+            "related_execution_ids": alert.related_execution_ids,
+        },
+    )
 
 
 @router.get("/cycles")
@@ -123,6 +160,10 @@ def acknowledge_allocation_alert(
     payload: AlertActionRequest,
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
+    existing = AllocationAlertService(session).trade_service.get_allocation_alert(
+        alert_id
+    )
+    previous_state = existing.state if existing is not None else None
     alert = AllocationAlertService(session).acknowledge_alert(
         alert_id, actor_id=payload.actor_id
     )
@@ -131,6 +172,13 @@ def acknowledge_allocation_alert(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Allocation alert '{alert_id}' not found.",
         )
+    _persist_alert_mutation_event(
+        session=session,
+        alert=alert,
+        action="acknowledge",
+        previous_state=previous_state or "UNKNOWN",
+        actor_id=payload.actor_id,
+    )
     return {
         "id": alert.id,
         "state": alert.state,
@@ -144,6 +192,10 @@ def resolve_allocation_alert(
     payload: AlertActionRequest,
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
+    existing = AllocationAlertService(session).trade_service.get_allocation_alert(
+        alert_id
+    )
+    previous_state = existing.state if existing is not None else None
     alert = AllocationAlertService(session).resolve_alert(
         alert_id, actor_id=payload.actor_id
     )
@@ -152,6 +204,13 @@ def resolve_allocation_alert(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Allocation alert '{alert_id}' not found.",
         )
+    _persist_alert_mutation_event(
+        session=session,
+        alert=alert,
+        action="resolve",
+        previous_state=previous_state or "UNKNOWN",
+        actor_id=payload.actor_id,
+    )
     return {"id": alert.id, "state": alert.state, "resolved_at": alert.resolved_at}
 
 

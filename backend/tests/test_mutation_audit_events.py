@@ -3,6 +3,11 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlmodel import select
 
+from app.api.routes.allocation import (
+    AlertActionRequest,
+    acknowledge_allocation_alert,
+    resolve_allocation_alert,
+)
 from app.api.routes.control_plane import (
     GovernanceUpdateRequest,
     OperatorControlUpdateRequest,
@@ -18,6 +23,7 @@ from app.api.routes.strategies import (
     stop_strategy,
     stop_strategy_by_name,
 )
+from app.models.allocation_alert import AllocationAlert
 from app.models.domain_event import DomainEvent
 from app.models.strategy_governance import StrategyFamilyGovernance
 from app.services.domain_event_service import domain_event_service
@@ -25,6 +31,28 @@ from app.services.domain_event_service import domain_event_service
 
 def _events(session) -> list[DomainEvent]:
     return list(session.exec(select(DomainEvent).order_by(DomainEvent.id)))
+
+
+def _seed_allocation_alert(session, *, state: str = "OPEN") -> AllocationAlert:
+    alert = AllocationAlert(
+        alert_key=f"audit-alert-{state.lower()}",
+        alert_type="material_execution_drift",
+        severity="error",
+        state=state,
+        escalation_level="critical",
+        title="Material execution drift",
+        message="Submitted risk drift needs operator attention.",
+        count=1,
+        recurrence_count=2,
+        related_intent_ids=[7],
+        related_cycle_ids=["cycle-1"],
+        related_execution_ids=[42],
+        details={"risk_delta": "material"},
+    )
+    session.add(alert)
+    session.commit()
+    session.refresh(alert)
+    return alert
 
 
 def test_audit_api_008_operator_control_mutation_persists_domain_event(session):
@@ -149,6 +177,68 @@ def test_audit_api_008_strategy_by_name_mutations_persist_domain_events(session)
     ]
     assert events[0].source == "api.strategies.start_by_name"
     assert events[1].source == "api.strategies.stop_by_name"
+
+
+def test_audit_api_008_allocation_alert_mutations_persist_domain_events(session):
+    open_alert = _seed_allocation_alert(session)
+    acknowledged_response = acknowledge_allocation_alert(
+        open_alert.id or 0,
+        AlertActionRequest(actor_id="risk-operator"),
+        session,
+    )
+    resolved_response = resolve_allocation_alert(
+        open_alert.id or 0,
+        AlertActionRequest(actor_id="risk-operator"),
+        session,
+    )
+
+    events = _events(session)
+    assert acknowledged_response["state"] == "ACKNOWLEDGED"
+    assert resolved_response["state"] == "RESOLVED"
+    assert [event.event_type for event in events] == [
+        "operator.allocation_alert_acknowledged",
+        "operator.allocation_alert_resolved",
+    ]
+    assert [event.source for event in events] == [
+        "api.allocation.alerts.acknowledge",
+        "api.allocation.alerts.resolve",
+    ]
+    assert events[0].actor_type == "operator"
+    assert events[0].actor_id == "risk-operator"
+    assert events[0].payload_json["alert_id"] == open_alert.id
+    assert events[0].payload_json["previous_state"] == "OPEN"
+    assert events[0].payload_json["state"] == "ACKNOWLEDGED"
+    assert events[0].payload_json["related_execution_ids"] == [42]
+    assert events[1].payload_json["previous_state"] == "ACKNOWLEDGED"
+    assert events[1].payload_json["state"] == "RESOLVED"
+
+
+def test_audit_api_008_allocation_alert_returns_error_if_audit_persistence_fails(
+    session, monkeypatch
+):
+    alert = _seed_allocation_alert(session)
+    monkeypatch.setattr(
+        domain_event_service,
+        "record_event_in_session",
+        lambda **_: None,
+        raising=False,
+    )
+
+    try:
+        acknowledge_allocation_alert(
+            alert.id or 0,
+            AlertActionRequest(actor_id="risk-operator"),
+            session,
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 503
+        assert exc.detail == (
+            "Allocation alert was acknowledged, but durable audit persistence failed."
+        )
+    else:
+        raise AssertionError(
+            "Expected allocation alert audit failure to block clean success"
+        )
 
 
 def test_audit_test_002_default_fixture_still_allows_required_route_audit_events(

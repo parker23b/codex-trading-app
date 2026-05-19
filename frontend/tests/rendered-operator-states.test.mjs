@@ -486,6 +486,35 @@ test("AUDIT-UI-004 rendered allocation alert mutation failure preserves backend 
   }
 });
 
+test("AUDIT-UI-004 rendered allocation alert refresh failure is not clean success", () => {
+  const { tempRoot, outDir } = compileRenderedModules();
+  try {
+    withCompiledAliases(outDir, () => {
+      const risk = require(path.join(outDir, "components", "risk", "risk-allocation-live.js"));
+      assert.equal(typeof risk.RiskAlertCard, "function");
+
+      const html = renderComponent(risk.RiskAlertCard, {
+        alert: baseAlert({ state: "ACKNOWLEDGED" }),
+        mutation: {
+          action: "acknowledge",
+          error: null,
+          pending: false,
+          refreshError: "Refresh failed: active-read refresh audit persistence failed",
+          success: "Mutation submitted, but backend alert truth could not be refreshed.",
+        },
+        onAcknowledge: () => {},
+        onResolve: () => {},
+      });
+
+      assert.match(html, /Mutation submitted, but backend alert truth could not be refreshed/);
+      assert.match(html, /Refresh failed: active-read refresh audit persistence failed/);
+      assert.doesNotMatch(html, /Mutation confirmed/);
+    });
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("AUDIT-UI-002 rendered allocation risk truth marks simulated and unknown as non-exact", () => {
   const { tempRoot, outDir } = compileRenderedModules();
   try {

@@ -25,3 +25,13 @@ test("AUDIT-UI-004 allocation alert mutation success refreshes backend truth bef
   assert.match(source, /Mutation confirmed/);
   assert.match(source, /setAlerts\(nextAlerts\)/);
 });
+
+test("AUDIT-UI-004 allocation alert refresh failures do not render clean success", () => {
+  const source = readFileSync(path.join(frontendRoot, "components", "risk", "risk-allocation-live.tsx"), "utf8");
+
+  assert.match(source, /refreshError/);
+  assert.match(source, /Refresh failed/);
+  assert.match(source, /Mutation submitted/);
+  assert.match(source, /backend alert truth could not be refreshed/);
+  assert.doesNotMatch(source, /success:\s*"Mutation confirmed[^"]*"\s*,\s*refreshError:\s*`Refresh failed/s);
+});
