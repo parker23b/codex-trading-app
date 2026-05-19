@@ -170,9 +170,12 @@ def test_audit_api_008_control_plane_reconcile_persists_domain_event(session):
         "degraded",
         "emergency_stopped",
     }
-    assert [event.event_type for event in events] == ["control_plane.reconciled"]
-    assert events[0].source == "api.control_plane.reconcile"
-    assert "deployed" in events[0].payload_json
+    reconciled_events = [
+        event for event in events if event.event_type == "control_plane.reconciled"
+    ]
+    assert len(reconciled_events) == 1
+    assert reconciled_events[0].source == "api.control_plane.reconcile"
+    assert "deployed" in reconciled_events[0].payload_json
 
 
 def test_audit_api_008_strategy_start_stop_mutations_persist_domain_events(session):
@@ -193,12 +196,17 @@ def test_audit_api_008_strategy_start_stop_mutations_persist_domain_events(sessi
 
     events = _events(session)
     assert [event.event_type for event in events] == [
+        "strategy.runtime_started",
         "operator.runtime_started",
+        "strategy.runtime_stopped",
         "operator.runtime_stopped",
     ]
     assert events[0].runtime_id is not None
     assert events[0].strategy_name == "mean_reversion"
-    assert events[1].payload_json == {
+    assert events[1].source == "api.strategy.start"
+    assert events[2].payload_json["previous_state"] == "RUNNING"
+    assert events[2].payload_json["new_state"] == "STOPPED"
+    assert events[3].payload_json == {
         "strategy_name": "mean_reversion",
         "instrument": "CS.D.EURUSD.CFD.IP",
     }
@@ -212,11 +220,15 @@ def test_audit_api_008_strategy_by_name_mutations_persist_domain_events(session)
     assert start_response.status == "started"
     assert stop_response.status == "stopped"
     assert [event.event_type for event in events] == [
+        "strategy.runtime_started",
         "operator.runtime_started",
+        "strategy.runtime_stopped",
         "operator.runtime_stopped",
     ]
-    assert events[0].source == "api.strategies.start_by_name"
-    assert events[1].source == "api.strategies.stop_by_name"
+    assert events[0].source == "strategy_service.start_strategy"
+    assert events[1].source == "api.strategies.start_by_name"
+    assert events[2].source == "strategy_service.stop_strategy"
+    assert events[3].source == "api.strategies.stop_by_name"
 
 
 def test_audit_api_008_allocation_alert_mutations_persist_domain_events(session):

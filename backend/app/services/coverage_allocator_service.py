@@ -9,7 +9,7 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.models.promotion_request import PromotionRequest, PromotionRequestStatus
 from app.models.watchlist import WatchlistEntry, WatchlistStatus
-from app.services.domain_event_service import domain_event_service
+from app.services.audit_event_recorder import record_required_domain_event
 from app.services.watchlist_service import WatchlistService
 
 logger = get_logger(__name__)
@@ -105,6 +105,29 @@ class CoverageAllocatorService:
                 rejected += 1
                 continue
 
+            previous_state = request.status
+            request.status = PromotionRequestStatus.ACCEPTED.value
+            request.updated_at = decided_at
+            self.session.add(request)
+            record_required_domain_event(
+                session=self.session,
+                event_type="coverage.promotion_accepted",
+                category="coverage",
+                severity="info",
+                source="coverage_allocator.allocate_pending_promotions",
+                title="Promotion request accepted",
+                message=f"{request.instrument} promoted into Tier 1 coverage.",
+                instrument=request.instrument,
+                actor_type="service",
+                actor_id="coverage_allocator",
+                payload_json={
+                    "promotion_request_id": request.id,
+                    "previous_state": previous_state,
+                    "new_state": request.status,
+                    "score": request.score,
+                },
+                created_at=decided_at,
+            )
             self.watchlist_service.promote_instrument(
                 instrument=request.instrument,
                 promoted_at=decided_at,
@@ -117,25 +140,6 @@ class CoverageAllocatorService:
                 requested_frequency=request.requested_frequency
                 or self.settings.ig_streaming_requested_frequency,
                 reason="promotion_accepted",
-            )
-            request.status = PromotionRequestStatus.ACCEPTED.value
-            request.updated_at = decided_at
-            self.session.add(request)
-            domain_event_service.record_event(
-                event_type="coverage.promotion_accepted",
-                category="coverage",
-                severity="info",
-                source="coverage_allocator.allocate_pending_promotions",
-                title="Promotion request accepted",
-                message=f"{request.instrument} promoted into Tier 1 coverage.",
-                instrument=request.instrument,
-                actor_type="service",
-                actor_id="coverage_allocator",
-                payload_json={
-                    "promotion_request_id": request.id,
-                    "score": request.score,
-                },
-                created_at=decided_at,
             )
             accepted += 1
             remaining_budget -= 1
@@ -198,10 +202,12 @@ class CoverageAllocatorService:
     def _reject_request(
         self, *, request: PromotionRequest, decided_at: datetime, reason_code: str
     ) -> None:
+        previous_state = request.status
         request.status = PromotionRequestStatus.REJECTED.value
         request.updated_at = decided_at
         self.session.add(request)
-        domain_event_service.record_event(
+        record_required_domain_event(
+            session=self.session,
             event_type="coverage.promotion_rejected",
             category="coverage",
             severity="info",
@@ -213,6 +219,8 @@ class CoverageAllocatorService:
             actor_id="coverage_allocator",
             payload_json={
                 "promotion_request_id": request.id,
+                "previous_state": previous_state,
+                "new_state": request.status,
                 "score": request.score,
                 "reason_code": reason_code,
             },

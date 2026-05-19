@@ -14,6 +14,7 @@ from app.core.runtime import runtime_manager
 from app.strategies.base import ScreeningSnapshot
 from app.strategies.registry import strategy_registry
 from app.db.session import engine
+from app.services.audit_event_recorder import record_required_domain_event
 from app.services.broker_service import BrokerService
 from app.services.coverage_allocator_service import CoverageAllocatorService
 from app.services.domain_event_service import domain_event_service
@@ -82,7 +83,7 @@ class MarketDataService:
             BrokerService().reconcile_positions(session)
             strategy_service = StrategyService(session)
             for instrument in active_instruments:
-                self._update_polling_health_transition(instrument)
+                self._update_polling_health_transition(instrument, session=session)
                 if not self._should_poll_instrument(instrument):
                     continue
                 instrument_engines = runtime_manager.get_engines_for_instrument(
@@ -172,7 +173,8 @@ class MarketDataService:
                     if intent is not None
                 ]
                 top_intent = max(intents, key=lambda intent: intent.score, default=None)
-                domain_event_service.record_event(
+                record_required_domain_event(
+                    session=session,
                     event_type="market.tier2_refreshed",
                     category="market",
                     severity="info",
@@ -180,6 +182,8 @@ class MarketDataService:
                     title="Tier 2 market refresh completed",
                     message=f"Tier 2 refresh evaluated {instrument}.",
                     instrument=instrument,
+                    actor_type="service",
+                    actor_id="market_data_service",
                     payload_json={
                         "scanner_count": len(self._screeners),
                         "promotion_score": top_intent.score
@@ -211,7 +215,8 @@ class MarketDataService:
                     requested_frequency=top_intent.requested_frequency
                     or self.settings.ig_streaming_requested_frequency,
                 )
-                domain_event_service.record_event(
+                record_required_domain_event(
+                    session=session,
                     event_type="coverage.promotion_requested",
                     category="coverage",
                     severity="info",
@@ -223,6 +228,8 @@ class MarketDataService:
                     actor_id=top_intent.scanner_name,
                     payload_json={
                         "promotion_request_id": request.id,
+                        "previous_state": "NOT_REQUESTED",
+                        "new_state": request.status,
                         "score": top_intent.score,
                         "source": top_intent.scanner_name,
                         "reason": top_intent.reason,
@@ -242,13 +249,16 @@ class MarketDataService:
                     allocation_result.expired,
                 ]
             ):
-                domain_event_service.record_event(
+                record_required_domain_event(
+                    session=session,
                     event_type="coverage.allocation_cycle_completed",
                     category="coverage",
                     severity="info",
                     source="market_data_service.tier2_refresh",
                     title="Coverage allocation cycle completed",
                     message="Coverage allocator processed pending promotion requests.",
+                    actor_type="service",
+                    actor_id="market_data_service",
                     payload_json={
                         "accepted": allocation_result.accepted,
                         "rejected": allocation_result.rejected,
@@ -270,13 +280,16 @@ class MarketDataService:
                     deployment_result.emergency_stopped,
                 ]
             ):
-                domain_event_service.record_event(
+                record_required_domain_event(
+                    session=session,
                     event_type="control_plane.reconciliation_cycle_completed",
                     category="strategy",
                     severity="info",
                     source="market_data_service.tier2_refresh",
                     title="Autonomous deployment cycle completed",
                     message="Deployment manager evaluated approved strategy families.",
+                    actor_type="service",
+                    actor_id="market_data_service",
                     payload_json={
                         "deployed": deployment_result.deployed,
                         "paused": deployment_result.paused,
@@ -321,7 +334,9 @@ class MarketDataService:
         self.health_service.set_stream_connected(True)
         return None
 
-    def _update_polling_health_transition(self, instrument: str) -> None:
+    def _update_polling_health_transition(
+        self, instrument: str, *, session: Session | None = None
+    ) -> None:
         if self.poll_prices:
             return
 
@@ -367,7 +382,8 @@ class MarketDataService:
 
         if reason is not None and instrument not in self._fallback_active_instruments:
             self._fallback_active_instruments.add(instrument)
-            domain_event_service.record_event(
+            self._record_polling_health_event(
+                session=session,
                 event_type="health.polling_fallback_started",
                 category="health",
                 severity="warning",
@@ -375,12 +391,17 @@ class MarketDataService:
                 title="Polling fallback started",
                 message=f"Polling fallback activated for {instrument}.",
                 instrument=instrument,
-                payload_json=payload,
+                payload_json={
+                    **payload,
+                    "previous_state": "STREAM_HEALTHY",
+                    "new_state": "POLLING_FALLBACK",
+                },
             )
         if reason is None and instrument in self._fallback_active_instruments:
             self._fallback_active_instruments.remove(instrument)
             self._healthy_first_seen_at.pop(instrument, None)
-            domain_event_service.record_event(
+            self._record_polling_health_event(
+                session=session,
                 event_type="health.polling_fallback_stopped",
                 category="health",
                 severity="info",
@@ -388,14 +409,19 @@ class MarketDataService:
                 title="Polling fallback stopped",
                 message=f"Streaming resumed cleanly for {instrument}.",
                 instrument=instrument,
-                payload_json=payload,
+                payload_json={
+                    **payload,
+                    "previous_state": "POLLING_FALLBACK",
+                    "new_state": "STREAM_HEALTHY",
+                },
             )
         if (
             reason == "stale_stream"
             and instrument not in self._stale_stream_instruments
         ):
             self._stale_stream_instruments.add(instrument)
-            domain_event_service.record_event(
+            self._record_polling_health_event(
+                session=session,
                 event_type="health.stream_stale",
                 category="health",
                 severity="warning",
@@ -403,12 +429,17 @@ class MarketDataService:
                 title="Streaming data went stale",
                 message=f"Streaming data became stale for {instrument}.",
                 instrument=instrument,
-                payload_json=payload,
+                payload_json={
+                    **payload,
+                    "previous_state": "STREAM_FRESH",
+                    "new_state": "STREAM_STALE",
+                },
             )
         if reason != "stale_stream" and instrument in self._stale_stream_instruments:
             self._stale_stream_instruments.remove(instrument)
             self._healthy_first_seen_at.pop(instrument, None)
-            domain_event_service.record_event(
+            self._record_polling_health_event(
+                session=session,
                 event_type="health.stream_recovered",
                 category="health",
                 severity="info",
@@ -416,8 +447,22 @@ class MarketDataService:
                 title="Streaming data recovered",
                 message=f"Streaming data freshness recovered for {instrument}.",
                 instrument=instrument,
-                payload_json=payload,
+                payload_json={
+                    **payload,
+                    "previous_state": "STREAM_STALE",
+                    "new_state": "STREAM_RECOVERED",
+                },
             )
+
+    def _record_polling_health_event(
+        self, *, session: Session | None = None, **kwargs: object
+    ) -> None:
+        kwargs.setdefault("actor_type", "service")
+        kwargs.setdefault("actor_id", "market_data_service")
+        if session is None:
+            domain_event_service.record_event(**kwargs)
+            return
+        record_required_domain_event(session=session, **kwargs)
 
     @staticmethod
     def _now() -> datetime:

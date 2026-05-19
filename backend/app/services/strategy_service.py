@@ -30,6 +30,7 @@ from app.models.trade import (
     utc_now,
 )
 from app.strategies.registry import strategy_registry
+from app.services.audit_event_recorder import record_required_domain_event
 from app.services.trade_decision_service import (
     TradeDecisionResult,
     TradeDecisionService,
@@ -447,6 +448,11 @@ class StrategyService:
         # It resolves persisted runtime mode and deployment/open-risk context
         # before the engine is created, so callers should not bypass it by
         # invoking `runtime_manager.start(...)` directly.
+        previous_runtime = (
+            self.runtime_state_service.get_runtime(strategy_name, instrument)
+            if self.runtime_state_service is not None
+            else None
+        )
         resolved_runtime_mode = self._resolve_runtime_start_mode(
             strategy_name=strategy_name,
             instrument=instrument,
@@ -477,7 +483,7 @@ class StrategyService:
                 ),
                 current_position=engine.current_position,
             )
-        self.event_service.record_event(
+        self._record_domain_event(
             event_type="strategy.runtime_started",
             category="strategy",
             severity="info",
@@ -487,7 +493,15 @@ class StrategyService:
             runtime_id=engine.runtime_id,
             strategy_name=strategy_name,
             instrument=instrument,
+            actor_type="service",
+            actor_id="strategy_service",
             payload_json={
+                "previous_state": (
+                    previous_runtime.status
+                    if previous_runtime is not None
+                    else "NOT_RUNNING"
+                ),
+                "new_state": "RUNNING",
                 "status": "RUNNING",
                 "control_mode": control_mode,
                 "runtime_mode": resolved_runtime_mode,
@@ -555,6 +569,7 @@ class StrategyService:
             raise ValueError(
                 f"No active engine for strategy '{strategy_name}' on '{instrument}'."
             )
+        previous_runtime_mode = getattr(engine, "runtime_mode", None)
         engine.runtime_mode = runtime_mode
         persisted_runtime = None
         if self.runtime_state_service is not None:
@@ -571,7 +586,7 @@ class StrategyService:
                 current_position=engine.current_position,
                 recovery_reason=recovery_reason,
             )
-        self.event_service.record_event(
+        self._record_domain_event(
             event_type="strategy.runtime_mode_changed",
             category="strategy",
             severity="warning" if runtime_mode == "EXITS_ONLY" else "info",
@@ -581,7 +596,11 @@ class StrategyService:
             runtime_id=engine.runtime_id,
             strategy_name=strategy_name,
             instrument=instrument,
+            actor_type="service",
+            actor_id="strategy_service",
             payload_json={
+                "previous_runtime_mode": previous_runtime_mode,
+                "new_runtime_mode": runtime_mode,
                 "runtime_mode": runtime_mode,
                 "control_mode": (
                     persisted_runtime.control_mode
@@ -602,7 +621,7 @@ class StrategyService:
             for engine in stopped_engines:
                 self.runtime_state_service.mark_stopped(engine.runtime_id)
         for engine in stopped_engines:
-            self.event_service.record_event(
+            self._record_domain_event(
                 event_type="strategy.runtime_stopped",
                 category="strategy",
                 severity="info",
@@ -612,9 +631,21 @@ class StrategyService:
                 runtime_id=engine.runtime_id,
                 strategy_name=engine.strategy.name,
                 instrument=engine.instrument,
-                payload_json={"status": "STOPPED"},
+                actor_type="service",
+                actor_id="strategy_service",
+                payload_json={
+                    "previous_state": "RUNNING",
+                    "new_state": "STOPPED",
+                    "status": "STOPPED",
+                },
             )
         self._refresh_paused_strategy_count()
+
+    def _record_domain_event(self, **kwargs: object) -> None:
+        if self.session is None:
+            self.event_service.record_event(**kwargs)
+            return
+        record_required_domain_event(session=self.session, **kwargs)
 
     def _refresh_paused_strategy_count(self) -> None:
         if self.runtime_state_service is None:
@@ -892,7 +923,7 @@ class StrategyService:
                     )
                     if not should_submit:
                         continue
-                    self.event_service.record_event(
+                    self._record_domain_event(
                         event_type="strategy.entry_candidate",
                         category="strategy",
                         severity="info",
@@ -903,6 +934,8 @@ class StrategyService:
                         strategy_name=signal.strategy_name,
                         instrument=signal.instrument,
                         execution_id=execution.id,
+                        actor_type="service",
+                        actor_id="strategy_service",
                         payload_json={
                             "trade_intent_id": intent.id,
                             "direction": signal.direction.value,
@@ -1100,7 +1133,7 @@ class StrategyService:
                 )
                 if not should_submit:
                     continue
-                self.event_service.record_event(
+                self._record_domain_event(
                     event_type="strategy.exit_candidate",
                     category="strategy",
                     severity="info",
@@ -1114,6 +1147,8 @@ class StrategyService:
                     if signal.position is not None
                     else None,
                     execution_id=execution.id,
+                    actor_type="service",
+                    actor_id="strategy_service",
                     payload_json={
                         "trade_intent_id": intent.id,
                         "observed_price": signal.observed_price,
@@ -2740,7 +2775,8 @@ class StrategyService:
                     },
                 },
             )
-            domain_event_service.record_event(
+            record_required_domain_event(
+                session=trade_service.session,
                 event_type="execution.partial_fill_requires_review",
                 category="execution",
                 severity="warning",
@@ -2752,8 +2788,12 @@ class StrategyService:
                 instrument=signal.instrument,
                 position_id=persisted_position.id,
                 execution_id=execution.id,
+                actor_type="service",
+                actor_id="strategy_service",
                 payload_json={
                     "trade_intent_id": intent.id,
+                    "previous_state": ExecutionStatus.FILL_PARTIAL.value,
+                    "new_state": ExecutionStatus.NEEDS_MANUAL_REVIEW.value,
                     "submitted_size": size_validation.normalized_size,
                     "filled_size": filled_size,
                     "residual_size": residual_size,
@@ -2835,7 +2875,8 @@ class StrategyService:
                 "material_execution_drift"
             )
         ):
-            domain_event_service.record_event(
+            record_required_domain_event(
+                session=trade_service.session,
                 event_type="allocation.execution_drift_detected",
                 category="allocation",
                 severity=(
@@ -2855,6 +2896,8 @@ class StrategyService:
                 instrument=signal.instrument,
                 position_id=persisted_position.id,
                 execution_id=execution.id,
+                actor_type="service",
+                actor_id="strategy_service",
                 payload_json={
                     "trade_intent_id": intent.id,
                     "risk_reconciliation": fill_risk_reconciliation,
@@ -3345,7 +3388,8 @@ class StrategyService:
                 duplicate_details["blocked_duplicate_client_request_id"] = (
                     reusable_execution.client_request_id
                 )
-                domain_event_service.record_event(
+                record_required_domain_event(
+                    session=trade_service.session,
                     event_type="execution.retry_suppressed",
                     category="execution",
                     severity="warning",
@@ -3359,7 +3403,13 @@ class StrategyService:
                     strategy_name=strategy_name,
                     instrument=instrument,
                     execution_id=reusable_execution.id,
-                    payload_json=duplicate_details,
+                    actor_type="service",
+                    actor_id="strategy_service",
+                    payload_json={
+                        **duplicate_details,
+                        "previous_state": reusable_execution.status,
+                        "new_state": ExecutionStatus.NEEDS_MANUAL_REVIEW.value,
+                    },
                 )
                 return (
                     trade_service.transition_execution(
@@ -3382,7 +3432,8 @@ class StrategyService:
                 phase == ExecutionPhase.CLOSE.value
                 and reusable_execution.status not in cls.SAFE_CLOSE_RETRY_STATUSES
             ):
-                domain_event_service.record_event(
+                record_required_domain_event(
+                    session=trade_service.session,
                     event_type="execution.retry_suppressed",
                     category="execution",
                     severity="warning",
@@ -3394,7 +3445,13 @@ class StrategyService:
                     instrument=instrument,
                     position_id=local_position_id,
                     execution_id=reusable_execution.id,
-                    payload_json=duplicate_details,
+                    actor_type="service",
+                    actor_id="strategy_service",
+                    payload_json={
+                        **duplicate_details,
+                        "previous_state": reusable_execution.status,
+                        "new_state": ExecutionStatus.NEEDS_MANUAL_REVIEW.value,
+                    },
                 )
                 return (
                     trade_service.transition_execution(

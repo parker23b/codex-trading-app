@@ -23,6 +23,7 @@ from app.core.broker import (
     BrokerOrderStatus,
     BrokerRiskSizingQuote,
 )
+from app.models.domain_event import DomainEvent
 from app.models.runtime import StrategyRuntimeState
 from app.models.strategy_deployment import StrategyDeployment
 from app.models.trade import (
@@ -42,6 +43,10 @@ from tests.fakes import make_order_result
 
 INSTRUMENT = "CS.D.EURUSD.MINI.IP"
 STRATEGY = "smoke_test_hold"
+
+
+def _domain_events(session) -> list[DomainEvent]:
+    return list(session.exec(select(DomainEvent).order_by(DomainEvent.id)))
 
 
 def _enable_live_operational_context(
@@ -100,6 +105,38 @@ def test_start_and_stop_strategy_persists_runtime_state(session):
     ).one()
     assert stopped_runtime.status == "STOPPED"
     assert stopped_runtime.recovery_state == "PAUSED"
+
+
+def test_audit_test_002_strategy_start_stop_persist_session_bound_domain_events(
+    session,
+):
+    service = StrategyService(session)
+
+    service.start_strategy(STRATEGY, INSTRUMENT)
+    runtime = session.exec(
+        select(StrategyRuntimeState)
+        .where(StrategyRuntimeState.strategy_name == STRATEGY)
+        .where(StrategyRuntimeState.instrument == INSTRUMENT)
+    ).one()
+    service.stop_strategy(instrument=INSTRUMENT, strategy_name=STRATEGY)
+
+    events = _domain_events(session)
+    assert [event.event_type for event in events] == [
+        "strategy.runtime_started",
+        "strategy.runtime_stopped",
+    ]
+    assert events[0].runtime_id == runtime.runtime_id
+    assert events[0].actor_type == "service"
+    assert events[0].actor_id == "strategy_service"
+    assert events[0].payload_json["previous_state"] == "NOT_RUNNING"
+    assert events[0].payload_json["new_state"] == "RUNNING"
+    assert events[0].payload_json["control_mode"] == "MANUAL"
+    assert events[0].payload_json["runtime_mode"] == "NORMAL"
+    assert events[1].runtime_id == runtime.runtime_id
+    assert events[1].actor_type == "service"
+    assert events[1].actor_id == "strategy_service"
+    assert events[1].payload_json["previous_state"] == "RUNNING"
+    assert events[1].payload_json["new_state"] == "STOPPED"
 
 
 def test_prepare_execution_reuses_existing_entry_attempt_for_same_opportunity(
@@ -195,6 +232,67 @@ def test_audit_life_001_blocks_submitted_entry_duplicate_retry_until_review(
         "ent-submitted-request"
     )
     assert len(executions) == 1
+
+
+def test_audit_test_002_duplicate_entry_retry_suppression_persists_domain_event(
+    session, fixed_now
+):
+    trade_service = TradeService(session)
+    initial_execution = trade_service.create_execution(
+        Execution(
+            strategy_name="mean_reversion",
+            instrument=INSTRUMENT,
+            phase=ExecutionPhase.ENTRY.value,
+            status=ExecutionStatus.ORDER_SUBMITTED.value,
+            client_request_id="ent-submitted-request",
+            signal_time=fixed_now,
+            requested_size=1.0,
+            requested_price=100.0,
+            details={
+                "action_key": f"entry:mean_reversion:{INSTRUMENT}:BUY",
+                "direction": "BUY",
+            },
+        )
+    )
+
+    execution, should_submit = StrategyService._prepare_execution(
+        trade_service=trade_service,
+        strategy_name="mean_reversion",
+        instrument=INSTRUMENT,
+        phase=ExecutionPhase.ENTRY.value,
+        signal_time=fixed_now + timedelta(seconds=5),
+        requested_size=1.0,
+        requested_price=100.2,
+        reason="Entry signal generated",
+        details={
+            "action_key": f"entry:mean_reversion:{INSTRUMENT}:BUY",
+            "direction": "BUY",
+        },
+    )
+
+    events = _domain_events(session)
+    assert should_submit is False
+    assert [event.event_type for event in events] == [
+        "execution.retry_suppressed",
+        "execution.order_rejected",
+    ]
+    retry_event = events[0]
+    assert retry_event.category == "execution"
+    assert retry_event.severity == "warning"
+    assert retry_event.source == "strategy_service.prepare_execution"
+    assert retry_event.actor_type == "service"
+    assert retry_event.actor_id == "strategy_service"
+    assert retry_event.correlation_id == "ent-submitted-request"
+    assert retry_event.execution_id == initial_execution.id
+    assert retry_event.strategy_name == "mean_reversion"
+    assert retry_event.instrument == INSTRUMENT
+    assert retry_event.payload_json["previous_state"] == "ORDER_SUBMITTED"
+    assert retry_event.payload_json["new_state"] == "NEEDS_MANUAL_REVIEW"
+    assert retry_event.payload_json["blocked_duplicate_client_request_id"] == (
+        "ent-submitted-request"
+    )
+    assert retry_event.payload_json["duplicate_attempt_count"] == 1
+    assert execution.status == ExecutionStatus.NEEDS_MANUAL_REVIEW.value
 
 
 def test_prepare_execution_blocks_unsafe_duplicate_close_retry(session, fixed_now):

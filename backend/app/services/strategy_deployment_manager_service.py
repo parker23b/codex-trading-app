@@ -14,7 +14,7 @@ from app.models.strategy_governance import (
     StrategyFamilyGovernance,
 )
 from app.models.trade import Position
-from app.services.domain_event_service import domain_event_service
+from app.services.audit_event_recorder import record_required_domain_event
 from app.services.health_service import get_health_service
 from app.services.operator_control_service import OperatorControlService
 from app.services.operational_state_service import (
@@ -111,7 +111,8 @@ class StrategyDeploymentManagerService:
                             )
                     if restart_reason is not None:
                         deployment.last_restart_reason = restart_reason
-                        domain_event_service.record_event(
+                        record_required_domain_event(
+                            session=self.session,
                             event_type="control_plane.runtime_restarted",
                             category="strategy",
                             severity="info",
@@ -120,7 +121,10 @@ class StrategyDeploymentManagerService:
                             message=f"{governance.strategy_name} runtime restarted to apply deployment change.",
                             strategy_name=governance.strategy_name,
                             instrument=selected_instrument,
+                            actor_type="service",
+                            actor_id="strategy_deployment_manager",
                             payload_json={
+                                "deployment_id": deployment.id,
                                 "reason": restart_reason,
                                 "selected_profile": selected_profile,
                                 "selected_parameters": selected_parameters,
@@ -197,7 +201,8 @@ class StrategyDeploymentManagerService:
             if target_state in counts:
                 counts[target_state] += 1
             if target_state != previous_state:
-                domain_event_service.record_event(
+                record_required_domain_event(
+                    session=self.session,
                     event_type="control_plane.deployment_state_changed",
                     category="strategy",
                     severity="info",
@@ -206,7 +211,10 @@ class StrategyDeploymentManagerService:
                     message=f"{governance.strategy_name} moved from {previous_state} to {target_state}.",
                     strategy_name=governance.strategy_name,
                     instrument=selected_instrument,
+                    actor_type="service",
+                    actor_id="strategy_deployment_manager",
                     payload_json={
+                        "deployment_id": deployment.id,
                         "previous_state": previous_state,
                         "new_state": target_state,
                         "selected_profile": selected_profile,
@@ -570,7 +578,8 @@ class StrategyDeploymentManagerService:
             f"{len(open_positions)} open position(s) remain while exits are not operationally eligible; "
             f"deployment moved to {target_state} ({exit_block_reason})."
         )
-        domain_event_service.record_event(
+        record_required_domain_event(
+            session=self.session,
             event_type="risk.unmanaged_open_risk",
             category="risk",
             severity="error",
@@ -579,9 +588,18 @@ class StrategyDeploymentManagerService:
             message=f"{strategy_name} has open positions but no exit-capable AUTO runtime remains.",
             strategy_name=strategy_name,
             instrument=deployment.selected_instrument,
+            actor_type="service",
+            actor_id="strategy_deployment_manager",
             payload_json={
+                "deployment_id": deployment.id,
                 "deployment_state": target_state,
                 "deployment_reason": target_reason,
+                "previous_open_risk_management_state": (
+                    deployment.open_risk_management_state
+                ),
+                "new_open_risk_management_state": (
+                    OpenRiskManagementState.UNMANAGED_OPEN_RISK.value
+                ),
                 "open_position_count": len(open_positions),
                 "blocked_instruments": [
                     {"instrument": instrument, "exit_block_reason": block_reason}

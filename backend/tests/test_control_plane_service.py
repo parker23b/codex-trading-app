@@ -6,6 +6,7 @@ from sqlmodel import select
 
 from app.core.broker import BrokerOrderResult, BrokerOrderStatus, OrderDirection
 from app.core.runtime import runtime_manager
+from app.models.domain_event import DomainEvent
 from app.models.runtime import StrategyRuntimeState
 from app.models.strategy_deployment import StrategyDeployment
 from app.models.strategy_governance import StrategyFamilyGovernance
@@ -29,6 +30,10 @@ from app.services.strategy_deployment_manager_service import (
 )
 from app.services.strategy_governance_service import StrategyGovernanceService
 from app.services.strategy_service import StrategyService
+
+
+def _domain_events(session) -> list[DomainEvent]:
+    return list(session.exec(select(DomainEvent).order_by(DomainEvent.id)))
 
 
 def _force_deployable_candidate(
@@ -328,6 +333,76 @@ def test_reconcile_auto_deploys_approved_autonomous_strategy(
     assert control_plane_family["alignment"]["is_aligned"] is True
 
 
+def test_audit_test_002_deployment_reconcile_persists_session_bound_domain_events(
+    session, broker, fixed_now
+):
+    health_service = get_health_service()
+    health_service.update_broker_state(connected=True, latency_ms=2.0)
+    health_service.set_stream_connected(True)
+    health_service.record_price_update(fixed_now, stream_connected=True)
+    governance_service = StrategyGovernanceService(session)
+    governance_service.ensure_defaults()
+    governance_service.upsert_strategy(
+        strategy_name="mean_reversion",
+        autonomous_operation_allowed=True,
+        approved_asset_classes=["INDICES"],
+        approved_instruments=["IX.D.FTSE.DAILY.IP"],
+        approved_profile_names=["fast"],
+    )
+    manager = StrategyDeploymentManagerService(session)
+    manager.settings.autonomous_control_enabled = True
+    _force_deployable_candidate(manager, instrument="IX.D.FTSE.DAILY.IP")
+
+    manager.reconcile(now=fixed_now)
+
+    deployment = session.exec(
+        select(StrategyDeployment).where(
+            StrategyDeployment.strategy_name == "mean_reversion"
+        )
+    ).one()
+    runtime = session.exec(
+        select(StrategyRuntimeState).where(
+            StrategyRuntimeState.strategy_name == "mean_reversion"
+        )
+    ).one()
+    events = _domain_events(session)
+    mean_reversion_events = [
+        event
+        for event in events
+        if event.strategy_name == "mean_reversion"
+        and event.event_type
+        in {
+            "strategy.runtime_started",
+            "strategy.runtime_mode_changed",
+            "control_plane.runtime_restarted",
+            "control_plane.deployment_state_changed",
+        }
+    ]
+    assert [event.event_type for event in mean_reversion_events] == [
+        "strategy.runtime_started",
+        "strategy.runtime_mode_changed",
+        "control_plane.runtime_restarted",
+        "control_plane.deployment_state_changed",
+    ]
+    assert mean_reversion_events[0].runtime_id == runtime.runtime_id
+    assert mean_reversion_events[0].actor_type == "service"
+    assert mean_reversion_events[0].actor_id == "strategy_service"
+    assert mean_reversion_events[0].payload_json["previous_state"] == "NOT_RUNNING"
+    assert mean_reversion_events[0].payload_json["new_state"] == "RUNNING"
+    assert mean_reversion_events[1].payload_json["previous_runtime_mode"] == "NORMAL"
+    assert mean_reversion_events[1].payload_json["new_runtime_mode"] == "NORMAL"
+    assert mean_reversion_events[2].source == "strategy_deployment_manager.reconcile"
+    assert mean_reversion_events[2].strategy_name == "mean_reversion"
+    assert mean_reversion_events[2].instrument == "IX.D.FTSE.DAILY.IP"
+    assert mean_reversion_events[2].payload_json["deployment_id"] == deployment.id
+    assert mean_reversion_events[2].payload_json["reason"] == (
+        "Runtime started with profile fast."
+    )
+    assert mean_reversion_events[3].payload_json["previous_state"] == "NOT_APPROVED"
+    assert mean_reversion_events[3].payload_json["new_state"] == "AUTO_DEPLOYED"
+    assert mean_reversion_events[3].payload_json["deployment_id"] == deployment.id
+
+
 def test_reconcile_emergency_stop_blocks_and_stops_auto_runtime(
     session, broker, fixed_now
 ):
@@ -606,6 +681,73 @@ def test_reconcile_flags_unmanaged_open_risk_when_exits_not_eligible(
     assert family["deployment"]["open_risk_management_state"] == "UNMANAGED_OPEN_RISK"
     assert telemetry["open_risk_management_state"] == "UNMANAGED_OPEN_RISK"
     assert "open position" in (deployment.open_risk_management_reason or "").lower()
+
+
+def test_audit_test_002_unmanaged_open_risk_persists_domain_event(
+    session, broker, fixed_now, monkeypatch
+):
+    _enable_live_exit_context(monkeypatch, fixed_now)
+    governance_service = StrategyGovernanceService(session)
+    governance_service.ensure_defaults()
+    governance_service.upsert_strategy(
+        strategy_name="mean_reversion",
+        autonomous_operation_allowed=True,
+        approved_asset_classes=["INDICES"],
+        approved_instruments=["IX.D.FTSE.DAILY.IP"],
+        approved_profile_names=["default"],
+    )
+    manager = StrategyDeploymentManagerService(session)
+    manager.settings.autonomous_control_enabled = True
+    _force_deployable_candidate(manager, instrument="IX.D.FTSE.DAILY.IP")
+    manager.reconcile(now=fixed_now)
+    _attach_open_position(
+        session,
+        strategy_name="mean_reversion",
+        instrument="IX.D.FTSE.DAILY.IP",
+        at=fixed_now,
+    )
+    blocked_snapshot = OperationalStateSnapshot(
+        feed_source_state=FeedSourceState.DISCONNECTED,
+        feed_health_state=FeedHealthState.FAILED,
+        broker_connectivity_state=BrokerConnectivityState.DISCONNECTED,
+        entry_eligible=False,
+        exit_eligible=False,
+        entry_eligibility_state=ExecutionEligibilityState.BLOCKED,
+        exit_eligibility_state=ExecutionEligibilityState.BLOCKED,
+        entry_block_reason="broker_disconnected",
+        exit_block_reason="broker_disconnected",
+        open_risk_management_state=OpenRiskManagementState.UNMANAGED_OPEN_RISK,
+        open_risk_management_reason="broker_disconnected",
+    )
+    manager.operational_state_service.get_summary = lambda: blocked_snapshot
+    manager.operational_state_service.get_summary_for_instrument = lambda instrument: (
+        blocked_snapshot
+    )
+
+    governance_service.upsert_strategy(
+        strategy_name="mean_reversion", emergency_stop=True
+    )
+    manager.reconcile(now=fixed_now + timedelta(minutes=1))
+
+    events = _domain_events(session)
+    unmanaged_events = [
+        event for event in events if event.event_type == "risk.unmanaged_open_risk"
+    ]
+    assert len(unmanaged_events) == 1
+    event = unmanaged_events[0]
+    assert event.category == "risk"
+    assert event.severity == "error"
+    assert event.actor_type == "service"
+    assert event.actor_id == "strategy_deployment_manager"
+    assert event.strategy_name == "mean_reversion"
+    assert event.payload_json["previous_open_risk_management_state"] != (
+        "UNMANAGED_OPEN_RISK"
+    )
+    assert event.payload_json["new_open_risk_management_state"] == (
+        "UNMANAGED_OPEN_RISK"
+    )
+    assert event.payload_json["deployment_state"] == "EMERGENCY_STOPPED"
+    assert event.payload_json["exit_block_reason"] == "broker_disconnected"
 
 
 def test_reconcile_rotation_keeps_old_open_risk_exit_capable(
