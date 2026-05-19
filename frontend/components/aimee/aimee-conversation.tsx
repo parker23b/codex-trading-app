@@ -36,8 +36,11 @@ export function AimeeConversation({
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-[0.82rem] font-semibold uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">
-            Questions
+            Advisory questions
           </h3>
+          <p className="mt-1 text-[0.74rem] text-[color:var(--text-tertiary)]">
+            Creates advisory review record. Passive AIMEE context stays read-only.
+          </p>
         </div>
       </div>
 
@@ -60,9 +63,15 @@ export function AimeeConversation({
                 <button
                   key={`empty-${question}`}
                   type="button"
-                  className="rounded-[10px] border border-[color:var(--border)] bg-[color:var(--bg-surface)] px-3 py-2 text-left text-[0.76rem] text-[color:var(--text-secondary)] transition-colors duration-150 hover:bg-[color:var(--bg-muted)] hover:text-[color:var(--text-primary)]"
-                  onClick={() => void onSubmitQuestion(question)}>
-                  {question}
+                  className="flex max-w-[18rem] flex-col gap-1 rounded-[10px] border border-[color:var(--border)] bg-[color:var(--bg-surface)] px-3 py-2 text-left transition-colors duration-150 hover:bg-[color:var(--bg-muted)] hover:text-[color:var(--text-primary)]"
+                  onClick={() => void onSubmitQuestion(question)}
+                  aria-label={`Ask AIMEE advisory question: ${question.replace(/[?.!]+$/, "")}. Creates an advisory review record.`}>
+                  <span className="text-[0.76rem] text-[color:var(--text-secondary)]">
+                    {question}
+                  </span>
+                  <span className="text-[0.64rem] uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">
+                    Ask & record advisory
+                  </span>
                 </button>
               ))}
             </div>
@@ -210,7 +219,7 @@ export function AimeeConversation({
             type="submit"
             className="inline-flex h-11 shrink-0 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--accent)_32%,var(--border))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--accent-soft)_70%,white_18%),color-mix(in_srgb,var(--accent-soft)_94%,transparent))] px-4 text-[0.82rem] font-semibold text-[color:var(--text-primary)] shadow-[var(--shadow-soft)] transition-transform duration-150 hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!inputValue.trim()}>
-            Ask
+            Ask & record
           </button>
         </div>
       </form>

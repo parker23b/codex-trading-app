@@ -62,6 +62,7 @@ function compileRenderedModules() {
       },
       files: [
         path.join(frontendRoot, "components", "aimee", "aimee-overview.tsx"),
+        path.join(frontendRoot, "components", "aimee", "aimee-conversation.tsx"),
         path.join(frontendRoot, "components", "aimee", "utils.ts"),
         path.join(frontendRoot, "components", "aimee", "types.ts"),
         path.join(frontendRoot, "components", "control-plane", "control-plane-live.tsx"),
@@ -764,6 +765,34 @@ test("AUDIT-UI-006 rendered AIMEE events summary does not convert missing teleme
       assert.doesNotMatch(html, /0 reconciliation issue/i);
       assert.doesNotMatch(html, /0 order failure/i);
       assert.doesNotMatch(html, /Stream disconnected/i);
+    });
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("AUDIT-UI-004 rendered AIMEE advisory controls disclose review persistence before submission", () => {
+  const { tempRoot, outDir } = compileRenderedModules();
+  try {
+    withCompiledAliases(outDir, () => {
+      const conversation = require(path.join(outDir, "components", "aimee", "aimee-conversation.js"));
+
+      const html = renderComponent(conversation.AimeeConversation, {
+        isLoading: false,
+        loadingError: null,
+        messages: [],
+        suggestedQuestions: ["What needs my attention right now?"],
+        onSubmitQuestion: async () => {},
+        inputValue: "Explain current risk exposure",
+        onInputChange: () => {},
+        onSubmit: async () => {},
+      });
+
+      assert.match(html, /Advisory questions/i);
+      assert.match(html, /Creates advisory review record/i);
+      assert.match(html, /Ask &amp; record/i);
+      assert.match(html, /aria-label="Ask AIMEE advisory question: What needs my attention right now\. Creates an advisory review record\."/i);
+      assert.doesNotMatch(html, /<button[^>]*>\s*Ask\s*<\/button>/i);
     });
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
