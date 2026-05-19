@@ -657,6 +657,7 @@ class TradeService:
                 "account_type",
                 "is_open",
                 "broker_sync_status",
+                "close_execution_source",
                 "broker_open_confirmed_at",
                 "broker_closed_confirmed_at",
                 "last_reconciled_at",
@@ -680,6 +681,7 @@ class TradeService:
         close_time: datetime | None = None,
         pnl: float | None = None,
         broker_sync_status: str = "CONFIRMED",
+        close_execution_source: str | None = None,
         close_reason: str | None = None,
         broker_confirmed_at: datetime | None = None,
     ) -> Position:
@@ -698,6 +700,8 @@ class TradeService:
         )
         position.unrealized_pnl = 0.0
         position.broker_sync_status = broker_sync_status
+        if close_execution_source is not None:
+            position.close_execution_source = close_execution_source
         position.broker_closed_confirmed_at = (
             broker_confirmed_at or position.close_time or utc_now()
         )

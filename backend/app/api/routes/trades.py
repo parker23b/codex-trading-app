@@ -16,6 +16,7 @@ class TradeResponse(BaseModel):
     strategy_name: str
     broker_reference: str | None
     close_broker_reference: str | None
+    close_execution_source: str | None
     instrument: str
     direction: str
     size: float
@@ -38,6 +39,7 @@ def _serialize_trade(trade: Trade) -> TradeResponse:
         strategy_name=trade.strategy_name,
         broker_reference=trade.broker_reference,
         close_broker_reference=trade.close_broker_reference,
+        close_execution_source=trade.close_execution_source,
         instrument=trade.instrument,
         direction=trade.direction,
         size=trade.size,
@@ -94,6 +96,8 @@ def list_positions_compat(
             "risk_percent": position.risk_percent,
             "entry_risk_amount": position.entry_risk_amount,
             "risk_truth_confidence": position.risk_truth_confidence,
+            "broker_sync_status": position.broker_sync_status,
+            "close_execution_source": position.close_execution_source,
             "reason": position.reason,
             "manual_override": position.manual_override,
             "time_in_trade_seconds": max(

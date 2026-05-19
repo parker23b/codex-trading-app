@@ -30,7 +30,10 @@ from app.models.trade import (
     utc_now,
 )
 from app.strategies.registry import strategy_registry
-from app.services.audit_event_recorder import record_required_domain_event
+from app.services.audit_event_recorder import (
+    AuditEventPersistenceError,
+    record_required_domain_event,
+)
 from app.services.trade_decision_service import (
     TradeDecisionResult,
     TradeDecisionService,
@@ -1209,7 +1212,16 @@ class StrategyService:
                         close_price=trade.close_price,
                         close_time=trade.close_time,
                         pnl=trade.pnl,
-                        broker_sync_status="CONFIRMED",
+                        broker_sync_status=(
+                            "CONFIRMED"
+                            if trade.close_execution_source
+                            == BrokerExecutionSource.BROKER_CONFIRMED.value
+                            else str(
+                                trade.close_execution_source
+                                or BrokerExecutionSource.BROKER_CONFIRMED.value
+                            )
+                        ),
+                        close_execution_source=trade.close_execution_source,
                         broker_confirmed_at=trade.close_time,
                     )
                     trade_service.transition_execution(
@@ -1259,6 +1271,12 @@ class StrategyService:
                     average_fill_price=trade.close_price,
                     filled_size=trade.size,
                     reason="Position close confirmed",
+                )
+                StrategyService._record_close_broker_action_event(
+                    trade_service=trade_service,
+                    execution=execution,
+                    trade_intent=intent,
+                    trade=persisted_trade,
                 )
                 if self.runtime_state_service is not None:
                     self.runtime_state_service.sync_engine_state(
@@ -3021,6 +3039,7 @@ class StrategyService:
             completed_reason="Close fill received",
         )
         if closed_order.status is not BrokerOrderStatus.FILLED:
+            previous_close_state = execution.status
             trade_service.transition_execution(
                 execution,
                 status=ExecutionStatus.NEEDS_MANUAL_REVIEW,
@@ -3036,6 +3055,18 @@ class StrategyService:
                 close_reason_code="close_incomplete",
                 close_reason="Close did not complete fully.",
                 completed_at=closed_order.executed_at,
+            )
+            StrategyService._record_close_broker_action_event(
+                trade_service=trade_service,
+                execution=execution,
+                trade_intent=intent,
+                trade=None,
+                event_type="broker.close_requires_manual_review",
+                severity="error",
+                title="Broker close requires manual review",
+                message=f"{signal.strategy_name} close on {signal.instrument} did not complete fully.",
+                previous_state=previous_close_state,
+                new_state=ExecutionStatus.NEEDS_MANUAL_REVIEW.value,
             )
             raise RuntimeError(
                 f"Close order for {signal.instrument} did not complete fully."
@@ -3062,6 +3093,7 @@ class StrategyService:
             pnl=pnl,
             entry_risk_amount=engine.current_position.entry_risk_amount,
             risk_truth_confidence=engine.current_position.risk_truth_confidence,
+            close_execution_source=closed_order.execution_source.value,
             account_type=engine.current_position.account_type,
         )
         engine.current_position.is_open = False
@@ -3168,6 +3200,110 @@ class StrategyService:
         if order.execution_source is BrokerExecutionSource.BROKER_CONFIRMED:
             return "CONFIRMED"
         return order.execution_source.value
+
+    @staticmethod
+    def _record_close_broker_action_event(
+        *,
+        trade_service: TradeService,
+        execution: Execution,
+        trade_intent: TradeIntent,
+        trade: Trade | None,
+        event_type: str = "broker.close_confirmed",
+        severity: str = "info",
+        title: str = "Broker close confirmed",
+        message: str | None = None,
+        previous_state: str = ExecutionStatus.FILL_FULL.value,
+        new_state: str = ExecutionStatus.CLOSE_CONFIRMED.value,
+    ) -> None:
+        broker_result = (execution.details or {}).get("broker_result")
+        source = "strategy_service.execute_exit_signal"
+        strategy_name = (
+            trade.strategy_name if trade is not None else execution.strategy_name
+        )
+        instrument = trade.instrument if trade is not None else execution.instrument
+        close_time = trade.close_time if trade is not None else execution.completed_at
+        close_execution_source = (
+            trade.close_execution_source if trade is not None else None
+        ) or (
+            str(broker_result.get("execution_source"))
+            if isinstance(broker_result, dict)
+            and broker_result.get("execution_source") is not None
+            else BrokerExecutionSource.BROKER_CONFIRMED.value
+        )
+        try:
+            record_required_domain_event(
+                session=trade_service.session,
+                event_type=event_type,
+                category="execution",
+                severity=severity,
+                source=source,
+                title=title,
+                message=message or f"{strategy_name} close on {instrument} completed.",
+                correlation_id=execution.client_request_id,
+                strategy_name=strategy_name,
+                instrument=instrument,
+                position_id=execution.local_position_id,
+                trade_id=trade.id if trade is not None else None,
+                execution_id=execution.id,
+                actor_type="service",
+                actor_id="strategy_service",
+                payload_json={
+                    "trade_intent_id": trade_intent.id,
+                    "previous_state": previous_state,
+                    "new_state": new_state,
+                    "close_broker_reference": execution.broker_reference,
+                    "execution_source": close_execution_source,
+                    "broker_reference": trade.broker_reference
+                    if trade is not None
+                    else None,
+                    "size": trade.size if trade is not None else execution.filled_size,
+                    "close_price": trade.close_price
+                    if trade is not None
+                    else execution.average_fill_price,
+                    "pnl": trade.pnl if trade is not None else None,
+                    "broker_result": broker_result
+                    if isinstance(broker_result, dict)
+                    else {},
+                },
+                created_at=close_time,
+            )
+        except AuditEventPersistenceError:
+            StrategyService._mark_execution_audit_persistence_failure(
+                trade_service=trade_service,
+                execution=execution,
+                event_type=event_type,
+                source=source,
+                previous_state=previous_state,
+                new_state=new_state,
+            )
+
+    @staticmethod
+    def _mark_execution_audit_persistence_failure(
+        *,
+        trade_service: TradeService,
+        execution: Execution,
+        event_type: str,
+        source: str,
+        previous_state: str | None,
+        new_state: str,
+    ) -> None:
+        details = dict(execution.details or {})
+        failures = list(details.get("audit_event_failures") or [])
+        failures.append(
+            {
+                "event_type": event_type,
+                "source": source,
+                "previous_state": previous_state,
+                "new_state": new_state,
+                "correlation_id": execution.client_request_id,
+            }
+        )
+        details["domain_event_persistence_failed"] = True
+        details["audit_event_failures"] = failures
+        execution.details = details
+        trade_service.session.add(execution)
+        trade_service.session.commit()
+        trade_service.session.refresh(execution)
 
     @staticmethod
     def _transition_execution_from_broker_result(

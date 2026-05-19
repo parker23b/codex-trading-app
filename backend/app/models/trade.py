@@ -30,6 +30,7 @@ class Trade(SQLModel, table=True):
     pnl: float = 0.0
     entry_risk_amount: float | None = None
     risk_truth_confidence: str | None = None
+    close_execution_source: str | None = Field(default=None, index=True)
     r_multiple: float | None = None
     outcome: str | None = None
     reason: str | None = None
@@ -130,6 +131,7 @@ class Position(SQLModel, table=True):
     account_type: str
     is_open: bool = True
     broker_sync_status: str = Field(default="PENDING", index=True)
+    close_execution_source: str | None = Field(default=None, index=True)
     broker_open_confirmed_at: datetime | None = None
     broker_closed_confirmed_at: datetime | None = None
     last_reconciled_at: datetime | None = None

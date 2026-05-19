@@ -1,3 +1,4 @@
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Trade } from "@/lib/types";
 
 type TradesTableProps = {
@@ -10,6 +11,28 @@ function formatNumber(value: number) {
 
 function formatSignedNumber(value: number) {
   return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
+}
+
+function closeSourceMeta(source?: string | null) {
+  if (source === "SIMULATED_LOCAL_CLOSE") {
+    return {
+      label: "Simulated local close",
+      tone: "warning" as const,
+      detail: "Local simulation; not broker-confirmed close truth.",
+    };
+  }
+  if (source === "BROKER_CONFIRMED") {
+    return {
+      label: "Broker confirmed",
+      tone: "positive" as const,
+      detail: "Close result came from broker-confirmed execution.",
+    };
+  }
+  return {
+    label: "Close source unknown",
+    tone: "warning" as const,
+    detail: "Backend did not provide close execution provenance.",
+  };
 }
 
 export function TradesTable({ trades }: TradesTableProps) {
@@ -27,6 +50,7 @@ export function TradesTable({ trades }: TradesTableProps) {
             <th>Direction</th>
             <th>Open</th>
             <th>Close</th>
+            <th>Close Source</th>
             <th>PnL</th>
           </tr>
         </thead>
@@ -40,6 +64,15 @@ export function TradesTable({ trades }: TradesTableProps) {
               </td>
               <td data-label="Open">{formatNumber(trade.open_price)}</td>
               <td data-label="Close">{formatNumber(trade.close_price)}</td>
+              <td data-label="Close Source">
+                <div className="cell-stack">
+                  <StatusBadge
+                    label={closeSourceMeta(trade.close_execution_source).label}
+                    tone={closeSourceMeta(trade.close_execution_source).tone}
+                  />
+                  <span className="muted">{closeSourceMeta(trade.close_execution_source).detail}</span>
+                </div>
+              </td>
               <td data-label="PnL" className={trade.pnl >= 0 ? "value-positive" : "value-negative"}>{formatSignedNumber(trade.pnl)}</td>
             </tr>
           ))}

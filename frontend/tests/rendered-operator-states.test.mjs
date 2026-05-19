@@ -68,6 +68,7 @@ function compileRenderedModules() {
         path.join(frontendRoot, "components", "control-plane", "control-plane-live.tsx"),
         path.join(frontendRoot, "components", "coverage", "coverage-live.tsx"),
         path.join(frontendRoot, "components", "dashboard", "dashboard-live.tsx"),
+        path.join(frontendRoot, "components", "dashboard", "recent-trades-table.tsx"),
         path.join(frontendRoot, "components", "live", "live-system-view.tsx"),
         path.join(frontendRoot, "components", "markets", "market-overview-dashboard.tsx"),
         path.join(frontendRoot, "components", "dashboard", "notification-center.tsx"),
@@ -75,6 +76,8 @@ function compileRenderedModules() {
         path.join(frontendRoot, "components", "strategy", "strategy-live.tsx"),
         path.join(frontendRoot, "components", "testing", "reset-history-button.tsx"),
         path.join(frontendRoot, "components", "console", "primitives.tsx"),
+        path.join(frontendRoot, "components", "trades-table.tsx"),
+        path.join(frontendRoot, "components", "ui", "status-badge.tsx"),
         path.join(frontendRoot, "lib", "api.ts"),
         path.join(frontendRoot, "lib", "execution-notifications.ts"),
         path.join(frontendRoot, "lib", "format.ts"),
@@ -161,6 +164,28 @@ function baseExecution(overrides = {}) {
     details: {},
     created_at: timestamp,
     updated_at: timestamp,
+    ...overrides,
+  };
+}
+
+function baseTrade(overrides = {}) {
+  return {
+    id: 12,
+    strategy_name: "Breakout",
+    broker_reference: "ENTRY-REF-1",
+    close_broker_reference: "CLOSE-REF-1",
+    close_execution_source: "BROKER_CONFIRMED",
+    instrument: "CS.D.EURUSD.MINI.IP",
+    direction: "BUY",
+    size: 1,
+    open_price: 1.08,
+    close_price: 1.09,
+    open_time: "2026-05-14T09:00:00.000Z",
+    close_time: "2026-05-14T10:00:00.000Z",
+    pnl: 100,
+    account_type: "DEMO",
+    r_multiple: 1.2,
+    reason: "Strategy exit triggered",
     ...overrides,
   };
 }
@@ -1374,6 +1399,32 @@ test("AUDIT-UI-006 rendered strategy open-position runtime keeps stop action pro
       assert.match(html, /Stopping this runtime does not close broker-confirmed open risk/i);
       assert.match(html, /Stop Runtime/i);
       assert.doesNotMatch(html, />Stop<\/button>/i);
+    });
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("AUDIT-LIFE-005 rendered trade tables label simulated close as local truth", () => {
+  const { tempRoot, outDir } = compileRenderedModules();
+  try {
+    withCompiledAliases(outDir, () => {
+      const tradesTable = require(path.join(outDir, "components", "trades-table.js"));
+      const recentTrades = require(path.join(outDir, "components", "dashboard", "recent-trades-table.js"));
+      const rows = [
+        baseTrade({
+          close_execution_source: "SIMULATED_LOCAL_CLOSE",
+          close_broker_reference: "local-close-1",
+        }),
+      ];
+
+      const allTradesHtml = renderComponent(tradesTable.TradesTable, { trades: rows });
+      const recentTradesHtml = renderComponent(recentTrades.RecentTradesTable, { trades: rows });
+      const html = `${allTradesHtml}${recentTradesHtml}`;
+
+      assert.match(html, /Simulated local close/i);
+      assert.match(html, /Local simulation; not broker-confirmed close truth/i);
+      assert.doesNotMatch(html, /Broker confirmed close truth/i);
     });
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });

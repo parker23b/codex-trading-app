@@ -104,6 +104,16 @@ function formatTimestamp(value?: string | null) {
   }).format(new Date(value));
 }
 
+function closeSourceLabel(source?: string | null) {
+  if (source === "SIMULATED_LOCAL_CLOSE") {
+    return "Simulated local close";
+  }
+  if (source === "BROKER_CONFIRMED") {
+    return "Broker confirmed";
+  }
+  return "Close source unknown";
+}
+
 function renderMetricOrUnavailable(
   value: string,
   unavailable: boolean,
@@ -909,6 +919,7 @@ export function DashboardLive({
               },
               { key: "side", header: "Side", render: (row) => row.direction },
               { key: "closed", header: "Closed", render: (row) => formatTimestamp(row.close_time) },
+              { key: "source", header: "Source", render: (row) => closeSourceLabel(row.close_execution_source) },
               { key: "pnl", header: "PnL", render: (row) => formatSignedCurrency(row.pnl) },
             ]}
           />

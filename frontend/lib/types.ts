@@ -1,8 +1,14 @@
+export type BrokerExecutionSource =
+  | "BROKER_CONFIRMED"
+  | "SIMULATED_LOCAL_FILL"
+  | "SIMULATED_LOCAL_CLOSE";
+
 export type Trade = {
   id: number;
   strategy_name: string;
   broker_reference?: string | null;
   close_broker_reference?: string | null;
+  close_execution_source?: BrokerExecutionSource | string | null;
   instrument: string;
   direction: "BUY" | "SELL";
   size: number;
@@ -83,6 +89,10 @@ export type Position = {
   current_price?: number | null;
   unrealized_pnl?: number | null;
   risk_percent?: number | null;
+  entry_risk_amount?: number | null;
+  risk_truth_confidence?: string | null;
+  broker_sync_status?: string | null;
+  close_execution_source?: BrokerExecutionSource | string | null;
   reason?: string | null;
   manual_override?: boolean;
 };

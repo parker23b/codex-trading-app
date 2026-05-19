@@ -28,6 +28,10 @@ class PositionResponse(BaseModel):
     current_price: float | None
     unrealized_pnl: float | None
     risk_percent: float | None
+    entry_risk_amount: float | None
+    risk_truth_confidence: str | None
+    broker_sync_status: str
+    close_execution_source: str | None
     reason: str | None
     manual_override: bool
     time_in_trade_seconds: int
@@ -52,6 +56,10 @@ def _serialize_position(position: Position) -> PositionResponse:
         current_price=position.current_price,
         unrealized_pnl=position.unrealized_pnl,
         risk_percent=position.risk_percent,
+        entry_risk_amount=position.entry_risk_amount,
+        risk_truth_confidence=position.risk_truth_confidence,
+        broker_sync_status=position.broker_sync_status,
+        close_execution_source=position.close_execution_source,
         reason=position.reason,
         manual_override=position.manual_override,
         time_in_trade_seconds=max(

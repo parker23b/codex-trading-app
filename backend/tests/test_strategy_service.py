@@ -17,6 +17,7 @@ from app.core.runtime import runtime_manager
 from app.core.signals import EntrySignal, SignalCandidate, SignalKind
 from sqlmodel import select
 
+from app.api.routes.trades import _serialize_trade
 from app.core.broker import (
     BrokerOrderResult,
     BrokerExecutionSource,
@@ -37,6 +38,7 @@ from app.models.trade import (
 from app.services.health_service import get_health_service
 from app.services.market_status_service import MarketStatus, get_market_status_service
 from app.services.strategy_service import StrategyService
+from app.services.domain_event_service import domain_event_service
 from app.services.trade_service import TradeService
 from tests.fakes import make_order_result
 
@@ -656,6 +658,344 @@ def test_audit_life_005_simulated_entry_persists_non_broker_provenance(
         BrokerExecutionSource.SIMULATED_LOCAL_FILL.value
     )
     assert persisted_position.broker_open_confirmed_at is None
+
+
+def test_audit_life_005_simulated_close_persists_non_broker_provenance(
+    session, broker, fixed_now
+):
+    service = StrategyService(session)
+    trade_service = TradeService(session)
+    service.start_strategy(STRATEGY, INSTRUMENT)
+    broker.place_order_outcomes.append(
+        BrokerOrderResult(
+            broker_reference="sim-entry-1",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.5,
+            executed_at=fixed_now + timedelta(seconds=1),
+            filled_size=0.2,
+            average_fill_price=100.5,
+            submitted_at=fixed_now + timedelta(seconds=1),
+            acknowledged_at=fixed_now + timedelta(seconds=1),
+            execution_source=BrokerExecutionSource.SIMULATED_LOCAL_FILL,
+        )
+    )
+    broker.close_position_outcomes.append(
+        BrokerOrderResult(
+            broker_reference="sim-close-1",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.SELL,
+            size=0.2,
+            price=101.0,
+            executed_at=fixed_now + timedelta(seconds=40),
+            filled_size=0.2,
+            average_fill_price=101.0,
+            submitted_at=fixed_now + timedelta(seconds=40),
+            acknowledged_at=fixed_now + timedelta(seconds=40),
+            execution_source=BrokerExecutionSource.SIMULATED_LOCAL_CLOSE,
+        )
+    )
+
+    service.process_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        100.5,
+        bid=100.49,
+        ask=100.51,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        101.0,
+        bid=100.99,
+        ask=101.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=40),
+    )
+
+    trade = trade_service.list_trades()[0]
+    execution = trade_service.list_executions(limit=1)[0]
+    closed_position = session.exec(select(Position)).one()
+    response = _serialize_trade(trade)
+
+    assert trade.close_execution_source == "SIMULATED_LOCAL_CLOSE"
+    assert closed_position.close_execution_source == "SIMULATED_LOCAL_CLOSE"
+    assert closed_position.broker_sync_status == "SIMULATED_LOCAL_CLOSE"
+    assert execution.status == ExecutionStatus.CLOSE_CONFIRMED.value
+    assert execution.details["broker_result"]["execution_source"] == (
+        "SIMULATED_LOCAL_CLOSE"
+    )
+    assert response.close_execution_source == "SIMULATED_LOCAL_CLOSE"
+
+
+def test_audit_test_002_successful_close_persists_broker_action_domain_event(
+    session, broker, fixed_now
+):
+    service = StrategyService(session)
+    trade_service = TradeService(session)
+    service.start_strategy(STRATEGY, INSTRUMENT)
+    broker.place_order_outcomes.append(
+        make_order_result(
+            broker_reference="entry-close-audit-1",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.5,
+            executed_at=fixed_now + timedelta(seconds=1),
+        )
+    )
+    broker.close_position_outcomes.append(
+        make_order_result(
+            broker_reference="close-audit-1",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.SELL,
+            size=0.2,
+            price=101.0,
+            executed_at=fixed_now + timedelta(seconds=40),
+        )
+    )
+
+    service.process_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        100.5,
+        bid=100.49,
+        ask=100.51,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        101.0,
+        bid=100.99,
+        ask=101.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=40),
+    )
+
+    trade = trade_service.list_trades()[0]
+    execution = trade_service.list_executions(limit=1)[0]
+    close_events = [
+        event
+        for event in _domain_events(session)
+        if event.event_type == "broker.close_confirmed"
+    ]
+
+    assert execution.status == ExecutionStatus.CLOSE_CONFIRMED.value
+    assert len(close_events) == 1
+    event = close_events[0]
+    assert event.category == "execution"
+    assert event.severity == "info"
+    assert event.source == "strategy_service.execute_exit_signal"
+    assert event.actor_type == "service"
+    assert event.actor_id == "strategy_service"
+    assert event.correlation_id == execution.client_request_id
+    assert event.strategy_name == STRATEGY
+    assert event.instrument == INSTRUMENT
+    assert event.execution_id == execution.id
+    assert event.position_id == execution.local_position_id
+    assert event.trade_id == trade.id
+    assert event.payload_json["trade_intent_id"] == trade.trade_intent_id
+    assert event.payload_json["previous_state"] == "FILL_FULL"
+    assert event.payload_json["new_state"] == "CLOSE_CONFIRMED"
+    assert event.payload_json["close_broker_reference"] == "close-audit-1"
+    assert event.payload_json["execution_source"] == "BROKER_CONFIRMED"
+    assert event.payload_json["broker_result"]["client_request_id"] == (
+        execution.client_request_id
+    )
+
+
+def test_audit_obs_001_close_audit_failure_marks_execution(
+    session, broker, fixed_now, monkeypatch
+):
+    service = StrategyService(session)
+    trade_service = TradeService(session)
+    service.start_strategy(STRATEGY, INSTRUMENT)
+    broker.place_order_outcomes.append(
+        make_order_result(
+            broker_reference="entry-close-audit-fail",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.5,
+            executed_at=fixed_now + timedelta(seconds=1),
+        )
+    )
+    broker.close_position_outcomes.append(
+        make_order_result(
+            broker_reference="close-audit-fail",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.SELL,
+            size=0.2,
+            price=101.0,
+            executed_at=fixed_now + timedelta(seconds=40),
+        )
+    )
+
+    service.process_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        100.5,
+        bid=100.49,
+        ask=100.51,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
+
+    original_record_event_in_session = domain_event_service.record_event_in_session
+
+    def fail_close_event(**kwargs):
+        if kwargs.get("event_type") == "broker.close_confirmed":
+            return None
+        return original_record_event_in_session(**kwargs)
+
+    monkeypatch.setattr(
+        domain_event_service,
+        "record_event_in_session",
+        fail_close_event,
+        raising=False,
+    )
+
+    service.process_price_update(
+        INSTRUMENT,
+        101.0,
+        bid=100.99,
+        ask=101.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=40),
+    )
+
+    execution = trade_service.list_executions(limit=1)[0]
+    assert execution.status == ExecutionStatus.CLOSE_CONFIRMED.value
+    assert execution.details["domain_event_persistence_failed"] is True
+    assert {
+        "event_type": "broker.close_confirmed",
+        "source": "strategy_service.execute_exit_signal",
+        "previous_state": "FILL_FULL",
+        "new_state": "CLOSE_CONFIRMED",
+        "correlation_id": execution.client_request_id,
+    } in execution.details["audit_event_failures"]
+
+
+def test_audit_test_002_incomplete_close_persists_manual_review_domain_event(
+    session, broker, fixed_now
+):
+    service = StrategyService(session)
+    trade_service = TradeService(session)
+    service.start_strategy(STRATEGY, INSTRUMENT)
+    broker.place_order_outcomes.append(
+        make_order_result(
+            broker_reference="entry-close-review-audit",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.5,
+            executed_at=fixed_now + timedelta(seconds=1),
+        )
+    )
+    broker.close_position_outcomes.append(
+        BrokerOrderResult(
+            broker_reference="close-review-audit",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.SELL,
+            size=0.2,
+            price=101.0,
+            executed_at=fixed_now + timedelta(seconds=40),
+            status=BrokerOrderStatus.PARTIALLY_FILLED,
+            filled_size=0.1,
+            average_fill_price=101.0,
+            submitted_at=fixed_now + timedelta(seconds=40),
+            acknowledged_at=fixed_now + timedelta(seconds=40),
+            reason="Broker partially closed the position.",
+            requires_manual_review=True,
+        )
+    )
+
+    service.process_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        100.5,
+        bid=100.49,
+        ask=100.51,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        101.0,
+        bid=100.99,
+        ask=101.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=40),
+    )
+
+    execution = trade_service.list_executions(limit=1)[0]
+    position = trade_service.list_positions()[0]
+    close_events = [
+        event
+        for event in _domain_events(session)
+        if event.event_type == "broker.close_requires_manual_review"
+    ]
+
+    assert len(trade_service.list_trades()) == 0
+    assert execution.status == ExecutionStatus.NEEDS_MANUAL_REVIEW.value
+    assert execution.requires_manual_review is True
+    assert position.is_open is True
+    assert len(close_events) == 1
+    event = close_events[0]
+    assert event.severity == "error"
+    assert event.source == "strategy_service.execute_exit_signal"
+    assert event.correlation_id == execution.client_request_id
+    assert event.position_id == position.id
+    assert event.execution_id == execution.id
+    assert event.payload_json["previous_state"] == "FILL_PARTIAL"
+    assert event.payload_json["new_state"] == "NEEDS_MANUAL_REVIEW"
+    assert event.payload_json["broker_result"]["status"] == "PARTIALLY_FILLED"
+    assert event.payload_json["broker_result"]["client_request_id"] == (
+        execution.client_request_id
+    )
 
 
 def test_audit_risk_002_execution_blocks_material_account_equity_drift(
