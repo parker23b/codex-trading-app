@@ -18,6 +18,14 @@ def _domain_events(session) -> list[DomainEvent]:
     return list(session.exec(select(DomainEvent).order_by(DomainEvent.id)))
 
 
+def _non_decision_domain_events(session) -> list[DomainEvent]:
+    return [
+        event
+        for event in _domain_events(session)
+        if not event.event_type.startswith("trade_intent.")
+    ]
+
+
 def test_runtime_recovery_creates_trade_intent_before_recreating_position(
     session, broker, fixed_now
 ):
@@ -203,7 +211,7 @@ def test_audit_test_002_runtime_recovery_resumed_runtime_persists_domain_event(
     outcomes = RuntimeRecoveryService(session).recover()
 
     positions = TradeService(session).list_positions()
-    events = _domain_events(session)
+    events = _non_decision_domain_events(session)
     assert any(outcome["outcome"] == "resumed" for outcome in outcomes)
     assert len(positions) == 1
     assert len(events) == 1
@@ -239,7 +247,7 @@ def test_audit_test_002_runtime_recovery_broker_mismatch_persists_domain_event(
 
     outcomes = RuntimeRecoveryService(session).recover()
 
-    events = _domain_events(session)
+    events = _non_decision_domain_events(session)
     assert any(outcome["outcome"] == "recovery_required" for outcome in outcomes)
     assert len(events) == 1
     assert events[0].event_type == "reconciliation.mismatch_detected"

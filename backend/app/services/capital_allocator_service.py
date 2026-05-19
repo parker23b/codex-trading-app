@@ -4,6 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from math import floor
+from typing import Any
 from uuid import uuid4
 
 from sqlmodel import Session
@@ -1132,15 +1133,21 @@ class CapitalAllocatorService:
             },
         )
         self.trade_service.record_allocation_cycle(allocation_cycle)
-        domain_event_service.record_event(
+        event = domain_event_service.record_event_in_session(
+            session=self.session,
             event_type="allocation.cycle_completed",
             category="allocation",
             severity="warning" if degraded_candidate_count > 0 else "info",
             source="capital_allocator_service.allocate",
             title="Allocation cycle completed",
             message=f"Allocation cycle {cycle_id} evaluated {len(entry_decisions)} candidates.",
+            correlation_id=cycle_id,
+            actor_type="service",
+            actor_id="capital_allocator_service",
             payload_json={
                 "cycle_id": cycle_id,
+                "previous_state": "NOT_CREATED",
+                "new_state": "COMPLETED",
                 "candidate_count": allocation_cycle.candidate_count,
                 "approved_count": allocation_cycle.approved_count,
                 "rejected_count": allocation_cycle.rejected_count,
@@ -1150,9 +1157,53 @@ class CapitalAllocatorService:
                 "binding_budget_counts": allocation_cycle.binding_budget_counts,
                 "rejection_reason_counts": allocation_cycle.rejection_reason_counts,
                 "degraded": allocation_cycle.details.get("degraded", False),
+                "decisions": [
+                    self._allocation_decision_audit_payload(decision)
+                    for decision in entry_decisions
+                ],
             },
             created_at=allocation_cycle.completed_at,
         )
+        if event is None:
+            self._mark_allocation_cycle_audit_persistence_failure(allocation_cycle)
+
+    @staticmethod
+    def _allocation_decision_audit_payload(
+        decision: AllocationDecision,
+    ) -> dict[str, object]:
+        signal = _require_entry_signal(decision.candidate)
+        return {
+            "strategy_name": decision.candidate.strategy_name,
+            "instrument": decision.candidate.instrument,
+            "direction": signal.direction.value,
+            "selected": decision.selected,
+            "reason_code": decision.reason_code,
+            "requested_risk_percent": decision.requested_risk_percent,
+            "allocated_risk_percent": decision.allocated_risk_percent,
+            "risk_truth_confidence": "ALLOCATION_INTENT_ONLY",
+            "degraded": decision.degraded,
+        }
+
+    def _mark_allocation_cycle_audit_persistence_failure(
+        self, allocation_cycle: AllocationCycle
+    ) -> None:
+        details: dict[str, Any] = dict(allocation_cycle.details or {})
+        failures = list(details.get("audit_event_failures") or [])
+        failures.append(
+            {
+                "event_type": "allocation.cycle_completed",
+                "source": "capital_allocator_service.allocate",
+                "previous_state": "NOT_CREATED",
+                "new_state": "COMPLETED",
+                "correlation_id": allocation_cycle.cycle_id,
+            }
+        )
+        details["domain_event_persistence_failed"] = True
+        details["audit_event_failures"] = failures
+        allocation_cycle.details = details
+        self.session.add(allocation_cycle)
+        self.session.commit()
+        self.session.refresh(allocation_cycle)
 
     def _currency_buckets(
         self, instrument: str, broker_details: BrokerMarketDetails | None

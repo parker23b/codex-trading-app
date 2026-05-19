@@ -14,6 +14,12 @@ def _events(session) -> list[DomainEvent]:
     return list(session.exec(select(DomainEvent).order_by(DomainEvent.id)))
 
 
+def _execution_events(session) -> list[DomainEvent]:
+    return [
+        event for event in _events(session) if event.event_type.startswith("execution.")
+    ]
+
+
 def _seed_execution(session) -> tuple[TradeIntent, Execution]:
     trade_service = TradeService(session)
     intent = trade_service.create_trade_intent(
@@ -51,7 +57,7 @@ def test_audit_test_002_execution_creation_persists_submission_pending_domain_ev
 ):
     intent, execution = _seed_execution(session)
 
-    events = _events(session)
+    events = _execution_events(session)
     assert len(events) == 1
     event = events[0]
     assert event.event_type == "execution.submission_pending_created"
@@ -86,7 +92,7 @@ def test_audit_test_002_execution_transition_persists_domain_event_despite_globa
         reason="Submitted to broker.",
     )
 
-    events = _events(session)
+    events = _execution_events(session)
     assert updated.status == ExecutionStatus.ORDER_SUBMITTED.value
     assert [event.event_type for event in events] == [
         "execution.submission_pending_created",
@@ -127,7 +133,7 @@ def test_audit_test_002_execution_transition_records_related_domain_ids(session)
         reason="Broker close confirmed.",
     )
 
-    events = _events(session)
+    events = _execution_events(session)
     assert [event.event_type for event in events] == [
         "execution.submission_pending_created",
         "execution.position_closed",
@@ -168,7 +174,7 @@ def test_audit_obs_001_execution_transition_marks_audit_persistence_failure(
         reason="Broker outcome is ambiguous.",
     )
 
-    events = _events(session)
+    events = _execution_events(session)
     assert [event.event_type for event in events] == [
         "execution.submission_pending_created"
     ]

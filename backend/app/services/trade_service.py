@@ -171,6 +171,7 @@ class TradeService:
             self.session.add(intent)
             self.session.commit()
             self.session.refresh(intent)
+            self._record_trade_intent_created_domain_event(intent)
             return intent
         except IntegrityError as exc:
             self.session.rollback()
@@ -405,6 +406,7 @@ class TradeService:
         opened_at: datetime | None = None,
         closed_at: datetime | None = None,
     ) -> TradeIntent:
+        previous_state = intent.state
         intent.state = state.value if isinstance(state, TradeIntentState) else state
         intent.updated_at = utc_now()
         if allocation_cycle_id is not None:
@@ -461,6 +463,9 @@ class TradeService:
             self.session.add(intent)
             self.session.commit()
             self.session.refresh(intent)
+            self._record_trade_intent_transition_domain_event(
+                intent, previous_state=previous_state
+            )
             return intent
         except IntegrityError as exc:
             self.session.rollback()
@@ -737,6 +742,165 @@ class TradeService:
         self.session.commit()
         self.session.refresh(event)
         return event
+
+    def _record_trade_intent_created_domain_event(self, intent: TradeIntent) -> None:
+        source = "trade_service.create_trade_intent"
+        event_type = "trade_intent.created"
+        event = domain_event_service.record_event_in_session(
+            session=self.session,
+            event_type=event_type,
+            category="decision",
+            severity=self._trade_intent_event_severity(intent.state),
+            source=source,
+            title="Trade intent created",
+            message=f"Trade intent {intent.id} created in {intent.state} state.",
+            correlation_id=self._trade_intent_correlation_id(intent),
+            strategy_name=intent.strategy_name,
+            instrument=intent.instrument,
+            position_id=intent.position_id,
+            trade_id=intent.trade_id,
+            actor_type="service",
+            actor_id="trade_service",
+            payload_json=self._trade_intent_event_payload(
+                intent,
+                previous_state="NOT_CREATED",
+                new_state=intent.state,
+            ),
+            created_at=intent.created_at,
+        )
+        if event is None:
+            self._mark_trade_intent_audit_persistence_failure(
+                intent,
+                event_type=event_type,
+                source=source,
+                previous_state="NOT_CREATED",
+            )
+
+    def _record_trade_intent_transition_domain_event(
+        self, intent: TradeIntent, *, previous_state: str | None
+    ) -> None:
+        if previous_state == intent.state:
+            return
+        source = "trade_service.transition_trade_intent"
+        event_type = "trade_intent.state_changed"
+        event = domain_event_service.record_event_in_session(
+            session=self.session,
+            event_type=event_type,
+            category="decision",
+            severity=self._trade_intent_event_severity(intent.state),
+            source=source,
+            title="Trade intent state changed",
+            message=(
+                f"Trade intent {intent.id} moved from {previous_state} "
+                f"to {intent.state}."
+            ),
+            correlation_id=self._trade_intent_correlation_id(intent),
+            strategy_name=intent.strategy_name,
+            instrument=intent.instrument,
+            position_id=intent.position_id,
+            trade_id=intent.trade_id,
+            actor_type="service",
+            actor_id="trade_service",
+            payload_json=self._trade_intent_event_payload(
+                intent,
+                previous_state=previous_state,
+                new_state=intent.state,
+            ),
+            created_at=intent.updated_at,
+        )
+        if event is None:
+            self._mark_trade_intent_audit_persistence_failure(
+                intent,
+                event_type=event_type,
+                source=source,
+                previous_state=previous_state,
+            )
+
+    @staticmethod
+    def _trade_intent_event_severity(state: str) -> str:
+        if state in {
+            TradeIntentState.FAILED.value,
+            TradeIntentState.FORCED_RECONCILIATION_CLOSE.value,
+        }:
+            return "error"
+        if state in {
+            TradeIntentState.REJECTED.value,
+            TradeIntentState.CANCELLED.value,
+            TradeIntentState.PARTIALLY_FILLED.value,
+        }:
+            return "warning"
+        return "info"
+
+    @staticmethod
+    def _trade_intent_correlation_id(intent: TradeIntent) -> str:
+        return intent.execution_client_request_id or f"trade_intent:{intent.id}"
+
+    @staticmethod
+    def _trade_intent_event_payload(
+        intent: TradeIntent,
+        *,
+        previous_state: str | None,
+        new_state: str,
+    ) -> dict[str, Any]:
+        return {
+            "trade_intent_id": intent.id,
+            "allocation_cycle_id": intent.allocation_cycle_id,
+            "previous_state": previous_state,
+            "new_state": new_state,
+            "state": intent.state,
+            "strategy_name": intent.strategy_name,
+            "family_name": intent.family_name,
+            "instrument": intent.instrument,
+            "direction": intent.direction,
+            "decision_reason_code": intent.decision_reason_code,
+            "decision_reason": intent.decision_reason,
+            "close_reason_code": intent.close_reason_code,
+            "close_reason": intent.close_reason,
+            "execution_client_request_id": intent.execution_client_request_id,
+            "broker_reference": intent.broker_reference,
+            "close_broker_reference": intent.close_broker_reference,
+            "position_id": intent.position_id,
+            "trade_id": intent.trade_id,
+            "proposed_size": intent.proposed_size,
+            "allocated_size": intent.allocated_size,
+            "proposed_risk_percent": intent.proposed_risk_percent,
+            "allocated_risk_percent": intent.allocated_risk_percent,
+            "estimated_risk_amount": intent.estimated_risk_amount,
+            "submitted_risk_amount": intent.submitted_risk_amount,
+            "fill_derived_risk_amount": intent.fill_derived_risk_amount,
+            "risk_truth_confidence": intent.risk_truth_confidence,
+            "risk_currency": intent.risk_currency,
+            "confidence": intent.confidence,
+            "market_status": intent.market_status,
+            "tradable": intent.tradable,
+            "details": intent.details or {},
+        }
+
+    def _mark_trade_intent_audit_persistence_failure(
+        self,
+        intent: TradeIntent,
+        *,
+        event_type: str,
+        source: str,
+        previous_state: str | None,
+    ) -> None:
+        details: dict[str, Any] = dict(intent.details or {})
+        failures = list(details.get("audit_event_failures") or [])
+        failures.append(
+            {
+                "event_type": event_type,
+                "source": source,
+                "previous_state": previous_state,
+                "new_state": intent.state,
+                "correlation_id": self._trade_intent_correlation_id(intent),
+            }
+        )
+        details["domain_event_persistence_failed"] = True
+        details["audit_event_failures"] = failures
+        intent.details = details
+        self.session.add(intent)
+        self.session.commit()
+        self.session.refresh(intent)
 
     def _record_execution_domain_event(
         self, execution: Execution, *, previous_status: str | None

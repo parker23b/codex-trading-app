@@ -25,6 +25,14 @@ def _domain_events(session) -> list[DomainEvent]:
     return list(session.exec(select(DomainEvent).order_by(DomainEvent.id)))
 
 
+def _reconciliation_domain_events(session) -> list[DomainEvent]:
+    return [
+        event
+        for event in _domain_events(session)
+        if event.event_type.startswith("reconciliation.")
+    ]
+
+
 def test_reconciliation_corrects_local_position_from_broker_truth(
     session, broker, fixed_now
 ):
@@ -374,7 +382,7 @@ def test_audit_test_002_reconciliation_adoption_persists_domain_event(
 
     positions = trade_service.list_positions()
     intents = trade_service.list_trade_intents(limit=10)
-    events = _domain_events(session)
+    events = _reconciliation_domain_events(session)
     assert len(positions) == 1
     assert len(intents) == 1
     assert len(events) == 1
@@ -480,7 +488,7 @@ def test_audit_test_002_reconciliation_forced_close_persists_domain_events(
 
     refreshed_intent = trade_service.get_trade_intent(intent.id)
     trades = trade_service.list_trades()
-    events = _domain_events(session)
+    events = _reconciliation_domain_events(session)
     assert refreshed_intent is not None
     assert len(trades) == 1
     assert [event.event_type for event in events] == [
