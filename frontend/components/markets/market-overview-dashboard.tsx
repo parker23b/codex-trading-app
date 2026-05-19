@@ -48,6 +48,30 @@ function canAdd(row: MarketCatalogueInstrument, limit: number, activeCount: numb
   return null;
 }
 
+function catalogueStateLabel(row: MarketCatalogueInstrument) {
+  if (row.streaming_now) {
+    return "Streaming data";
+  }
+  if (row.in_strategy_watchlist) {
+    return "Watchlisted, not streaming";
+  }
+  if (row.shortlisted) {
+    return "Shortlisted only";
+  }
+  return "Catalogue only";
+}
+
+function watchlistStateLabel(row: StrategyWatchlistResponse["instruments"][number]) {
+  return row.streamed ? "Streaming data" : "Evaluation candidate only";
+}
+
+function watchlistStateDetail(row: StrategyWatchlistResponse["instruments"][number]) {
+  if (row.streamed) {
+    return "Data coverage only. Not entry approval.";
+  }
+  return "Not trading approval. Entry still depends on governance, risk, broker, and market-data gates.";
+}
+
 export function MarketOverviewDashboard({
   initialOverview,
   initialOverviewError,
@@ -206,13 +230,13 @@ export function MarketOverviewDashboard({
             label: "Strategy Watchlist",
             value: watchlistError ? "Unavailable" : `${normalWatchlistCount}/${strategyWatchlist.limit || "-"}`,
             tone: watchlistError ? "inactive" : strategyWatchlist.cap_exceeded_by_protective_coverage ? "warning" : normalWatchlistCount >= strategyWatchlist.limit ? "warning" : "positive",
-            meta: watchlistError ?? (strategyWatchlist.cap_exceeded_by_protective_coverage ? `${strategyWatchlist.protective_count ?? 0} protective above normal capacity` : "normal eligible capacity"),
+            meta: watchlistError ?? (strategyWatchlist.cap_exceeded_by_protective_coverage ? `${strategyWatchlist.protective_count ?? 0} protective above normal capacity` : "normal watchlist capacity"),
           },
           {
             label: "Live",
             value: watchlistError ? "Unavailable" : strategyWatchlist.streaming_count,
             tone: watchlistError ? "inactive" : strategyWatchlist.streaming_count ? "positive" : "inactive",
-            meta: watchlistError ?? "streaming now",
+            meta: watchlistError ?? "data coverage now",
           },
         ]}
       />
@@ -274,7 +298,7 @@ export function MarketOverviewDashboard({
                 },
                 { key: "instrument", header: "Instrument", render: (row) => <span>{row.name} <span className="muted">{row.symbol}</span></span> },
                 { key: "asset", header: "Class", render: (row) => row.asset_class },
-                { key: "state", header: "State", render: (row) => <StatusPill label={row.streaming_now ? "live" : row.in_strategy_watchlist ? "eligible" : row.shortlisted ? "shortlisted" : "catalogue"} tone={rowTone(row)} /> },
+                { key: "state", header: "State", render: (row) => <StatusPill label={catalogueStateLabel(row)} tone={rowTone(row)} /> },
                 { key: "fit", header: "Strategy Fit", render: (row) => row.strategy_compatibility.slice(0, 2).join(", ") || "n/a" },
               ]}
             />
@@ -309,7 +333,7 @@ export function MarketOverviewDashboard({
         }
         right={
           <div className="stack-layout">
-            <Panel title="Strategy Watchlist" subtitle={watchlistError ? "Strategy watchlist source unavailable." : "Eligible for backend streaming/evaluation."} priority="critical" tone={watchlistError ? "inactive" : strategyWatchlist.active_count ? "positive" : "inactive"} compact>
+            <Panel title="Strategy Watchlist" subtitle={watchlistError ? "Strategy watchlist source unavailable." : "Evaluation candidates. Not trading approval."} priority="critical" tone={watchlistError ? "inactive" : strategyWatchlist.active_count ? "positive" : "inactive"} compact>
               <CompactTable
                 dense
                 rows={strategyWatchlist.instruments}
@@ -317,7 +341,16 @@ export function MarketOverviewDashboard({
                 getRowTone={(row) => row.streamed ? "positive" : "warning"}
                 columns={[
                   { key: "instrument", header: "Instrument", render: (row) => formatInstrumentLabel(row.instrument) },
-                  { key: "state", header: "State", render: (row) => <StatusPill label={row.streamed ? "streaming" : "eligible"} tone={row.streamed ? "positive" : "warning"} /> },
+                  {
+                    key: "state",
+                    header: "State",
+                    render: (row) => (
+                      <span className="cell-stack" title={watchlistStateDetail(row)}>
+                        <StatusPill label={watchlistStateLabel(row)} tone={row.streamed ? "positive" : "warning"} />
+                        <span className="status-note status-note--inline">{watchlistStateDetail(row)}</span>
+                      </span>
+                    ),
+                  },
                   {
                     key: "reason",
                     header: "Source",
@@ -334,8 +367,8 @@ export function MarketOverviewDashboard({
               <div className="metric-stack">
                 <div className="metric-stack__row"><span>Catalogue</span><strong>{catalogueError ? "Unavailable" : "Available markets"}</strong></div>
                 <div className="metric-stack__row"><span>Shortlist</span><strong>{catalogueError ? "Unavailable" : "Operator interest"}</strong></div>
-                <div className="metric-stack__row"><span>Strategy watchlist</span><strong>{watchlistError ? "Unavailable" : "Stream eligible"}</strong></div>
-                <div className="metric-stack__row"><span>Live</span><strong>{watchlistError ? "Unavailable" : "Streaming/evaluating"}</strong></div>
+                <div className="metric-stack__row"><span>Strategy watchlist</span><strong>{watchlistError ? "Unavailable" : "Evaluation candidates"}</strong></div>
+                <div className="metric-stack__row"><span>Live</span><strong>{watchlistError ? "Unavailable" : "Data coverage only"}</strong></div>
                 <div className="metric-stack__row"><span>Normal capacity</span><strong>{watchlistError ? "Unavailable" : `${normalWatchlistCount}/${strategyWatchlist.limit || "-"}`}</strong></div>
                 <div className="metric-stack__row"><span>Protective coverage</span><strong>{watchlistError ? "Unavailable" : `${strategyWatchlist.protective_count ?? 0} pinned separately`}</strong></div>
               </div>

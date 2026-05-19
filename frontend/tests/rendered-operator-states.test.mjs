@@ -434,6 +434,78 @@ function baseCoverageErrors() {
   };
 }
 
+function baseMarketCatalogueRow(overrides = {}) {
+  return {
+    id: "CS.D.EURUSD.MINI.IP",
+    instrument: "CS.D.EURUSD.MINI.IP",
+    name: "EUR/USD",
+    symbol: "EUR/USD",
+    asset_class: "FOREX",
+    category: "Forex",
+    currency: "USD",
+    base_currency: "EUR",
+    quote_currency: "USD",
+    forex_major: true,
+    tradable: true,
+    shortlisted: false,
+    in_strategy_watchlist: false,
+    streaming_now: false,
+    activity_level: "HIGH",
+    strategy_compatibility: ["Breakout"],
+    reference_price: 1.08,
+    shortlisted_at: null,
+    note: null,
+    ...overrides,
+  };
+}
+
+function baseMarketOverviewProps(overrides = {}) {
+  const instrument = baseMarketCatalogueRow();
+  return {
+    initialOverview: {
+      generatedAt: "2026-05-17T10:00:00.000Z",
+      summary: {
+        category: "forex",
+        label: "Forex",
+        description: "Major FX instruments.",
+        status: "OPEN",
+        headline: "Forex open",
+        detail: "Market overview available.",
+        nextTransitionAt: "2026-05-17T17:00:00.000Z",
+        nextTransitionLabel: "Close",
+        tradableCount: 1,
+        activeCount: 0,
+        totalCount: 1,
+      },
+      instruments: [],
+    },
+    initialOverviewError: null,
+    initialCatalogue: {
+      generated_at: "2026-05-17T10:00:00.000Z",
+      instruments: [instrument],
+      summary: {
+        total_count: 1,
+        shortlisted_count: 0,
+        strategy_watchlist_count: 0,
+        streaming_count: 0,
+      },
+    },
+    initialCatalogueError: null,
+    initialStrategyWatchlist: {
+      generated_at: "2026-05-17T10:00:00.000Z",
+      limit: 10,
+      active_count: 0,
+      normal_count: 0,
+      streaming_count: 0,
+      protective_count: 0,
+      cap_exceeded_by_protective_coverage: false,
+      instruments: [],
+    },
+    initialStrategyWatchlistError: null,
+    ...overrides,
+  };
+}
+
 test("AUDIT-UI-006 rendered pending execution notification is degraded and not raw healthy truth", () => {
   const { tempRoot, outDir } = compileRenderedModules();
   try {
@@ -1121,6 +1193,140 @@ test("AUDIT-UI-006 rendered markets dashboard does not turn unavailable sources 
       assert.doesNotMatch(html, /Catalogue[\s\S]{0,260}Available markets/i);
       assert.doesNotMatch(html, /Shortlist[\s\S]{0,260}operator interest/i);
       assert.doesNotMatch(html, /Live[\s\S]{0,260}Streaming\/evaluating/i);
+    });
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("AUDIT-UI-006 rendered markets watchlist provenance does not imply trading approval", () => {
+  const { tempRoot, outDir } = compileRenderedModules();
+  try {
+    withCompiledAliases(outDir, () => {
+      const markets = require(path.join(outDir, "components", "markets", "market-overview-dashboard.js"));
+      const instrument = baseMarketCatalogueRow({
+        shortlisted: true,
+        in_strategy_watchlist: true,
+        streaming_now: false,
+      });
+
+      const html = renderComponent(markets.MarketOverviewDashboard, baseMarketOverviewProps({
+        initialCatalogue: {
+          generated_at: "2026-05-17T10:00:00.000Z",
+          instruments: [instrument],
+          summary: {
+            total_count: 1,
+            shortlisted_count: 1,
+            strategy_watchlist_count: 1,
+            streaming_count: 0,
+          },
+        },
+        initialStrategyWatchlist: {
+          generated_at: "2026-05-17T10:00:00.000Z",
+          limit: 10,
+          active_count: 1,
+          normal_count: 1,
+          streaming_count: 0,
+          protective_count: 0,
+          cap_exceeded_by_protective_coverage: false,
+          instruments: [
+            {
+              instrument: instrument.instrument,
+              tier: "TIER1",
+              status: "ACTIVE",
+              asset_class: "FOREX",
+              pinned: false,
+              reason: "strategy_watchlist",
+              reason_detail: {
+                code: "strategy_watchlist",
+                label: "Strategy watchlist",
+                operator_action: "Watchlisted for evaluation only; entry still depends on governance, risk, broker, and market-data gates.",
+              },
+              protective: false,
+              priority_score: 1,
+              requested_frequency: "1s",
+              promotion_expires_at: null,
+              last_streamed_at: null,
+              last_refreshed_at: "2026-05-17T10:00:00.000Z",
+              streamed: false,
+            },
+          ],
+        },
+      }));
+
+      assert.match(html, /Watchlisted, not streaming/i);
+      assert.match(html, /Evaluation candidate only/i);
+      assert.match(html, /Not trading approval/i);
+      assert.match(html, /Entry still depends on governance, risk, broker, and market-data gates/i);
+      assert.doesNotMatch(html, />eligible<\/span>/i);
+      assert.doesNotMatch(html, /Eligible for backend streaming\/evaluation/i);
+      assert.doesNotMatch(html, /Streaming\/evaluating/i);
+    });
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("AUDIT-UI-006 rendered markets streaming provenance stays separate from entry approval", () => {
+  const { tempRoot, outDir } = compileRenderedModules();
+  try {
+    withCompiledAliases(outDir, () => {
+      const markets = require(path.join(outDir, "components", "markets", "market-overview-dashboard.js"));
+      const instrument = baseMarketCatalogueRow({
+        in_strategy_watchlist: true,
+        streaming_now: true,
+      });
+
+      const html = renderComponent(markets.MarketOverviewDashboard, baseMarketOverviewProps({
+        initialCatalogue: {
+          generated_at: "2026-05-17T10:00:00.000Z",
+          instruments: [instrument],
+          summary: {
+            total_count: 1,
+            shortlisted_count: 0,
+            strategy_watchlist_count: 1,
+            streaming_count: 1,
+          },
+        },
+        initialStrategyWatchlist: {
+          generated_at: "2026-05-17T10:00:00.000Z",
+          limit: 10,
+          active_count: 1,
+          normal_count: 1,
+          streaming_count: 1,
+          protective_count: 0,
+          cap_exceeded_by_protective_coverage: false,
+          instruments: [
+            {
+              instrument: instrument.instrument,
+              tier: "TIER1",
+              status: "ACTIVE",
+              asset_class: "FOREX",
+              pinned: false,
+              reason: "strategy_watchlist",
+              reason_detail: {
+                code: "streaming",
+                label: "Streaming source",
+                operator_action: "Streaming confirms data coverage only; it is not entry approval.",
+              },
+              protective: false,
+              priority_score: 1,
+              requested_frequency: "1s",
+              promotion_expires_at: null,
+              last_streamed_at: "2026-05-17T10:00:00.000Z",
+              last_refreshed_at: "2026-05-17T10:00:00.000Z",
+              streamed: true,
+            },
+          ],
+        },
+      }));
+
+      assert.match(html, /Streaming data/i);
+      assert.match(html, /Data coverage only/i);
+      assert.match(html, /Not entry approval/i);
+      assert.match(html, /Streaming confirms data coverage only/i);
+      assert.doesNotMatch(html, /Trading approved/i);
+      assert.doesNotMatch(html, /Entry approved/i);
     });
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
