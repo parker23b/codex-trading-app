@@ -15,7 +15,7 @@ from app.models.trade import (
     utc_now,
 )
 from app.strategies.registry import strategy_registry
-from app.services.domain_event_service import domain_event_service
+from app.services.audit_event_recorder import record_required_domain_event
 from app.services.runtime_state_service import RuntimeStateService
 from app.services.trade_service import TradeService
 
@@ -134,16 +134,21 @@ class RuntimeRecoveryService:
                     }
                 )
                 if "auth" in broker_error.lower():
-                    domain_event_service.record_error(
+                    self._record_required_runtime_event(
+                        runtime_id=runtime.runtime_id,
                         error_type="BrokerAuthenticationFailed",
-                        source="runtime_recovery_service.recover",
                         event_type="health.broker_auth_failed",
+                        category="health",
+                        severity="error",
                         title="Broker authentication failed during recovery",
                         message=f"Runtime recovery could not verify broker state for {runtime.strategy_name} on {runtime.instrument}.",
-                        runtime_id=runtime.runtime_id,
                         strategy_name=runtime.strategy_name,
                         instrument=runtime.instrument,
-                        payload_json={"reason": broker_error},
+                        payload_json={
+                            "reason": broker_error,
+                            "previous_state": previous_recovery_state,
+                            "new_state": "RECOVERY_REQUIRED",
+                        },
                     )
                 continue
 
@@ -177,12 +182,9 @@ class RuntimeRecoveryService:
                         "outcome": "recovery_required",
                     }
                 )
-                domain_event_service.record_event_in_session(
-                    session=self.session,
+                self._record_required_runtime_event(
                     event_type="reconciliation.mismatch_detected",
-                    category="reconciliation",
                     severity="warning",
-                    source="runtime_recovery_service.recover",
                     title="Persisted runtime position was not confirmed by broker",
                     message=f"Startup recovery found no broker confirmation for {runtime.strategy_name} on {runtime.instrument}.",
                     runtime_id=runtime.runtime_id,
@@ -301,12 +303,10 @@ class RuntimeRecoveryService:
                     "outcome": "resumed" if current_position is not None else "running",
                 }
             )
-            domain_event_service.record_event_in_session(
-                session=self.session,
+            self._record_required_runtime_event(
                 event_type="strategy.runtime_started",
                 category="strategy",
                 severity="info",
-                source="runtime_recovery_service.recover",
                 title="Persisted strategy runtime resumed",
                 message=f"{runtime.strategy_name} resumed on {runtime.instrument} during startup recovery.",
                 runtime_id=engine.runtime_id,
@@ -334,6 +334,39 @@ class RuntimeRecoveryService:
             )
 
         return outcomes
+
+    def _record_required_runtime_event(
+        self,
+        *,
+        event_type: str,
+        category: str = "reconciliation",
+        severity: str,
+        title: str,
+        message: str,
+        runtime_id: str | None,
+        strategy_name: str,
+        instrument: str,
+        payload_json: dict[str, object],
+        error_type: str | None = None,
+        position_id: int | None = None,
+    ) -> None:
+        record_required_domain_event(
+            session=self.session,
+            event_type=event_type,
+            category=category,
+            severity=severity,
+            error_type=error_type,
+            source="runtime_recovery_service.recover",
+            title=title,
+            message=message,
+            runtime_id=runtime_id,
+            strategy_name=strategy_name,
+            instrument=instrument,
+            position_id=position_id,
+            actor_type="service",
+            actor_id="runtime_recovery_service",
+            payload_json=payload_json,
+        )
 
     @staticmethod
     def _resolve_local_position(

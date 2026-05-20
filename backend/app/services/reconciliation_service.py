@@ -13,7 +13,7 @@ from app.models.trade import (
     utc_now,
 )
 from app.strategies.registry import strategy_registry
-from app.services.domain_event_service import domain_event_service
+from app.services.audit_event_recorder import record_required_domain_event
 from app.services.health_service import get_health_service
 from app.services.runtime_state_service import RuntimeStateService
 from app.services.trade_service import TradeService
@@ -218,12 +218,9 @@ class ReconciliationService:
                     )
                 if is_adopted:
                     adopted_count += 1
-                    domain_event_service.record_event_in_session(
-                        session=self.trade_service.session,
+                    self._record_required_reconciliation_event(
                         event_type="reconciliation.unmatched_remote_position",
-                        category="reconciliation",
                         severity="warning",
-                        source="reconciliation_service.reconcile_open_positions",
                         title="Broker position had no local match",
                         message=f"Broker position for {instrument} was adopted into local state.",
                         strategy_name=strategy_name,
@@ -238,12 +235,9 @@ class ReconciliationService:
                     )
                 else:
                     corrected_count += 1
-                    domain_event_service.record_event_in_session(
-                        session=self.trade_service.session,
+                    self._record_required_reconciliation_event(
                         event_type="reconciliation.position_corrected",
-                        category="reconciliation",
                         severity="info",
-                        source="reconciliation_service.reconcile_open_positions",
                         title="Local position corrected from broker state",
                         message=f"Local position for {instrument} was updated to broker truth.",
                         strategy_name=strategy_name,
@@ -347,12 +341,9 @@ class ReconciliationService:
                 local_position_id=local_position.id,
                 details=details,
             )
-            domain_event_service.record_event_in_session(
-                session=self.trade_service.session,
+            self._record_required_reconciliation_event(
                 event_type="reconciliation.unmatched_local_position",
-                category="reconciliation",
                 severity="warning",
-                source="reconciliation_service.reconcile_open_positions",
                 title="Local position missing at broker",
                 message=f"Local position for {local_position.instrument} was not found remotely and was closed.",
                 strategy_name=local_position.strategy_name,
@@ -363,12 +354,9 @@ class ReconciliationService:
                     "broker_reference": local_position.broker_reference,
                 },
             )
-            domain_event_service.record_event_in_session(
-                session=self.trade_service.session,
+            self._record_required_reconciliation_event(
                 event_type="reconciliation.position_corrected",
-                category="reconciliation",
                 severity="info",
-                source="reconciliation_service.reconcile_open_positions",
                 title="Position corrected after reconciliation",
                 message=f"Reconciliation closed a mismatched local position for {local_position.instrument}.",
                 strategy_name=local_position.strategy_name,
@@ -421,6 +409,34 @@ class ReconciliationService:
             },
         )
         return self.trade_service.list_positions()
+
+    def _record_required_reconciliation_event(
+        self,
+        *,
+        event_type: str,
+        severity: str,
+        title: str,
+        message: str,
+        strategy_name: str,
+        instrument: str,
+        position_id: int | None,
+        payload_json: dict[str, object],
+    ) -> None:
+        record_required_domain_event(
+            session=self.trade_service.session,
+            event_type=event_type,
+            category="reconciliation",
+            severity=severity,
+            source="reconciliation_service.reconcile_open_positions",
+            title=title,
+            message=message,
+            strategy_name=strategy_name,
+            instrument=instrument,
+            position_id=position_id,
+            actor_type="service",
+            actor_id="reconciliation_service",
+            payload_json=payload_json,
+        )
 
     @staticmethod
     def _position_needs_reconciliation(

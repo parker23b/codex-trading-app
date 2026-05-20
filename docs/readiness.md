@@ -22,7 +22,7 @@ The current blocking themes are:
 - the spec coverage matrix still does not comprehensively map every P0/P1 boundary and surface requirement
 - `risk_truth_confidence` now has an authoritative backend/frontend contract, but broader enum-parity and operator-surface evidence are still incomplete
 - any future operator-critical raw dict/list routes still need explicit contract ownership even though the currently known frontend-consumed route boundary is now modeled
-- durable audit preservation is still incomplete for remaining broker-action and background-event paths
+- durable audit preservation is still incomplete for broader broker-action HTTP authority and remaining background-event paths outside the covered entry/close/recovery/reconciliation slices
 - frontend operator truth is still missing broad browser/e2e coverage for degraded, unknown, passive-vs-mutation, and mutation-failure states
 - logging redaction, secrets hygiene, dependency locking, migrations, and durable observability remain below readiness grade
 
@@ -33,7 +33,7 @@ The canonical blocker list is in [audit-status.md](audit-status.md).
 - Simulated/local execution and close provenance is not yet proved across broader frontend/browser operator surfaces.
 - Broader backend/frontend enum-parity proof is still incomplete even though `risk_truth_confidence` now has a central contract.
 - Future raw operator-critical routes would make contract drift easier to miss even though the currently known frontend-consumed route boundary is now modeled.
-- Remaining mutation and broker-action paths still need durable audit-preservation proof at the route/background boundary.
+- Broader broker-action HTTP authority and remaining mutation/background paths still need durable audit-preservation proof at the route/background boundary.
 - Browser/e2e operator-state coverage is still too narrow for readiness claims.
 - Database evolution currently relies on `create_all()` plus SQLite patch helpers rather than versioned migrations.
 - Python dependency locking and dependency-vulnerability gates are not yet production-grade.

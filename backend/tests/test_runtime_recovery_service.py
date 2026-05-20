@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import pytest
 from sqlmodel import select
 
 from app.core.broker import OrderDirection
 from app.models.domain_event import DomainEvent
 from app.models.runtime import StrategyRuntimeState
 from app.models.trade import Position, TradeIntentState
+from app.services.audit_event_recorder import AuditEventPersistenceError
+from app.services.domain_event_service import domain_event_service
 from app.services.runtime_recovery_service import RuntimeRecoveryService
 from app.services.trade_service import TradeService
 from tests.fakes import make_broker_position
@@ -258,8 +261,98 @@ def test_audit_test_002_runtime_recovery_broker_mismatch_persists_domain_event(
     assert events[0].strategy_name == "smoke_test_hold"
     assert events[0].instrument == "CS.D.EURUSD.MINI.IP"
     assert events[0].payload_json["broker_reference"] == "missing-broker-audit"
-    assert events[0].payload_json["previous_state"] == "RUNNING"
-    assert events[0].payload_json["new_state"] == "RECOVERY_REQUIRED"
+
+
+def test_audit_test_002_runtime_recovery_broker_auth_failure_persists_domain_event(
+    session, broker, fixed_now
+):
+    session.add(
+        StrategyRuntimeState(
+            runtime_id="runtime-recover-auth-audit",
+            strategy_name="smoke_test_hold",
+            instrument="CS.D.EURUSD.MINI.IP",
+            status="RUNNING",
+            recovery_state="RUNNING",
+            current_position_broker_reference="missing-auth-audit",
+            last_price_seen=101.0,
+            last_price_seen_at=fixed_now - timedelta(seconds=5),
+        )
+    )
+    session.commit()
+
+    def raise_auth_error():
+        raise RuntimeError("auth denied by broker")
+
+    broker.get_positions = raise_auth_error
+
+    outcomes = RuntimeRecoveryService(session).recover()
+
+    events = _non_decision_domain_events(session)
+    assert any(outcome["outcome"] == "recovery_required" for outcome in outcomes)
+    assert len(events) == 1
+    event = events[0]
+    assert event.event_type == "health.broker_auth_failed"
+    assert event.category == "health"
+    assert event.severity == "error"
+    assert event.error_type == "BrokerAuthenticationFailed"
+    assert event.source == "runtime_recovery_service.recover"
+    assert event.actor_type == "service"
+    assert event.actor_id == "runtime_recovery_service"
+    assert event.runtime_id == "runtime-recover-auth-audit"
+    assert event.strategy_name == "smoke_test_hold"
+    assert event.instrument == "CS.D.EURUSD.MINI.IP"
+    assert event.payload_json["reason"] == "auth denied by broker"
+    assert event.payload_json["previous_state"] == "RUNNING"
+    assert event.payload_json["new_state"] == "RECOVERY_REQUIRED"
+
+
+def test_audit_obs_001_runtime_recovery_resumed_runtime_audit_failure_raises(
+    session, broker, fixed_now, monkeypatch
+):
+    session.add(
+        StrategyRuntimeState(
+            runtime_id="runtime-recover-audit-fail",
+            strategy_name="smoke_test_hold",
+            instrument="CS.D.EURUSD.MINI.IP",
+            status="RUNNING",
+            recovery_state="RECOVERY_REQUIRED",
+            current_position_broker_reference="recover-audit-fail-pos-1",
+            last_price_seen=101.0,
+            last_price_seen_at=fixed_now - timedelta(seconds=5),
+        )
+    )
+    session.commit()
+    broker.remote_positions = [
+        make_broker_position(
+            broker_reference="recover-audit-fail-pos-1",
+            instrument="CS.D.EURUSD.MINI.IP",
+            direction=OrderDirection.BUY,
+            size=0.4,
+            open_price=101.25,
+            opened_at=fixed_now - timedelta(minutes=3),
+        )
+    ]
+    monkeypatch.setattr(
+        domain_event_service,
+        "record_event_in_session",
+        lambda **_: None,
+        raising=False,
+    )
+
+    with pytest.raises(
+        AuditEventPersistenceError,
+        match="strategy.runtime_started",
+    ):
+        RuntimeRecoveryService(session).recover()
+
+    assert _non_decision_domain_events(session) == []
+    runtime = session.exec(
+        select(StrategyRuntimeState).where(
+            StrategyRuntimeState.runtime_id == "runtime-recover-audit-fail"
+        )
+    ).one()
+    assert runtime.recovery_state == "RUNNING"
+    assert runtime.status == "RUNNING"
 
 
 def test_audit_life_003_stopped_runtime_attaches_intent_to_confirmed_local_position(

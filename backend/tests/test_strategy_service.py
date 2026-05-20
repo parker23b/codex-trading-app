@@ -35,6 +35,7 @@ from app.models.trade import (
     TradeIntent,
     TradeIntentState,
 )
+from app.services.audit_event_recorder import AuditEventPersistenceError
 from app.services.health_service import get_health_service
 from app.services.market_status_service import MarketStatus, get_market_status_service
 from app.services.strategy_service import StrategyService
@@ -295,6 +296,114 @@ def test_audit_test_002_duplicate_entry_retry_suppression_persists_domain_event(
     )
     assert retry_event.payload_json["duplicate_attempt_count"] == 1
     assert execution.status == ExecutionStatus.NEEDS_MANUAL_REVIEW.value
+
+
+def test_audit_test_002_duplicate_close_retry_suppression_persists_domain_event(
+    session, fixed_now
+):
+    trade_service = TradeService(session)
+    initial_execution = trade_service.create_execution(
+        Execution(
+            strategy_name="mean_reversion",
+            instrument=INSTRUMENT,
+            phase=ExecutionPhase.CLOSE.value,
+            status=ExecutionStatus.ORDER_SUBMITTED.value,
+            client_request_id="cls-submitted-request",
+            broker_reference="broker-pos-2",
+            local_position_id=42,
+            signal_time=fixed_now,
+            requested_size=1.0,
+            requested_price=100.0,
+            details={"action_key": f"close:mean_reversion:{INSTRUMENT}:broker-pos-2"},
+        )
+    )
+
+    execution, should_submit = StrategyService._prepare_execution(
+        trade_service=trade_service,
+        strategy_name="mean_reversion",
+        instrument=INSTRUMENT,
+        phase=ExecutionPhase.CLOSE.value,
+        signal_time=fixed_now + timedelta(seconds=5),
+        requested_size=1.0,
+        requested_price=99.8,
+        reason="Exit signal generated",
+        broker_reference="broker-pos-2",
+        local_position_id=42,
+        details={"action_key": f"close:mean_reversion:{INSTRUMENT}:broker-pos-2"},
+    )
+
+    events = _domain_events(session)
+    assert should_submit is False
+    assert [event.event_type for event in events] == [
+        "execution.retry_suppressed",
+        "execution.order_rejected",
+    ]
+    retry_event = events[0]
+    assert retry_event.category == "execution"
+    assert retry_event.severity == "warning"
+    assert retry_event.source == "strategy_service.prepare_execution"
+    assert retry_event.actor_type == "service"
+    assert retry_event.actor_id == "strategy_service"
+    assert retry_event.correlation_id == "cls-submitted-request"
+    assert retry_event.execution_id == initial_execution.id
+    assert retry_event.position_id == 42
+    assert retry_event.strategy_name == "mean_reversion"
+    assert retry_event.instrument == INSTRUMENT
+    assert retry_event.payload_json["previous_state"] == "ORDER_SUBMITTED"
+    assert retry_event.payload_json["new_state"] == "NEEDS_MANUAL_REVIEW"
+    assert retry_event.payload_json["duplicate_attempt_count"] == 1
+    assert execution.status == ExecutionStatus.NEEDS_MANUAL_REVIEW.value
+    assert execution.requires_manual_review is True
+
+
+def test_audit_obs_001_duplicate_close_retry_audit_failure_raises(
+    session, fixed_now, monkeypatch
+):
+    trade_service = TradeService(session)
+    initial_execution = trade_service.create_execution(
+        Execution(
+            strategy_name="mean_reversion",
+            instrument=INSTRUMENT,
+            phase=ExecutionPhase.CLOSE.value,
+            status=ExecutionStatus.ORDER_SUBMITTED.value,
+            client_request_id="cls-audit-fail-request",
+            broker_reference="broker-pos-3",
+            local_position_id=43,
+            signal_time=fixed_now,
+            requested_size=1.0,
+            requested_price=100.0,
+            details={"action_key": f"close:mean_reversion:{INSTRUMENT}:broker-pos-3"},
+        )
+    )
+    monkeypatch.setattr(
+        domain_event_service,
+        "record_event_in_session",
+        lambda **_: None,
+        raising=False,
+    )
+
+    with pytest.raises(AuditEventPersistenceError, match="execution.retry_suppressed"):
+        StrategyService._prepare_execution(
+            trade_service=trade_service,
+            strategy_name="mean_reversion",
+            instrument=INSTRUMENT,
+            phase=ExecutionPhase.CLOSE.value,
+            signal_time=fixed_now + timedelta(seconds=5),
+            requested_size=1.0,
+            requested_price=99.8,
+            reason="Exit signal generated",
+            broker_reference="broker-pos-3",
+            local_position_id=43,
+            details={"action_key": f"close:mean_reversion:{INSTRUMENT}:broker-pos-3"},
+        )
+
+    refreshed = trade_service.find_execution_by_client_request_id(
+        "cls-audit-fail-request"
+    )
+    assert refreshed is not None
+    assert refreshed.id == initial_execution.id
+    assert refreshed.status == ExecutionStatus.ORDER_SUBMITTED.value
+    assert refreshed.details.get("duplicate_retry_blocked") is None
 
 
 def test_prepare_execution_blocks_unsafe_duplicate_close_retry(session, fixed_now):
@@ -825,6 +934,141 @@ def test_audit_test_002_successful_close_persists_broker_action_domain_event(
     assert event.payload_json["broker_result"]["client_request_id"] == (
         execution.client_request_id
     )
+
+
+def test_audit_test_002_successful_entry_persists_broker_action_domain_events(
+    session, broker, fixed_now
+):
+    service = StrategyService(session)
+    trade_service = TradeService(session)
+    service.start_strategy(STRATEGY, INSTRUMENT)
+    broker.place_order_outcomes.append(
+        make_order_result(
+            broker_reference="entry-audit-1",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.5,
+            executed_at=fixed_now + timedelta(seconds=1),
+        )
+    )
+
+    service.process_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        100.5,
+        bid=100.49,
+        ask=100.51,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
+
+    position = trade_service.list_positions()[0]
+    intent = trade_service.list_trade_intents(limit=1)[0]
+    execution = trade_service.list_executions(limit=1)[0]
+    execution_events = [
+        event
+        for event in _domain_events(session)
+        if event.execution_id == execution.id
+        and event.event_type.startswith("execution.")
+    ]
+
+    assert [event.event_type for event in execution_events] == [
+        "execution.submission_pending_created",
+        "execution.order_submitted",
+        "execution.order_acknowledged",
+        "execution.fill_received",
+        "execution.position_opened",
+    ]
+    assert execution.status == ExecutionStatus.POSITION_OPENED.value
+    submitted = execution_events[1]
+    acknowledged = execution_events[2]
+    opened = execution_events[-1]
+    assert submitted.category == "execution"
+    assert submitted.source == "trade_service.transition_execution"
+    assert submitted.correlation_id == execution.client_request_id
+    assert submitted.payload_json["trade_intent_id"] == intent.id
+    assert submitted.payload_json["previous_state"] == "SUBMISSION_PENDING"
+    assert submitted.payload_json["new_state"] == "ORDER_SUBMITTED"
+    assert acknowledged.payload_json["broker_reference"] == "entry-audit-1"
+    assert acknowledged.payload_json["details"]["broker_result"][
+        "client_request_id"
+    ] == (execution.client_request_id)
+    assert opened.position_id == position.id
+    assert opened.payload_json["trade_intent_id"] == intent.id
+    assert opened.payload_json["broker_reference"] == "entry-audit-1"
+    assert opened.payload_json["previous_state"] == "FILL_FULL"
+    assert opened.payload_json["new_state"] == "POSITION_OPENED"
+
+
+def test_audit_obs_001_entry_position_opened_audit_failure_marks_execution(
+    session, broker, fixed_now, monkeypatch
+):
+    service = StrategyService(session)
+    trade_service = TradeService(session)
+    service.start_strategy(STRATEGY, INSTRUMENT)
+    broker.place_order_outcomes.append(
+        make_order_result(
+            broker_reference="entry-audit-fail-1",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.5,
+            executed_at=fixed_now + timedelta(seconds=1),
+        )
+    )
+    original_record_event_in_session = domain_event_service.record_event_in_session
+
+    def fail_position_opened_event(**kwargs):
+        if kwargs.get("event_type") == "execution.position_opened":
+            return None
+        return original_record_event_in_session(**kwargs)
+
+    monkeypatch.setattr(
+        domain_event_service,
+        "record_event_in_session",
+        fail_position_opened_event,
+        raising=False,
+    )
+
+    service.process_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        100.5,
+        bid=100.49,
+        ask=100.51,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
+
+    execution = trade_service.list_executions(limit=1)[0]
+    assert execution.status == ExecutionStatus.POSITION_OPENED.value
+    assert execution.details["domain_event_persistence_failed"] is True
+    assert {
+        "event_type": "execution.position_opened",
+        "source": "trade_service.transition_execution",
+        "previous_state": "FILL_FULL",
+        "new_state": "POSITION_OPENED",
+        "correlation_id": execution.client_request_id,
+    } in execution.details["audit_event_failures"]
 
 
 def test_audit_obs_001_close_audit_failure_marks_execution(
