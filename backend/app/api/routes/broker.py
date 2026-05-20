@@ -3,6 +3,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
+from app.api.errors import operator_error_detail
 from app.core.broker import BrokerError
 from app.services.broker_service import BrokerService
 
@@ -24,7 +25,12 @@ def list_broker_positions() -> list[BrokerPositionResponse]:
         positions = BrokerService().list_remote_positions()
     except BrokerError as exc:
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=operator_error_detail(
+                exc,
+                default_detail="Unable to load broker positions.",
+                prefix="Unable to load broker positions",
+            ),
         ) from exc
 
     return [

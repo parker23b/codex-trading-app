@@ -369,12 +369,11 @@ def test_audit_test_002_runtime_recovery_resumed_runtime_preserves_authority_for
     assert close_event.execution_id == execution.id
     assert close_event.payload_json["previous_state"] == "FILL_FULL"
     assert close_event.payload_json["new_state"] == "CLOSE_CONFIRMED"
-    assert (
-        close_event.payload_json["broker_reference"] == "recover-close-authority-pos-1"
+    assert close_event.payload_json["broker_reference"].startswith(
+        "[REDACTED_BROKER_REF:"
     )
-    assert (
-        close_event.payload_json["close_broker_reference"]
-        == "recover-close-authority-close-1"
+    assert close_event.payload_json["close_broker_reference"].startswith(
+        "[REDACTED_BROKER_REF:"
     )
 
 
@@ -408,7 +407,9 @@ def test_audit_test_002_runtime_recovery_broker_mismatch_persists_domain_event(
     assert events[0].runtime_id == "runtime-recover-mismatch-audit"
     assert events[0].strategy_name == "smoke_test_hold"
     assert events[0].instrument == "CS.D.EURUSD.MINI.IP"
-    assert events[0].payload_json["broker_reference"] == "missing-broker-audit"
+    assert (
+        events[0].payload_json["broker_reference"].startswith("[REDACTED_BROKER_REF:")
+    )
 
 
 def test_audit_test_002_runtime_recovery_broker_query_failure_persists_domain_event(
@@ -449,7 +450,7 @@ def test_audit_test_002_runtime_recovery_broker_query_failure_persists_domain_ev
     assert event.runtime_id == "runtime-recover-query-fail-audit"
     assert event.strategy_name == "smoke_test_hold"
     assert event.instrument == "CS.D.EURUSD.MINI.IP"
-    assert event.payload_json["broker_reference"] == "recover-query-fail-broker-ref"
+    assert event.payload_json["broker_reference"].startswith("[REDACTED_BROKER_REF:")
     assert event.payload_json["reason"] == "broker transport unavailable"
     assert event.payload_json["previous_state"] == "RUNNING"
     assert event.payload_json["new_state"] == "RECOVERY_REQUIRED"
@@ -549,7 +550,7 @@ def test_audit_test_002_runtime_recovery_stopped_open_risk_persists_domain_event
     assert event.strategy_name == "smoke_test_hold"
     assert event.instrument == "CS.D.EURUSD.MINI.IP"
     assert event.position_id == positions[0].id
-    assert event.payload_json["broker_reference"] == "stopped-open-risk-audit-1"
+    assert event.payload_json["broker_reference"].startswith("[REDACTED_BROKER_REF:")
     assert event.payload_json["trade_intent_id"] == intents[0].id
     assert event.payload_json["runtime_mode"] == "STOPPED"
     assert event.payload_json["recovered"] is True

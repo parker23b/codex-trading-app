@@ -15,6 +15,7 @@ from app.api.contracts.markets import (
     StrategyWatchlistMutationResponse,
     StrategyWatchlistResponse,
 )
+from app.api.errors import operator_error_detail
 from app.db.session import get_session
 from app.core.broker import BrokerError
 from app.models.watchlist import OperatorShortlistEntry, WatchlistEntry
@@ -62,12 +63,20 @@ def get_market_overview(
         return service.get_category_overview(category)
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=operator_error_detail(
+                exc,
+                default_detail="Invalid market category.",
+            ),
         ) from exc
     except BrokerError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Unable to load market overview from broker: {exc}",
+            detail=operator_error_detail(
+                exc,
+                default_detail="Unable to load market overview from broker.",
+                prefix="Unable to load market overview from broker",
+            ),
         ) from exc
 
 
@@ -93,7 +102,11 @@ def add_shortlist_item(
         instrument = WatchlistService(session).set_shortlisted(instrument_id)
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=operator_error_detail(
+                exc,
+                default_detail=f"Instrument '{instrument_id}' was not found.",
+            ),
         ) from exc
     entry = _shortlist_entry(session, instrument_id)
     persist_required_domain_event(

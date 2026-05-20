@@ -3,13 +3,18 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
 const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+let notificationHelpersCache = null;
 
 function compileNotificationHelpers() {
+  if (notificationHelpersCache) {
+    return notificationHelpersCache;
+  }
+
   const outDir = mkdtempSync(path.join(tmpdir(), "execution-notifications-"));
   execFileSync(
     path.join(frontendRoot, "node_modules", ".bin", "tsc"),
@@ -35,8 +40,17 @@ function compileNotificationHelpers() {
   );
   const require = createRequire(import.meta.url);
   const compiled = require(path.join(outDir, "lib", "execution-notifications.js"));
-  return { outDir, buildExecutionDetail: compiled.buildExecutionDetail };
+  notificationHelpersCache = { outDir, buildExecutionDetail: compiled.buildExecutionDetail };
+  return notificationHelpersCache;
 }
+
+after(() => {
+  if (!notificationHelpersCache) {
+    return;
+  }
+  rmSync(notificationHelpersCache.outDir, { recursive: true, force: true });
+  notificationHelpersCache = null;
+});
 
 function executionWithDriftFlags({ material, critical }) {
   return {
@@ -77,43 +91,31 @@ function executionWithDriftFlags({ material, critical }) {
 }
 
 test("AUDIT-RISK-002 execution notification displays material submitted/fill risk drift", () => {
-  const { outDir, buildExecutionDetail } = compileNotificationHelpers();
-  try {
-    const detail = buildExecutionDetail(
-      executionWithDriftFlags({ material: true, critical: false }),
-    );
+  const { buildExecutionDetail } = compileNotificationHelpers();
+  const detail = buildExecutionDetail(
+    executionWithDriftFlags({ material: true, critical: false }),
+  );
 
-    assert.match(detail, /material risk drift detected/);
-    assert.doesNotMatch(detail, /critical risk drift detected/);
-  } finally {
-    rmSync(outDir, { recursive: true, force: true });
-  }
+  assert.match(detail, /material risk drift detected/);
+  assert.doesNotMatch(detail, /critical risk drift detected/);
 });
 
 test("AUDIT-RISK-002 execution notification displays critical submitted/fill risk drift", () => {
-  const { outDir, buildExecutionDetail } = compileNotificationHelpers();
-  try {
-    const detail = buildExecutionDetail(
-      executionWithDriftFlags({ material: true, critical: true }),
-    );
+  const { buildExecutionDetail } = compileNotificationHelpers();
+  const detail = buildExecutionDetail(
+    executionWithDriftFlags({ material: true, critical: true }),
+  );
 
-    assert.match(detail, /critical risk drift detected/);
-    assert.doesNotMatch(detail, /material risk drift detected/);
-  } finally {
-    rmSync(outDir, { recursive: true, force: true });
-  }
+  assert.match(detail, /critical risk drift detected/);
+  assert.doesNotMatch(detail, /material risk drift detected/);
 });
 
 test("AUDIT-RISK-002 execution notification omits drift text without drift flags", () => {
-  const { outDir, buildExecutionDetail } = compileNotificationHelpers();
-  try {
-    const detail = buildExecutionDetail(
-      executionWithDriftFlags({ material: false, critical: false }),
-    );
+  const { buildExecutionDetail } = compileNotificationHelpers();
+  const detail = buildExecutionDetail(
+    executionWithDriftFlags({ material: false, critical: false }),
+  );
 
-    assert.doesNotMatch(detail, /material risk drift detected/);
-    assert.doesNotMatch(detail, /critical risk drift detected/);
-  } finally {
-    rmSync(outDir, { recursive: true, force: true });
-  }
+  assert.doesNotMatch(detail, /material risk drift detected/);
+  assert.doesNotMatch(detail, /critical risk drift detected/);
 });

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-import traceback
 from typing import Any
 
 from sqlmodel import Session, desc, select
 
 from app.core.logging import get_logger
+from app.core.redaction import sanitize_error_detail, sanitize_payload, sanitize_text
 from app.db.session import engine
 from app.models.domain_event import DomainEvent, utc_now
 
@@ -54,9 +54,9 @@ class DomainEventService:
             execution_id=execution_id,
             actor_type=actor_type,
             actor_id=actor_id,
-            title=title,
-            message=message,
-            payload_json=payload_json or {},
+            title=sanitize_text(title) or title,
+            message=sanitize_text(message),
+            payload_json=sanitize_payload(payload_json or {}),
         )
         try:
             with Session(engine) as session:
@@ -116,9 +116,9 @@ class DomainEventService:
             execution_id=execution_id,
             actor_type=actor_type,
             actor_id=actor_id,
-            title=title,
-            message=message,
-            payload_json=payload_json or {},
+            title=sanitize_text(title) or title,
+            message=sanitize_text(message),
+            payload_json=sanitize_payload(payload_json or {}),
         )
         try:
             session.add(event)
@@ -161,14 +161,18 @@ class DomainEventService:
         created_at: datetime | None = None,
         exc: BaseException | None = None,
     ) -> DomainEvent | None:
-        payload = dict(payload_json or {})
+        payload = sanitize_payload(dict(payload_json or {}))
         payload.setdefault("error_type", error_type)
         if exc is not None:
-            payload.setdefault("exception_message", str(exc))
             payload.setdefault(
-                "traceback",
-                "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+                "exception_message",
+                sanitize_error_detail(
+                    exc,
+                    default_detail="Internal error details redacted.",
+                ),
             )
+            payload.setdefault("traceback", "[TRACEBACK REDACTED]")
+            payload.setdefault("exception_type", type(exc).__name__)
         return self.record_event(
             event_type=event_type,
             category=category,
@@ -176,7 +180,15 @@ class DomainEventService:
             error_type=error_type,
             source=source,
             title=title,
-            message=message or (str(exc) if exc is not None else None),
+            message=message
+            or (
+                sanitize_error_detail(
+                    exc,
+                    default_detail="Internal error details redacted.",
+                )
+                if exc is not None
+                else None
+            ),
             correlation_id=correlation_id,
             runtime_id=runtime_id,
             strategy_name=strategy_name,

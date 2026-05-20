@@ -6,6 +6,7 @@ from app.api.audit import persist_required_domain_event
 from app.api.auth import build_operator_audit_context, resolve_request_settings
 from app.api.contracts.control_plane import StrategyMutationStatusResponse
 from app.api.contracts.strategies import StrategySummaryResponse
+from app.api.errors import operator_error_detail
 from app.core.runtime import runtime_manager
 from app.db.session import get_session
 from app.services.strategy_service import StrategyService
@@ -63,7 +64,10 @@ def start_strategy(
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
+            detail=operator_error_detail(
+                exc,
+                default_detail="Unable to start strategy runtime.",
+            ),
         ) from exc
     engine = runtime_manager.get_engine(payload.strategy_name, payload.instrument)
     persist_required_domain_event(
@@ -113,7 +117,10 @@ def stop_strategy(
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(exc),
+            detail=operator_error_detail(
+                exc,
+                default_detail="Strategy runtime was not found.",
+            ),
         ) from exc
     persist_required_domain_event(
         session=session,
@@ -178,7 +185,11 @@ def start_strategy_by_name(
         )
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=operator_error_detail(
+                exc,
+                default_detail="Unable to start strategy runtime.",
+            ),
         ) from exc
     engine = runtime_manager.get_engine(name, instrument)
     persist_required_domain_event(
@@ -231,7 +242,11 @@ def stop_strategy_by_name(
         service.stop_strategy(strategy_name=name)
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=operator_error_detail(
+                exc,
+                default_detail="Strategy runtime was not found.",
+            ),
         ) from exc
     persist_required_domain_event(
         session=session,

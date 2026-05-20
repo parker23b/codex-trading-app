@@ -322,8 +322,10 @@ def test_audit_test_002_trade_intent_transition_records_related_domain_ids(sessi
     assert event.payload_json["trade_intent_id"] == intent.id
     assert event.payload_json["previous_state"] == TradeIntentState.PROPOSED.value
     assert event.payload_json["new_state"] == TradeIntentState.CLOSED.value
-    assert event.payload_json["broker_reference"] == "entry-ref-audit"
-    assert event.payload_json["close_broker_reference"] == "close-ref-audit"
+    assert event.payload_json["broker_reference"].startswith("[REDACTED_BROKER_REF:")
+    assert event.payload_json["close_broker_reference"].startswith(
+        "[REDACTED_BROKER_REF:"
+    )
     assert event.payload_json["close_reason_code"] == "broker_close_confirmed"
     assert (
         event.payload_json["risk_truth_confidence"]

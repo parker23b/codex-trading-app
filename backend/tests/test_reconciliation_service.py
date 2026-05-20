@@ -185,7 +185,7 @@ def test_audit_test_002_reconciliation_correction_persists_domain_event(
     assert event.position_id == local_position.id
     assert event.correlation_id == "reconcile-correct-request-1"
     assert event.execution_id == execution.id
-    assert event.payload_json["broker_reference"] == "broker-correct-audit"
+    assert event.payload_json["broker_reference"].startswith("[REDACTED_BROKER_REF:")
     assert event.payload_json["trade_intent_id"] == intent.id
     assert event.payload_json["execution_id"] == execution.id
     assert event.payload_json["execution_client_request_id"] == (
@@ -490,7 +490,9 @@ def test_audit_test_002_reconciliation_adoption_persists_domain_event(
     assert events[0].strategy_name == "broker_sync"
     assert events[0].instrument == "CS.D.EURUSD.MINI.IP"
     assert events[0].position_id == positions[0].id
-    assert events[0].payload_json["broker_reference"] == "broker-adopt-audit"
+    assert (
+        events[0].payload_json["broker_reference"].startswith("[REDACTED_BROKER_REF:")
+    )
     assert events[0].payload_json["trade_intent_id"] == intents[0].id
     assert events[0].payload_json["previous_state"] == "BROKER_ONLY"
     assert events[0].payload_json["new_state"] == "LOCAL_POSITION_ADOPTED"
@@ -654,7 +656,9 @@ def test_audit_test_002_reconciliation_forced_close_persists_domain_events(
         assert event.trade_id == trades[0].id
         assert event.execution_id == execution.id
         assert event.correlation_id == "reconcile-force-request-1"
-        assert event.payload_json["broker_reference"] == "missing-audit"
+        assert event.payload_json["broker_reference"].startswith(
+            "[REDACTED_BROKER_REF:"
+        )
         assert event.payload_json["trade_intent_id"] == intent.id
         assert event.payload_json["execution_id"] == execution.id
         assert event.payload_json["execution_client_request_id"] == (

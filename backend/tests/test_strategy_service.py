@@ -929,7 +929,9 @@ def test_audit_test_002_successful_close_persists_broker_action_domain_event(
     assert event.payload_json["trade_intent_id"] == trade.trade_intent_id
     assert event.payload_json["previous_state"] == "FILL_FULL"
     assert event.payload_json["new_state"] == "CLOSE_CONFIRMED"
-    assert event.payload_json["close_broker_reference"] == "close-audit-1"
+    assert event.payload_json["close_broker_reference"].startswith(
+        "[REDACTED_BROKER_REF:"
+    )
     assert event.payload_json["execution_source"] == "BROKER_CONFIRMED"
     assert event.payload_json["broker_result"]["client_request_id"] == (
         execution.client_request_id
@@ -999,13 +1001,15 @@ def test_audit_test_002_successful_entry_persists_broker_action_domain_events(
     assert submitted.payload_json["trade_intent_id"] == intent.id
     assert submitted.payload_json["previous_state"] == "SUBMISSION_PENDING"
     assert submitted.payload_json["new_state"] == "ORDER_SUBMITTED"
-    assert acknowledged.payload_json["broker_reference"] == "entry-audit-1"
+    assert acknowledged.payload_json["broker_reference"].startswith(
+        "[REDACTED_BROKER_REF:"
+    )
     assert acknowledged.payload_json["details"]["broker_result"][
         "client_request_id"
     ] == (execution.client_request_id)
     assert opened.position_id == position.id
     assert opened.payload_json["trade_intent_id"] == intent.id
-    assert opened.payload_json["broker_reference"] == "entry-audit-1"
+    assert opened.payload_json["broker_reference"].startswith("[REDACTED_BROKER_REF:")
     assert opened.payload_json["previous_state"] == "FILL_FULL"
     assert opened.payload_json["new_state"] == "POSITION_OPENED"
 

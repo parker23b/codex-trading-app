@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from app.api.audit import persist_required_domain_event
+from app.api.errors import operator_error_detail
 from app.db.session import get_session
 from app.reviewer.models import (
     DailyReviewResponse,
@@ -208,7 +209,11 @@ def get_trade_postmortem(
         )
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=operator_error_detail(
+                exc,
+                default_detail=f"Trade '{trade_id}' was not found.",
+            ),
         ) from exc
     if persist:
         _persist_review_audit_event(
@@ -268,5 +273,9 @@ def get_review_record(
         return AIReviewerService(session).get_review_record(review_id)
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=operator_error_detail(
+                exc,
+                default_detail=f"Review '{review_id}' was not found.",
+            ),
         ) from exc

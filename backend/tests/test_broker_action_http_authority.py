@@ -240,8 +240,8 @@ def test_audit_api_008_strategy_start_http_route_reachable_entry_preserves_autho
     assert position_opened.payload_json["trade_intent_id"] == execution.trade_intent_id
     assert position_opened.payload_json["previous_state"] == "FILL_FULL"
     assert position_opened.payload_json["new_state"] == "POSITION_OPENED"
-    assert (
-        position_opened.payload_json["broker_reference"] == execution.broker_reference
+    assert position_opened.payload_json["broker_reference"].startswith(
+        "[REDACTED_BROKER_REF:"
     )
     assert (
         position_opened.payload_json["details"]["runtime_authority"]
@@ -343,8 +343,8 @@ def test_audit_api_008_strategy_start_by_name_route_reachable_close_preserves_ma
     assert manual_review_event.execution_id == execution.id
     assert manual_review_event.position_id == execution.local_position_id
     assert manual_review_event.payload_json["trade_intent_id"] == intent.id
-    assert manual_review_event.payload_json["broker_reference"] == (
-        "close-route-manual-review-1"
+    assert manual_review_event.payload_json["broker_reference"].startswith(
+        "[REDACTED_BROKER_REF:"
     )
     assert manual_review_event.payload_json["requires_manual_review"] is True
     assert (

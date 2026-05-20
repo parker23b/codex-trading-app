@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import HTTPException, status
 from sqlmodel import Session
 
+from app.core.redaction import sanitize_payload
 from app.services.domain_event_service import domain_event_service
 
 
@@ -48,7 +49,7 @@ def persist_required_domain_event(
         execution_id=execution_id,
         actor_type=actor_type,
         actor_id=actor_id,
-        payload_json=payload_json,
+        payload_json=sanitize_payload(payload_json),
     )
     if event is None:
         raise HTTPException(

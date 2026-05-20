@@ -112,7 +112,7 @@ def test_audit_test_002_execution_transition_persists_domain_event_despite_globa
     assert event.payload_json["trade_intent_id"] == intent.id
     assert event.payload_json["previous_state"] == "SUBMISSION_PENDING"
     assert event.payload_json["new_state"] == "ORDER_SUBMITTED"
-    assert event.payload_json["broker_reference"] == "deal-ref-audit-1"
+    assert event.payload_json["broker_reference"].startswith("[REDACTED_BROKER_REF:")
     assert event.payload_json["requested_size"] == 1.0
     assert event.payload_json["intended_risk_amount"] == 50.0
 

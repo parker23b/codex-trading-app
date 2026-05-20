@@ -31,6 +31,7 @@ from app.core.broker import (
 )
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.redaction import sanitize_error_detail, sanitize_payload
 
 logger = get_logger(__name__)
 
@@ -158,7 +159,7 @@ class IGBroker(Broker):
                 "strategy": order.strategy_name,
                 "direction": order.direction.value,
                 "size": order.size,
-                "payload": payload,
+                "payload": "[RAW_BROKER_PAYLOAD REDACTED]",
                 "market_status": market_details.market_status,
                 "tradable": market_details.tradable,
                 "min_deal_size": market_details.min_deal_size,
@@ -171,7 +172,7 @@ class IGBroker(Broker):
                 "account_balance": account_summary.balance,
                 "account_currency": self._get_account_currency(),
                 "order_currency": order_currency,
-                "market_payload": market_payload,
+                "market_payload": "[RAW_BROKER_PAYLOAD REDACTED]",
             },
         )
         response = self._request("POST", "/positions/otc", version="2", body=payload)
@@ -198,7 +199,10 @@ class IGBroker(Broker):
                     "strategy": order.strategy_name,
                     "deal_reference": deal_reference,
                     "client_request_id": order.client_request_id,
-                    "error": str(exc),
+                    "error": sanitize_error_detail(
+                        exc,
+                        default_detail="Broker confirmation details redacted.",
+                    ),
                 },
             )
             return self._confirmation_failure_result(
@@ -328,7 +332,7 @@ class IGBroker(Broker):
                 "direction": opposite_direction.value,
                 "size": open_position.size,
                 "client_request_id": client_request_id,
-                "payload": payload,
+                "payload": "[RAW_BROKER_PAYLOAD REDACTED]",
             },
         )
         response = self._request("DELETE", "/positions/otc", version="1", body=payload)
@@ -357,7 +361,10 @@ class IGBroker(Broker):
                     "broker_reference": open_position.broker_reference,
                     "deal_reference": deal_reference,
                     "client_request_id": client_request_id,
-                    "error": str(exc),
+                    "error": sanitize_error_detail(
+                        exc,
+                        default_detail="Broker confirmation details redacted.",
+                    ),
                 },
             )
             return self._confirmation_failure_result(
@@ -561,7 +568,13 @@ class IGBroker(Broker):
             ):
                 logger.warning(
                     "Using stale IG market cache after upstream error",
-                    extra={"instrument": instrument, "error": str(exc)},
+                    extra={
+                        "instrument": instrument,
+                        "error": sanitize_error_detail(
+                            exc,
+                            default_detail="Upstream error details redacted.",
+                        ),
+                    },
                 )
                 return cached.details
             raise
@@ -968,11 +981,12 @@ class IGBroker(Broker):
             if deal_status == "REJECTED":
                 reason = response.get("reason") or "Unknown rejection"
                 raise IGBrokerError(
-                    f"IG rejected deal {deal_reference}: {reason}. Confirmation: {json.dumps(response, default=str)}"
+                    "IG rejected the broker action during confirmation lookup: "
+                    f"{sanitize_error_detail(reason, default_detail='Broker rejected the request.')}"
                 )
             time.sleep(0.4)
         raise IGBrokerError(
-            f"Timed out waiting for IG confirmation for deal {deal_reference}: {last_response}"
+            "Timed out waiting for IG confirmation after broker acknowledgement."
         )
 
     @staticmethod
@@ -1250,24 +1264,36 @@ class IGBroker(Broker):
                 headers=request_headers,
             )
             if status_code >= 400:
+                parsed_error_code = self._extract_error_code(response_text)
                 logger.error(
                     "IG request failed",
                     extra={
                         "status_code": status_code,
                         "path": path,
-                        "body": response_text[:500],
+                        "error_code": parsed_error_code,
+                        "response_body": "[RAW_BROKER_PAYLOAD REDACTED]",
                     },
                 )
-                raise IGBrokerError(
-                    f"IG request failed with status {status_code}: {response_text}"
-                )
+                message = f"IG request failed with status {status_code}"
+                if parsed_error_code:
+                    message = f"{message} ({parsed_error_code})"
+                raise IGBrokerError(message)
             response_body = json.loads(response_text) if response_text else {}
             return response_body, response_headers
         except IGBrokerError:
             raise
         except OSError as exc:
-            logger.error("IG network error", extra={"path": path, "reason": str(exc)})
-            raise IGBrokerError(f"Unable to reach IG API: {exc}") from exc
+            logger.error(
+                "IG network error",
+                extra={
+                    "path": path,
+                    "reason": sanitize_error_detail(
+                        exc,
+                        default_detail="Network error details redacted.",
+                    ),
+                },
+            )
+            raise IGBrokerError("Unable to reach IG API.") from exc
 
     def _send_https_request(
         self,
@@ -1393,3 +1419,20 @@ class IGBroker(Broker):
             or "Unable to reach IG API" in message
             or "status 5" in message
         )
+
+    @staticmethod
+    def _extract_error_code(response_text: str) -> str | None:
+        if not response_text:
+            return None
+        try:
+            parsed = json.loads(response_text)
+        except json.JSONDecodeError:
+            return None
+        sanitized = sanitize_payload(parsed)
+        if not isinstance(sanitized, dict):
+            return None
+        for key in ("errorCode", "error_code", "reason"):
+            value = sanitized.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        return None

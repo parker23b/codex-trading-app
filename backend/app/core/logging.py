@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 from collections.abc import Mapping
 from json import dumps
 
+from app.core.redaction import sanitize_payload, sanitize_text
+
 
 class StructuredFormatter(logging.Formatter):
     """Attach non-standard LogRecord fields as JSON for easier backend tracing."""
@@ -33,7 +35,26 @@ class StructuredFormatter(logging.Formatter):
     }
 
     def format(self, record: logging.LogRecord) -> str:
-        base_message = super().format(record)
+        original_message = record.getMessage()
+        sanitized_message = sanitize_text(original_message) or original_message
+        original_msg, original_args = record.msg, record.args
+        original_exc_info, original_exc_text = record.exc_info, record.exc_text
+        suppress_traceback = record.exc_info is not None or bool(record.exc_text)
+        try:
+            if sanitized_message != original_message:
+                record.msg = sanitized_message
+                record.args = ()
+            if suppress_traceback:
+                record.exc_info = None
+                record.exc_text = None
+            base_message = super().format(record)
+        finally:
+            record.msg = original_msg
+            record.args = original_args
+            record.exc_info = original_exc_info
+            record.exc_text = original_exc_text
+        if suppress_traceback:
+            base_message = f"{base_message} {sanitize_text('[TRACEBACK REDACTED]')}"
         extra = {
             key: value
             for key, value in record.__dict__.items()
@@ -42,14 +63,16 @@ class StructuredFormatter(logging.Formatter):
         if not extra:
             return base_message
 
-        serializable_extra = {
-            key: value
-            if isinstance(
-                value, (str, int, float, bool, type(None), list, tuple, Mapping)
-            )
-            else str(value)
-            for key, value in extra.items()
-        }
+        serializable_extra = sanitize_payload(
+            {
+                key: value
+                if isinstance(
+                    value, (str, int, float, bool, type(None), list, tuple, Mapping)
+                )
+                else str(value)
+                for key, value in extra.items()
+            }
+        )
         return f"{base_message} {dumps(serializable_extra, sort_keys=True)}"
 
 
@@ -87,14 +110,17 @@ class DomainEventErrorHandler(logging.Handler):
                 if key not in StructuredFormatter._reserved and not key.startswith("_")
             }
             if extra:
-                payload["log_context"] = {
-                    key: value
-                    if isinstance(
-                        value, (str, int, float, bool, type(None), list, tuple, Mapping)
-                    )
-                    else str(value)
-                    for key, value in extra.items()
-                }
+                payload["log_context"] = sanitize_payload(
+                    {
+                        key: value
+                        if isinstance(
+                            value,
+                            (str, int, float, bool, type(None), list, tuple, Mapping),
+                        )
+                        else str(value)
+                        for key, value in extra.items()
+                    }
+                )
             domain_event_service.record_error(
                 error_type=str(error_type),
                 source=record.name,

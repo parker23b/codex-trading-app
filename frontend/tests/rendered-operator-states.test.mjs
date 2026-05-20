@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -16,8 +16,16 @@ const Module = require("node:module");
 const runtimeModulePaths = new Map(
   ["react", "react-dom/server", "react/jsx-runtime"].map((request) => [request, frontendRequire.resolve(request)]),
 );
+let renderedModulesCache = null;
 
 function compileRenderedModules() {
+  if (renderedModulesCache) {
+    return {
+      tempRoot: path.join(renderedModulesCache.tempRoot, "__cached_fixture__"),
+      outDir: renderedModulesCache.outDir,
+    };
+  }
+
   const tempRoot = mkdtempSync(path.join(tmpdir(), "rendered-operator-states-"));
   const outDir = path.join(tempRoot, "out");
   const configPath = path.join(tempRoot, "tsconfig.json");
@@ -97,8 +105,20 @@ function compileRenderedModules() {
     const stdout = error?.stdout?.toString?.() ?? "";
     throw new Error(`TypeScript render-fixture compilation failed.\n${stdout}${stderr}`);
   }
-  return { tempRoot, outDir };
+  renderedModulesCache = { tempRoot, outDir };
+  return {
+    tempRoot: path.join(tempRoot, "__cached_fixture__"),
+    outDir,
+  };
 }
+
+after(() => {
+  if (!renderedModulesCache) {
+    return;
+  }
+  rmSync(renderedModulesCache.tempRoot, { recursive: true, force: true });
+  renderedModulesCache = null;
+});
 
 function withCompiledAliases(outDir, fn) {
   const originalResolveFilename = Module._resolveFilename;

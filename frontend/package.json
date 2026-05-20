@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test:frontend": "node --test tests/*.test.mjs",
+    "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",
     "audit:unused": "knip",
     "audit:arch": "depcruise app components lib --config .dependency-cruiser.cjs",
@@ -19,6 +20,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4.2.2",
     "@types/node": "^22.14.1",
     "@types/react": "^19.0.10",

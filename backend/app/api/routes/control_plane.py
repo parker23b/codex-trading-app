@@ -11,6 +11,7 @@ from app.api.contracts.control_plane import (
     GovernanceMutationResponse,
     OperatorControlResponse,
 )
+from app.api.errors import operator_error_detail
 from app.db.session import get_session
 from app.models.strategy_governance import GovernanceApprovalState
 from app.services.control_plane_service import ControlPlaneService
@@ -102,7 +103,11 @@ def get_control_plane_strategy_detail(
         )
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=operator_error_detail(
+                exc,
+                default_detail=f"Strategy '{strategy_name}' was not found.",
+            ),
         ) from exc
 
 
@@ -198,7 +203,11 @@ def update_strategy_governance(
         )
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=operator_error_detail(
+                exc,
+                default_detail=f"Strategy '{strategy_name}' was not found.",
+            ),
         ) from exc
     persist_required_domain_event(
         session=session,
