@@ -116,8 +116,25 @@ def test_audit_test_002_reconciliation_correction_persists_domain_event(
             signal_time=fixed_now - timedelta(minutes=10),
             proposed_size=0.2,
             allocated_size=0.2,
+            allocation_cycle_id="alloc-reconcile-correct-1",
             broker_reference="broker-correct-audit",
+            execution_client_request_id="reconcile-correct-request-1",
             opened_at=fixed_now - timedelta(minutes=10),
+        )
+    )
+    execution = trade_service.create_execution(
+        Execution(
+            trade_intent_id=intent.id,
+            strategy_name="smoke_test_hold",
+            instrument="CS.D.EURUSD.MINI.IP",
+            phase=ExecutionPhase.ENTRY.value,
+            status=ExecutionStatus.NEEDS_MANUAL_REVIEW.value,
+            client_request_id="reconcile-correct-request-1",
+            broker_reference="broker-correct-audit",
+            signal_time=fixed_now - timedelta(minutes=10),
+            requested_size=0.2,
+            requested_price=100.0,
+            requires_manual_review=True,
         )
     )
     local_position = trade_service.record_broker_position(
@@ -166,8 +183,15 @@ def test_audit_test_002_reconciliation_correction_persists_domain_event(
     assert event.strategy_name == "smoke_test_hold"
     assert event.instrument == "CS.D.EURUSD.MINI.IP"
     assert event.position_id == local_position.id
+    assert event.correlation_id == "reconcile-correct-request-1"
+    assert event.execution_id == execution.id
     assert event.payload_json["broker_reference"] == "broker-correct-audit"
     assert event.payload_json["trade_intent_id"] == intent.id
+    assert event.payload_json["execution_id"] == execution.id
+    assert event.payload_json["execution_client_request_id"] == (
+        "reconcile-correct-request-1"
+    )
+    assert event.payload_json["allocation_cycle_id"] == "alloc-reconcile-correct-1"
     assert event.payload_json["matched_local_position"] is True
     assert event.payload_json["previous_state"] == "LOCAL_POSITION_STALE"
     assert event.payload_json["new_state"] == "LOCAL_POSITION_BROKER_CONFIRMED"
@@ -583,10 +607,28 @@ def test_audit_test_002_reconciliation_forced_close_persists_domain_events(
             signal_time=current_position.open_time,
             proposed_size=0.2,
             allocated_size=0.2,
+            allocation_cycle_id="alloc-reconcile-force-1",
             broker_reference="missing-audit",
+            execution_client_request_id="reconcile-force-request-1",
             decision_reason_code="approved",
             decision_reason="Opened earlier.",
             opened_at=current_position.open_time,
+        )
+    )
+    execution = trade_service.create_execution(
+        Execution(
+            trade_intent_id=intent.id,
+            strategy_name="smoke_test_hold",
+            instrument="CS.D.EURUSD.MINI.IP",
+            phase=ExecutionPhase.ENTRY.value,
+            status=ExecutionStatus.POSITION_OPENED.value,
+            client_request_id="reconcile-force-request-1",
+            broker_reference="missing-audit",
+            signal_time=current_position.open_time,
+            requested_size=0.2,
+            filled_size=0.2,
+            requested_price=100.0,
+            average_fill_price=100.0,
         )
     )
     current_position.trade_intent_id = intent.id
@@ -609,10 +651,91 @@ def test_audit_test_002_reconciliation_forced_close_persists_domain_events(
         assert event.strategy_name == "smoke_test_hold"
         assert event.instrument == "CS.D.EURUSD.MINI.IP"
         assert event.position_id == persisted.id
+        assert event.trade_id == trades[0].id
+        assert event.execution_id == execution.id
+        assert event.correlation_id == "reconcile-force-request-1"
         assert event.payload_json["broker_reference"] == "missing-audit"
         assert event.payload_json["trade_intent_id"] == intent.id
+        assert event.payload_json["execution_id"] == execution.id
+        assert event.payload_json["execution_client_request_id"] == (
+            "reconcile-force-request-1"
+        )
         assert event.payload_json["forced_trade_id"] == trades[0].id
+        assert event.payload_json["trade_id"] == trades[0].id
+        assert event.payload_json["allocation_cycle_id"] == "alloc-reconcile-force-1"
         assert event.payload_json["previous_state"] == "LOCAL_POSITION_OPEN"
         assert event.payload_json["new_state"] == "LOCAL_POSITION_FORCED_CLOSED"
     assert events[0].severity == "warning"
     assert events[1].severity == "info"
+
+
+def test_audit_obs_001_reconciliation_forced_close_audit_failure_raises(
+    session, fixed_now, monkeypatch
+):
+    trade_service = TradeService(session)
+    current_position = Position(
+        strategy_name="smoke_test_hold",
+        broker_reference="missing-audit-fail",
+        instrument="CS.D.EURUSD.MINI.IP",
+        direction="BUY",
+        size=0.2,
+        open_price=100.0,
+        open_time=fixed_now - timedelta(minutes=5),
+        current_price=99.5,
+        unrealized_pnl=-0.1,
+        account_type="DEMO",
+        is_open=True,
+        broker_sync_status="CONFIRMED",
+    )
+    intent = trade_service.create_trade_intent(
+        TradeIntent(
+            strategy_name="smoke_test_hold",
+            instrument="CS.D.EURUSD.MINI.IP",
+            direction="BUY",
+            state=TradeIntentState.POSITION_OPENED.value,
+            signal_time=current_position.open_time,
+            proposed_size=0.2,
+            allocated_size=0.2,
+            broker_reference="missing-audit-fail",
+            execution_client_request_id="reconcile-force-fail-request-1",
+            opened_at=current_position.open_time,
+        )
+    )
+    trade_service.create_execution(
+        Execution(
+            trade_intent_id=intent.id,
+            strategy_name="smoke_test_hold",
+            instrument="CS.D.EURUSD.MINI.IP",
+            phase=ExecutionPhase.ENTRY.value,
+            status=ExecutionStatus.POSITION_OPENED.value,
+            client_request_id="reconcile-force-fail-request-1",
+            broker_reference="missing-audit-fail",
+            signal_time=current_position.open_time,
+            requested_size=0.2,
+            filled_size=0.2,
+            requested_price=100.0,
+            average_fill_price=100.0,
+        )
+    )
+    current_position.trade_intent_id = intent.id
+    trade_service.record_broker_position(current_position)
+    monkeypatch.setattr(
+        domain_event_service,
+        "record_event_in_session",
+        lambda **_: None,
+        raising=False,
+    )
+
+    with pytest.raises(
+        AuditEventPersistenceError,
+        match="reconciliation.unmatched_local_position",
+    ):
+        ReconciliationService(trade_service).reconcile_open_positions()
+
+    events = _reconciliation_domain_events(session)
+    trades = trade_service.list_trades()
+    refreshed_intent = trade_service.get_trade_intent(intent.id)
+    assert events == []
+    assert len(trades) == 1
+    assert refreshed_intent is not None
+    assert refreshed_intent.state == TradeIntentState.FORCED_RECONCILIATION_CLOSE.value

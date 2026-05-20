@@ -22,7 +22,7 @@ The current blocking themes are:
 - the spec coverage matrix still does not comprehensively map every P0/P1 boundary and surface requirement
 - `risk_truth_confidence` now has an authoritative backend/frontend contract, but broader enum-parity and operator-surface evidence are still incomplete
 - any future operator-critical raw dict/list routes still need explicit contract ownership even though the currently known frontend-consumed route boundary is now modeled
-- durable audit preservation is still incomplete for broader broker-action HTTP authority and remaining background-event paths outside the covered entry/close/recovery/reconciliation slices
+- durable audit preservation is still incomplete for broader broker-action HTTP authority and remaining background-event paths outside the covered entry/close and selected recovery/reconciliation slices
 - frontend operator truth is still missing broad browser/e2e coverage for degraded, unknown, passive-vs-mutation, and mutation-failure states
 - logging redaction, secrets hygiene, dependency locking, migrations, and durable observability remain below readiness grade
 
@@ -45,7 +45,7 @@ The canonical blocker list is in [audit-status.md](audit-status.md).
 Before live or demo broker dealing, the app needs at least:
 
 - complete modeled/documented contracts for any future operator-critical raw response families
-- durable audit-preservation proof for remaining mutation, broker-action, reconciliation, recovery, and background-event paths
+- durable audit-preservation proof for remaining mutation, broker-action, and background-event paths beyond the covered entry/close and selected recovery/reconciliation slices
 - browser/e2e evidence for degraded, stale, simulated, unknown, manual-review, and mutation-failure operator states
 - migration, dependency, redaction, and secrets controls that are strong enough for broker-connected operation
 - regression tests for every fixed P0/P1 behaviour that still lacks route, frontend, or full-stack evidence

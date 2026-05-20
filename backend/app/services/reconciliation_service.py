@@ -217,6 +217,7 @@ class ReconciliationService:
                         details=details,
                     )
                 if is_adopted:
+                    correlated_execution = self._linked_execution_for_intent(intent)
                     adopted_count += 1
                     self._record_required_reconciliation_event(
                         event_type="reconciliation.unmatched_remote_position",
@@ -226,14 +227,42 @@ class ReconciliationService:
                         strategy_name=strategy_name,
                         instrument=instrument,
                         position_id=persisted.id,
+                        correlation_id=(
+                            intent.execution_client_request_id
+                            if intent is not None
+                            else None
+                        ),
+                        trade_id=intent.trade_id if intent is not None else None,
+                        execution_id=(
+                            correlated_execution.id
+                            if correlated_execution is not None
+                            else None
+                        ),
                         payload_json={
                             **details,
                             "broker_reference": remote_position.broker_reference,
+                            "execution_id": (
+                                correlated_execution.id
+                                if correlated_execution is not None
+                                else None
+                            ),
+                            "execution_client_request_id": (
+                                intent.execution_client_request_id
+                                if intent is not None
+                                else None
+                            ),
+                            "trade_id": intent.trade_id if intent is not None else None,
+                            "allocation_cycle_id": (
+                                intent.allocation_cycle_id
+                                if intent is not None
+                                else None
+                            ),
                             "previous_state": "BROKER_ONLY",
                             "new_state": "LOCAL_POSITION_ADOPTED",
                         },
                     )
                 else:
+                    correlated_execution = self._linked_execution_for_intent(intent)
                     corrected_count += 1
                     self._record_required_reconciliation_event(
                         event_type="reconciliation.position_corrected",
@@ -243,9 +272,36 @@ class ReconciliationService:
                         strategy_name=strategy_name,
                         instrument=instrument,
                         position_id=persisted.id,
+                        correlation_id=(
+                            intent.execution_client_request_id
+                            if intent is not None
+                            else None
+                        ),
+                        trade_id=intent.trade_id if intent is not None else None,
+                        execution_id=(
+                            correlated_execution.id
+                            if correlated_execution is not None
+                            else None
+                        ),
                         payload_json={
                             **details,
                             "broker_reference": remote_position.broker_reference,
+                            "execution_id": (
+                                correlated_execution.id
+                                if correlated_execution is not None
+                                else None
+                            ),
+                            "execution_client_request_id": (
+                                intent.execution_client_request_id
+                                if intent is not None
+                                else None
+                            ),
+                            "trade_id": intent.trade_id if intent is not None else None,
+                            "allocation_cycle_id": (
+                                intent.allocation_cycle_id
+                                if intent is not None
+                                else None
+                            ),
                             "previous_state": "LOCAL_POSITION_STALE",
                             "new_state": "LOCAL_POSITION_BROKER_CONFIRMED",
                         },
@@ -322,6 +378,7 @@ class ReconciliationService:
                     completed_at=forced_trade.close_time,
                     closed_at=forced_trade.close_time,
                 )
+            correlated_execution = self._linked_execution_for_intent(intent)
             unmatched_local_count += 1
             details = {
                 "trade_intent_id": intent.id if intent is not None else None,
@@ -349,9 +406,32 @@ class ReconciliationService:
                 strategy_name=local_position.strategy_name,
                 instrument=local_position.instrument,
                 position_id=local_position.id,
+                correlation_id=(
+                    intent.execution_client_request_id if intent is not None else None
+                ),
+                trade_id=forced_trade.id,
+                execution_id=(
+                    correlated_execution.id
+                    if correlated_execution is not None
+                    else None
+                ),
                 payload_json={
                     **details,
                     "broker_reference": local_position.broker_reference,
+                    "execution_client_request_id": (
+                        intent.execution_client_request_id
+                        if intent is not None
+                        else None
+                    ),
+                    "execution_id": (
+                        correlated_execution.id
+                        if correlated_execution is not None
+                        else None
+                    ),
+                    "trade_id": forced_trade.id,
+                    "allocation_cycle_id": (
+                        intent.allocation_cycle_id if intent is not None else None
+                    ),
                 },
             )
             self._record_required_reconciliation_event(
@@ -362,9 +442,32 @@ class ReconciliationService:
                 strategy_name=local_position.strategy_name,
                 instrument=local_position.instrument,
                 position_id=local_position.id,
+                correlation_id=(
+                    intent.execution_client_request_id if intent is not None else None
+                ),
+                trade_id=forced_trade.id,
+                execution_id=(
+                    correlated_execution.id
+                    if correlated_execution is not None
+                    else None
+                ),
                 payload_json={
                     **details,
                     "broker_reference": local_position.broker_reference,
+                    "execution_client_request_id": (
+                        intent.execution_client_request_id
+                        if intent is not None
+                        else None
+                    ),
+                    "execution_id": (
+                        correlated_execution.id
+                        if correlated_execution is not None
+                        else None
+                    ),
+                    "trade_id": forced_trade.id,
+                    "allocation_cycle_id": (
+                        intent.allocation_cycle_id if intent is not None else None
+                    ),
                     "correction": "closed_local_position",
                 },
             )
@@ -420,6 +523,9 @@ class ReconciliationService:
         strategy_name: str,
         instrument: str,
         position_id: int | None,
+        correlation_id: str | None = None,
+        trade_id: int | None = None,
+        execution_id: int | None = None,
         payload_json: dict[str, object],
     ) -> None:
         record_required_domain_event(
@@ -430,12 +536,22 @@ class ReconciliationService:
             source="reconciliation_service.reconcile_open_positions",
             title=title,
             message=message,
+            correlation_id=correlation_id,
             strategy_name=strategy_name,
             instrument=instrument,
             position_id=position_id,
+            trade_id=trade_id,
+            execution_id=execution_id,
             actor_type="service",
             actor_id="reconciliation_service",
             payload_json=payload_json,
+        )
+
+    def _linked_execution_for_intent(self, intent: TradeIntent | None):
+        if intent is None or intent.execution_client_request_id is None:
+            return None
+        return self.trade_service.find_execution_by_client_request_id(
+            intent.execution_client_request_id
         )
 
     @staticmethod

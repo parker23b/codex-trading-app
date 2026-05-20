@@ -104,6 +104,10 @@ class RuntimeRecoveryService:
             )
 
             if broker_error is not None:
+                recovery_intent = self._resolve_existing_runtime_trade_intent(
+                    runtime=runtime,
+                    position=local_position,
+                )
                 self.trade_service.record_reconciliation_event(
                     event_type="RUNTIME_RECOVERY_REQUIRED",
                     trade_intent_id=local_position.trade_intent_id
@@ -133,26 +137,62 @@ class RuntimeRecoveryService:
                         "outcome": "recovery_required",
                     }
                 )
-                if "auth" in broker_error.lower():
-                    self._record_required_runtime_event(
-                        runtime_id=runtime.runtime_id,
-                        error_type="BrokerAuthenticationFailed",
-                        event_type="health.broker_auth_failed",
-                        category="health",
-                        severity="error",
-                        title="Broker authentication failed during recovery",
-                        message=f"Runtime recovery could not verify broker state for {runtime.strategy_name} on {runtime.instrument}.",
-                        strategy_name=runtime.strategy_name,
-                        instrument=runtime.instrument,
-                        payload_json={
-                            "reason": broker_error,
-                            "previous_state": previous_recovery_state,
-                            "new_state": "RECOVERY_REQUIRED",
-                        },
-                    )
+                self._record_required_runtime_event(
+                    runtime_id=runtime.runtime_id,
+                    correlation_id=(
+                        recovery_intent.execution_client_request_id
+                        if recovery_intent is not None
+                        else None
+                    ),
+                    trade_id=recovery_intent.trade_id
+                    if recovery_intent is not None
+                    else None,
+                    execution_id=self._linked_execution_id(recovery_intent),
+                    error_type=(
+                        "BrokerAuthenticationFailed"
+                        if "auth" in broker_error.lower()
+                        else "BrokerPositionQueryFailed"
+                    ),
+                    event_type=(
+                        "health.broker_auth_failed"
+                        if "auth" in broker_error.lower()
+                        else "health.runtime_recovery_failed"
+                    ),
+                    category="health",
+                    severity="error",
+                    title=(
+                        "Broker authentication failed during recovery"
+                        if "auth" in broker_error.lower()
+                        else "Broker position query failed during recovery"
+                    ),
+                    message=f"Runtime recovery could not verify broker state for {runtime.strategy_name} on {runtime.instrument}.",
+                    strategy_name=runtime.strategy_name,
+                    instrument=runtime.instrument,
+                    position_id=local_position.id
+                    if local_position is not None
+                    else None,
+                    payload_json={
+                        "reason": broker_error,
+                        "broker_reference": runtime.current_position_broker_reference,
+                        "trade_intent_id": (
+                            recovery_intent.id if recovery_intent is not None else None
+                        ),
+                        "execution_client_request_id": (
+                            recovery_intent.execution_client_request_id
+                            if recovery_intent is not None
+                            else None
+                        ),
+                        "previous_state": previous_recovery_state,
+                        "new_state": "RECOVERY_REQUIRED",
+                    },
+                )
                 continue
 
             if runtime.current_position_broker_reference and remote_position is None:
+                recovery_intent = self._resolve_existing_runtime_trade_intent(
+                    runtime=runtime,
+                    position=local_position,
+                )
                 self.trade_service.record_reconciliation_event(
                     event_type="RUNTIME_RECOVERY_REQUIRED",
                     trade_intent_id=local_position.trade_intent_id
@@ -188,10 +228,30 @@ class RuntimeRecoveryService:
                     title="Persisted runtime position was not confirmed by broker",
                     message=f"Startup recovery found no broker confirmation for {runtime.strategy_name} on {runtime.instrument}.",
                     runtime_id=runtime.runtime_id,
+                    correlation_id=(
+                        recovery_intent.execution_client_request_id
+                        if recovery_intent is not None
+                        else None
+                    ),
                     strategy_name=runtime.strategy_name,
                     instrument=runtime.instrument,
+                    position_id=local_position.id
+                    if local_position is not None
+                    else None,
+                    trade_id=recovery_intent.trade_id
+                    if recovery_intent is not None
+                    else None,
+                    execution_id=self._linked_execution_id(recovery_intent),
                     payload_json={
                         "broker_reference": runtime.current_position_broker_reference,
+                        "trade_intent_id": (
+                            recovery_intent.id if recovery_intent is not None else None
+                        ),
+                        "execution_client_request_id": (
+                            recovery_intent.execution_client_request_id
+                            if recovery_intent is not None
+                            else None
+                        ),
                         "reason": "Persisted runtime references an open position that the broker did not confirm.",
                         "previous_state": previous_recovery_state,
                         "new_state": "RECOVERY_REQUIRED",
@@ -241,6 +301,10 @@ class RuntimeRecoveryService:
                 )
 
             if runtime.runtime_mode == "STOPPED":
+                paused_intent = self._resolve_existing_runtime_trade_intent(
+                    runtime=runtime,
+                    position=current_position,
+                )
                 self.runtime_state_service.mark_recovery_state(
                     strategy_name=runtime.strategy_name,
                     instrument=runtime.instrument,
@@ -261,6 +325,43 @@ class RuntimeRecoveryService:
                         "outcome": "stopped",
                     }
                 )
+                if current_position is not None:
+                    self._record_required_runtime_event(
+                        event_type="strategy.runtime_recovery_paused",
+                        category="strategy",
+                        severity="info",
+                        title="Persisted stopped runtime retained recovered open risk",
+                        message=f"{runtime.strategy_name} remained stopped after recovery while retaining open risk on {runtime.instrument}.",
+                        runtime_id=runtime.runtime_id,
+                        correlation_id=(
+                            paused_intent.execution_client_request_id
+                            if paused_intent is not None
+                            else None
+                        ),
+                        strategy_name=runtime.strategy_name,
+                        instrument=runtime.instrument,
+                        position_id=current_position.id,
+                        trade_id=paused_intent.trade_id
+                        if paused_intent is not None
+                        else None,
+                        execution_id=self._linked_execution_id(paused_intent),
+                        payload_json={
+                            "broker_reference": current_position.broker_reference,
+                            "trade_intent_id": (
+                                paused_intent.id if paused_intent is not None else None
+                            ),
+                            "execution_client_request_id": (
+                                paused_intent.execution_client_request_id
+                                if paused_intent is not None
+                                else None
+                            ),
+                            "runtime_mode": runtime.runtime_mode,
+                            "recovered": True,
+                            "has_position": True,
+                            "previous_state": previous_recovery_state,
+                            "new_state": "PAUSED",
+                        },
+                    )
                 continue
 
             engine = runtime_manager.start(
@@ -349,6 +450,9 @@ class RuntimeRecoveryService:
         payload_json: dict[str, object],
         error_type: str | None = None,
         position_id: int | None = None,
+        correlation_id: str | None = None,
+        trade_id: int | None = None,
+        execution_id: int | None = None,
     ) -> None:
         record_required_domain_event(
             session=self.session,
@@ -360,13 +464,44 @@ class RuntimeRecoveryService:
             title=title,
             message=message,
             runtime_id=runtime_id,
+            correlation_id=correlation_id,
             strategy_name=strategy_name,
             instrument=instrument,
             position_id=position_id,
+            trade_id=trade_id,
+            execution_id=execution_id,
             actor_type="service",
             actor_id="runtime_recovery_service",
             payload_json=payload_json,
         )
+
+    def _resolve_existing_runtime_trade_intent(
+        self, *, runtime, position: Position | None
+    ) -> TradeIntent | None:
+        if position is not None and position.trade_intent_id is not None:
+            existing = self.trade_service.get_trade_intent(position.trade_intent_id)
+            if existing is not None:
+                return existing
+        if runtime.current_position_broker_reference:
+            return self.trade_service.find_open_trade_intent(
+                strategy_name=runtime.strategy_name,
+                instrument=runtime.instrument,
+                broker_reference=runtime.current_position_broker_reference,
+                position_id=position.id if position is not None else None,
+            )
+        return self.trade_service.find_open_trade_intent(
+            strategy_name=runtime.strategy_name,
+            instrument=runtime.instrument,
+            position_id=position.id if position is not None else None,
+        )
+
+    def _linked_execution_id(self, intent: TradeIntent | None) -> int | None:
+        if intent is None or intent.execution_client_request_id is None:
+            return None
+        execution = self.trade_service.find_execution_by_client_request_id(
+            intent.execution_client_request_id
+        )
+        return execution.id if execution is not None else None
 
     @staticmethod
     def _resolve_local_position(

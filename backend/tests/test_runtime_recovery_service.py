@@ -263,6 +263,50 @@ def test_audit_test_002_runtime_recovery_broker_mismatch_persists_domain_event(
     assert events[0].payload_json["broker_reference"] == "missing-broker-audit"
 
 
+def test_audit_test_002_runtime_recovery_broker_query_failure_persists_domain_event(
+    session, broker, fixed_now
+):
+    session.add(
+        StrategyRuntimeState(
+            runtime_id="runtime-recover-query-fail-audit",
+            strategy_name="smoke_test_hold",
+            instrument="CS.D.EURUSD.MINI.IP",
+            status="RUNNING",
+            recovery_state="RUNNING",
+            current_position_broker_reference="recover-query-fail-broker-ref",
+            last_price_seen=101.0,
+            last_price_seen_at=fixed_now - timedelta(seconds=5),
+        )
+    )
+    session.commit()
+
+    def raise_transport_error():
+        raise RuntimeError("broker transport unavailable")
+
+    broker.get_positions = raise_transport_error
+
+    outcomes = RuntimeRecoveryService(session).recover()
+
+    events = _non_decision_domain_events(session)
+    assert any(outcome["outcome"] == "recovery_required" for outcome in outcomes)
+    assert len(events) == 1
+    event = events[0]
+    assert event.event_type == "health.runtime_recovery_failed"
+    assert event.category == "health"
+    assert event.severity == "error"
+    assert event.error_type == "BrokerPositionQueryFailed"
+    assert event.source == "runtime_recovery_service.recover"
+    assert event.actor_type == "service"
+    assert event.actor_id == "runtime_recovery_service"
+    assert event.runtime_id == "runtime-recover-query-fail-audit"
+    assert event.strategy_name == "smoke_test_hold"
+    assert event.instrument == "CS.D.EURUSD.MINI.IP"
+    assert event.payload_json["broker_reference"] == "recover-query-fail-broker-ref"
+    assert event.payload_json["reason"] == "broker transport unavailable"
+    assert event.payload_json["previous_state"] == "RUNNING"
+    assert event.payload_json["new_state"] == "RECOVERY_REQUIRED"
+
+
 def test_audit_test_002_runtime_recovery_broker_auth_failure_persists_domain_event(
     session, broker, fixed_now
 ):
@@ -304,6 +348,66 @@ def test_audit_test_002_runtime_recovery_broker_auth_failure_persists_domain_eve
     assert event.payload_json["reason"] == "auth denied by broker"
     assert event.payload_json["previous_state"] == "RUNNING"
     assert event.payload_json["new_state"] == "RECOVERY_REQUIRED"
+
+
+def test_audit_test_002_runtime_recovery_stopped_open_risk_persists_domain_event(
+    session, broker, fixed_now
+):
+    session.add(
+        StrategyRuntimeState(
+            runtime_id="runtime-recover-stopped-open-risk-audit",
+            strategy_name="smoke_test_hold",
+            instrument="CS.D.EURUSD.MINI.IP",
+            status="RUNNING",
+            recovery_state="RUNNING",
+            runtime_mode="STOPPED",
+            current_position_broker_reference="stopped-open-risk-audit-1",
+            last_price_seen=101.0,
+            last_price_seen_at=fixed_now - timedelta(seconds=5),
+        )
+    )
+    session.commit()
+    broker.remote_positions = [
+        make_broker_position(
+            broker_reference="stopped-open-risk-audit-1",
+            instrument="CS.D.EURUSD.MINI.IP",
+            direction=OrderDirection.BUY,
+            size=0.4,
+            open_price=101.25,
+            opened_at=fixed_now - timedelta(minutes=3),
+        )
+    ]
+
+    outcomes = RuntimeRecoveryService(session).recover()
+
+    positions = TradeService(session).list_positions()
+    intents = TradeService(session).list_trade_intents(limit=10)
+    events = _non_decision_domain_events(session)
+    assert any(outcome["outcome"] == "stopped" for outcome in outcomes)
+    assert len(positions) == 1
+    assert len(intents) == 1
+    assert len(events) == 1
+    event = next(
+        event
+        for event in events
+        if event.event_type == "strategy.runtime_recovery_paused"
+    )
+    assert event.category == "strategy"
+    assert event.severity == "info"
+    assert event.source == "runtime_recovery_service.recover"
+    assert event.actor_type == "service"
+    assert event.actor_id == "runtime_recovery_service"
+    assert event.runtime_id == "runtime-recover-stopped-open-risk-audit"
+    assert event.strategy_name == "smoke_test_hold"
+    assert event.instrument == "CS.D.EURUSD.MINI.IP"
+    assert event.position_id == positions[0].id
+    assert event.payload_json["broker_reference"] == "stopped-open-risk-audit-1"
+    assert event.payload_json["trade_intent_id"] == intents[0].id
+    assert event.payload_json["runtime_mode"] == "STOPPED"
+    assert event.payload_json["recovered"] is True
+    assert event.payload_json["has_position"] is True
+    assert event.payload_json["previous_state"] == "RUNNING"
+    assert event.payload_json["new_state"] == "PAUSED"
 
 
 def test_audit_obs_001_runtime_recovery_resumed_runtime_audit_failure_raises(
@@ -353,6 +457,69 @@ def test_audit_obs_001_runtime_recovery_resumed_runtime_audit_failure_raises(
     ).one()
     assert runtime.recovery_state == "RUNNING"
     assert runtime.status == "RUNNING"
+
+
+def test_audit_obs_001_runtime_recovery_stopped_open_risk_audit_failure_raises(
+    session, broker, fixed_now, monkeypatch
+):
+    session.add(
+        StrategyRuntimeState(
+            runtime_id="runtime-recover-stopped-open-risk-audit-fail",
+            strategy_name="smoke_test_hold",
+            instrument="CS.D.EURUSD.MINI.IP",
+            status="RUNNING",
+            recovery_state="RUNNING",
+            runtime_mode="STOPPED",
+            current_position_broker_reference="stopped-open-risk-audit-fail-1",
+            last_price_seen=101.0,
+            last_price_seen_at=fixed_now - timedelta(seconds=5),
+        )
+    )
+    session.commit()
+    broker.remote_positions = [
+        make_broker_position(
+            broker_reference="stopped-open-risk-audit-fail-1",
+            instrument="CS.D.EURUSD.MINI.IP",
+            direction=OrderDirection.BUY,
+            size=0.4,
+            open_price=101.25,
+            opened_at=fixed_now - timedelta(minutes=3),
+        )
+    ]
+    original_record_event_in_session = domain_event_service.record_event_in_session
+
+    def fail_paused_event(**kwargs):
+        if kwargs.get("event_type") == "strategy.runtime_recovery_paused":
+            return None
+        return original_record_event_in_session(**kwargs)
+
+    monkeypatch.setattr(
+        domain_event_service,
+        "record_event_in_session",
+        fail_paused_event,
+        raising=False,
+    )
+
+    with pytest.raises(
+        AuditEventPersistenceError,
+        match="strategy.runtime_recovery_paused",
+    ):
+        RuntimeRecoveryService(session).recover()
+
+    events = _non_decision_domain_events(session)
+    runtime = session.exec(
+        select(StrategyRuntimeState).where(
+            StrategyRuntimeState.runtime_id
+            == "runtime-recover-stopped-open-risk-audit-fail"
+        )
+    ).one()
+    positions = TradeService(session).list_positions()
+    intents = TradeService(session).list_trade_intents(limit=10)
+    assert events == []
+    assert runtime.recovery_state == "PAUSED"
+    assert runtime.status == "STOPPED"
+    assert len(positions) == 1
+    assert len(intents) == 1
 
 
 def test_audit_life_003_stopped_runtime_attaches_intent_to_confirmed_local_position(
