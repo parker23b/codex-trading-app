@@ -59,6 +59,7 @@ class StrategyRuntimeManager:
         strategy_parameters: dict[str, object] | None = None,
         runtime_id: str | None = None,
         strategy_snapshot: dict[str, object] | None = None,
+        startup_context: dict[str, object] | None = None,
         current_position: Position | None = None,
         runtime_mode: str = "NORMAL",
         activate: bool = True,
@@ -107,6 +108,7 @@ class StrategyRuntimeManager:
             runtime_id=runtime_id or str(uuid4()),
             active_profile_name=resolved_profile.profile_name,
             strategy_parameters=dict(resolved_profile.parameter_values),
+            startup_context=dict(startup_context or {}),
             runtime_mode=runtime_mode,
         )
         engine.current_position = clone_position(current_position)

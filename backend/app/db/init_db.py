@@ -142,6 +142,7 @@ def initialize_database() -> None:
     _ensure_sqlite_column("strategyruntimestate", "deployment_id", "INTEGER")
     _ensure_sqlite_column("strategyruntimestate", "active_profile_name", "VARCHAR")
     _ensure_sqlite_column("strategyruntimestate", "auto_resume", "BOOLEAN DEFAULT 1")
+    _ensure_sqlite_column("strategyruntimestate", "startup_context", "JSON")
     _ensure_sqlite_column("strategyruntimestate", "strategy_state_snapshot", "JSON")
     _ensure_sqlite_column("strategyruntimestate", "updated_at", "TIMESTAMP")
     _ensure_sqlite_column(

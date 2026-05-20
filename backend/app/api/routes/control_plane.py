@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from app.api.audit import persist_required_domain_event
+from app.api.auth import build_operator_audit_context, resolve_request_settings
 from app.api.contracts.control_plane import (
     ControlPlaneFamilyResponse,
     ControlPlaneReconcileResponse,
@@ -55,8 +56,12 @@ def get_operator_control_state(
 @router.put("/control-plane/operator-state", response_model=OperatorControlResponse)
 def update_operator_control_state(
     payload: OperatorControlUpdateRequest,
+    request: Request,
     session: Session = Depends(get_session),
 ) -> OperatorControlResponse:
+    operator_context = build_operator_audit_context(
+        request, settings=resolve_request_settings(request)
+    )
     state = OperatorControlService(session).update_autonomous_control(
         enabled=payload.autonomous_control_enabled,
         reason=payload.reason,
@@ -72,8 +77,9 @@ def update_operator_control_state(
         source="api.control_plane.update_operator_state",
         title="Autonomous control override updated",
         message="Operator updated the global autonomous control override.",
-        actor_type="operator",
-        actor_id="api",
+        correlation_id=operator_context["correlation_id"],
+        actor_type=str(operator_context["actor_type"]),
+        actor_id=str(operator_context["actor_id"]),
         payload_json={
             "autonomous_control_override": state.autonomous_control_override,
             "override_reason": state.override_reason,
@@ -102,9 +108,22 @@ def get_control_plane_strategy_detail(
 
 @router.post("/control-plane/reconcile", response_model=ControlPlaneReconcileResponse)
 def reconcile_control_plane(
+    request: Request,
     session: Session = Depends(get_session),
 ) -> ControlPlaneReconcileResponse:
-    result = StrategyDeploymentManagerService(session).reconcile()
+    operator_context = build_operator_audit_context(
+        request, settings=resolve_request_settings(request)
+    )
+    result = StrategyDeploymentManagerService(session).reconcile(
+        startup_context={
+            "authority_kind": "http_route",
+            "route_source": "api.control_plane.reconcile",
+            "route_path": request.url.path,
+            "actor_type": operator_context["actor_type"],
+            "actor_id": operator_context["actor_id"],
+            "correlation_id": operator_context["correlation_id"],
+        }
+    )
     persist_required_domain_event(
         session=session,
         failure_detail=(
@@ -116,14 +135,23 @@ def reconcile_control_plane(
         source="api.control_plane.reconcile",
         title="Control plane reconciliation completed",
         message="Autonomous deployment manager completed a reconciliation cycle.",
-        actor_type="operator",
-        actor_id="api",
+        correlation_id=operator_context["correlation_id"],
+        actor_type=str(operator_context["actor_type"]),
+        actor_id=str(operator_context["actor_id"]),
         payload_json={
             "deployed": result.deployed,
             "paused": result.paused,
             "blocked": result.blocked,
             "degraded": result.degraded,
             "emergency_stopped": result.emergency_stopped,
+            "startup_context": {
+                "authority_kind": "http_route",
+                "route_source": "api.control_plane.reconcile",
+                "route_path": request.url.path,
+                "actor_type": operator_context["actor_type"],
+                "actor_id": operator_context["actor_id"],
+                "correlation_id": operator_context["correlation_id"],
+            },
         },
     )
     return ControlPlaneReconcileResponse(
@@ -142,8 +170,12 @@ def reconcile_control_plane(
 def update_strategy_governance(
     strategy_name: str,
     payload: GovernanceUpdateRequest,
+    request: Request,
     session: Session = Depends(get_session),
 ) -> GovernanceMutationResponse:
+    operator_context = build_operator_audit_context(
+        request, settings=resolve_request_settings(request)
+    )
     if payload.approval_state is not None and payload.approval_state not in {
         GovernanceApprovalState.NOT_APPROVED.value,
         GovernanceApprovalState.APPROVED.value,
@@ -180,8 +212,9 @@ def update_strategy_governance(
         title="Strategy governance updated",
         message=f"Operator updated governance for {strategy_name}.",
         strategy_name=strategy_name,
-        actor_type="operator",
-        actor_id="api",
+        correlation_id=operator_context["correlation_id"],
+        actor_type=str(operator_context["actor_type"]),
+        actor_id=str(operator_context["actor_id"]),
         payload_json={
             "approval_state": record.approval_state,
             "autonomous_operation_allowed": record.autonomous_operation_allowed,

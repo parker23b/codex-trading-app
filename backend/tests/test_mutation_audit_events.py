@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 
 from fastapi import HTTPException
+from starlette.requests import Request
 from sqlmodel import select
 
 from app.api.routes.allocation import (
@@ -54,6 +55,26 @@ def _events(session) -> list[DomainEvent]:
     return list(session.exec(select(DomainEvent).order_by(DomainEvent.id)))
 
 
+def _request(
+    *,
+    method: str = "POST",
+    path: str = "/strategy/start",
+    headers: dict[str, str] | None = None,
+) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": method,
+            "path": path,
+            "headers": [
+                (name.lower().encode("latin-1"), value.encode("latin-1"))
+                for name, value in (headers or {}).items()
+            ],
+            "query_string": b"",
+        }
+    )
+
+
 def _seed_allocation_alert(session, *, state: str = "OPEN") -> AllocationAlert:
     alert = AllocationAlert(
         alert_key=f"audit-alert-{state.lower()}",
@@ -101,6 +122,7 @@ def test_audit_api_008_operator_control_mutation_persists_domain_event(session):
             autonomous_control_enabled=False,
             reason="maintenance window",
         ),
+        _request(path="/control-plane/operator-state"),
         session,
     )
 
@@ -128,6 +150,7 @@ def test_audit_api_008_operator_control_returns_error_if_audit_persistence_fails
     try:
         update_operator_control_state(
             OperatorControlUpdateRequest(autonomous_control_enabled=True),
+            _request(path="/control-plane/operator-state"),
             session,
         )
     except HTTPException as exc:
@@ -148,6 +171,7 @@ def test_audit_api_008_governance_mutation_persists_domain_event(session):
             emergency_stop=True,
             notes="disable during audit",
         ),
+        _request(path="/control-plane/governance/mean_reversion"),
         session,
     )
 
@@ -160,7 +184,9 @@ def test_audit_api_008_governance_mutation_persists_domain_event(session):
 
 
 def test_audit_api_008_control_plane_reconcile_persists_domain_event(session):
-    response = reconcile_control_plane(session)
+    response = reconcile_control_plane(
+        _request(path="/control-plane/reconcile"), session
+    )
 
     events = _events(session)
     assert response.model_dump().keys() == {
@@ -184,6 +210,7 @@ def test_audit_api_008_strategy_start_stop_mutations_persist_domain_events(sessi
             strategy_name="mean_reversion",
             instrument="CS.D.EURUSD.CFD.IP",
         ),
+        _request(path="/strategy/start"),
         session,
     )
     stop_strategy(
@@ -191,6 +218,7 @@ def test_audit_api_008_strategy_start_stop_mutations_persist_domain_events(sessi
             strategy_name="mean_reversion",
             instrument="CS.D.EURUSD.CFD.IP",
         ),
+        _request(path="/strategy/stop"),
         session,
     )
 
@@ -213,8 +241,16 @@ def test_audit_api_008_strategy_start_stop_mutations_persist_domain_events(sessi
 
 
 def test_audit_api_008_strategy_by_name_mutations_persist_domain_events(session):
-    start_response = start_strategy_by_name("mean_reversion", session)
-    stop_response = stop_strategy_by_name("mean_reversion", session)
+    start_response = start_strategy_by_name(
+        "mean_reversion",
+        _request(path="/strategies/mean_reversion/start"),
+        session,
+    )
+    stop_response = stop_strategy_by_name(
+        "mean_reversion",
+        _request(path="/strategies/mean_reversion/stop"),
+        session,
+    )
 
     events = _events(session)
     assert start_response.status == "started"
@@ -299,6 +335,7 @@ def test_audit_test_002_default_fixture_still_allows_required_route_audit_events
     update_strategy_governance(
         "mean_reversion",
         GovernanceUpdateRequest(approval_state="APPROVED"),
+        _request(path="/control-plane/governance/mean_reversion"),
         session,
     )
 

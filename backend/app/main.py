@@ -171,6 +171,7 @@ def create_app(
         title=app_settings.app_name,
         lifespan=lifespan if enable_lifespan else _noop_lifespan,
     )
+    app.state.settings = app_settings
 
     app.add_middleware(
         CORSMiddleware,

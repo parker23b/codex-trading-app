@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import secrets
+from typing import Any
 
 from fastapi import HTTPException, Request, status
 
@@ -17,6 +18,7 @@ ACTIVE_READ_REFRESH_GET_PATHS = {
     "/reviews/daily",
     "/reviews/runtime-health",
 }
+REQUEST_CORRELATION_HEADER_NAMES = ("x-request-id", "x-correlation-id")
 
 
 def requires_operator_auth(
@@ -67,6 +69,18 @@ def require_operator_identity(
     return "operator"
 
 
+def build_operator_audit_context(
+    request: Request, *, settings: Settings | None = None
+) -> dict[str, Any]:
+    active_settings = settings or resolve_request_settings(request) or get_settings()
+    return {
+        "actor_type": "operator",
+        "actor_id": require_operator_identity(request, settings=active_settings),
+        "correlation_id": extract_request_correlation_id(request),
+        "request_path": request.url.path,
+    }
+
+
 def _configured_operator_token(settings: Settings) -> str | None:
     token = settings.operator_api_token
     if token is None:
@@ -92,6 +106,21 @@ def _extract_operator_token(request: Request) -> str | None:
     if header_token and header_token.strip():
         return header_token.strip()
     return None
+
+
+def extract_request_correlation_id(request: Request) -> str | None:
+    for header_name in REQUEST_CORRELATION_HEADER_NAMES:
+        value = request.headers.get(header_name)
+        if value and value.strip():
+            return value.strip()
+    return None
+
+
+def resolve_request_settings(request: Request) -> Settings | None:
+    app = request.scope.get("app")
+    if app is None:
+        return None
+    return getattr(getattr(app, "state", None), "settings", None)
 
 
 def _is_review_refresh_path(path: str) -> bool:

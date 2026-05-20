@@ -30,6 +30,7 @@ class TradingEngine:
     trade_size: float = 0.0
     active_profile_name: str | None = None
     strategy_parameters: dict[str, Any] = field(default_factory=dict)
+    startup_context: dict[str, Any] = field(default_factory=dict)
     runtime_mode: str = "NORMAL"
     active: bool = False
     current_position: Position | None = field(default=None, init=False)

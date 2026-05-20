@@ -446,6 +446,7 @@ class StrategyService:
         deployment_id: int | None = None,
         profile_name: str | None = None,
         strategy_parameters: dict[str, object] | None = None,
+        startup_context: dict[str, object] | None = None,
     ) -> None:
         # Service-layer start is the authoritative path for runtime startup.
         # It resolves persisted runtime mode and deployment/open-risk context
@@ -466,6 +467,7 @@ class StrategyService:
             instrument=instrument,
             profile_name=profile_name,
             strategy_parameters=strategy_parameters,
+            startup_context=startup_context,
             runtime_mode=resolved_runtime_mode,
             startup_source="strategy_service.start_strategy",
         )
@@ -480,6 +482,7 @@ class StrategyService:
                 deployment_id=deployment_id,
                 active_profile_name=engine.active_profile_name,
                 parameters=engine.strategy_parameters,
+                startup_context=engine.startup_context,
                 last_price_seen=runtime_manager.get_last_price(instrument),
                 last_price_seen_at=runtime_manager.get_last_price_updated_at(
                     instrument
@@ -511,6 +514,7 @@ class StrategyService:
                 "deployment_id": deployment_id,
                 "active_profile_name": engine.active_profile_name,
                 "strategy_parameters": engine.strategy_parameters,
+                "startup_context": engine.startup_context,
             },
         )
         self._refresh_paused_strategy_count()
@@ -913,6 +917,9 @@ class StrategyService:
                         reason="Execution attempt created for approved entry intent",
                         details={
                             "action_key": self._entry_action_key(signal),
+                            "runtime_authority": self._runtime_authority_context(
+                                engine
+                            ),
                             "direction": signal.direction.value,
                             "market_status": signal.market_status,
                             "tradable": signal.tradable,
@@ -1127,6 +1134,7 @@ class StrategyService:
                     else None,
                     details={
                         "action_key": self._close_action_key(signal),
+                        "runtime_authority": self._runtime_authority_context(engine),
                         "market_status": signal.market_status,
                         "tradable": signal.tradable,
                         "trade_intent_id": intent.id,
@@ -3639,6 +3647,13 @@ class StrategyService:
             ),
             True,
         )
+
+    @staticmethod
+    def _runtime_authority_context(engine) -> dict[str, object]:
+        startup_context = getattr(engine, "startup_context", None) or {}
+        if not startup_context:
+            return {}
+        return dict(startup_context)
 
     @staticmethod
     def _resolve_price_snapshot(

@@ -46,7 +46,12 @@ class StrategyDeploymentManagerService:
         self.suitability_service = RegimeSuitabilityService()
         self.strategy_service = StrategyService(session)
 
-    def reconcile(self, *, now: datetime | None = None) -> DeploymentReconcileResult:
+    def reconcile(
+        self,
+        *,
+        now: datetime | None = None,
+        startup_context: dict[str, object] | None = None,
+    ) -> DeploymentReconcileResult:
         current_time = now.astimezone(UTC) if now is not None else datetime.now(UTC)
         governance_records = self.governance_service.list_strategies()
         counts = {
@@ -94,6 +99,7 @@ class StrategyDeploymentManagerService:
                         deployment_id=deployment.id,
                         profile_name=selected_profile,
                         strategy_parameters=selected_parameters,
+                        startup_context=startup_context,
                     )
                     if selected_instrument is not None:
                         selected_engine = runtime_manager.get_engine(
@@ -439,6 +445,7 @@ class StrategyDeploymentManagerService:
         deployment_id: int,
         profile_name: str | None,
         strategy_parameters: dict[str, object],
+        startup_context: dict[str, object] | None,
     ) -> str | None:
         if instrument is None:
             return None
@@ -481,6 +488,7 @@ class StrategyDeploymentManagerService:
                 deployment_id=deployment_id,
                 profile_name=profile_name,
                 strategy_parameters=strategy_parameters,
+                startup_context=startup_context,
             )
             if restart_reason is None:
                 restart_reason = (

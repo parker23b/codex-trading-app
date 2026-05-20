@@ -56,6 +56,7 @@ class RuntimeStateService:
         active_profile_name: str | None = None,
         parameters: dict[str, Any] | None = None,
         auto_resume: bool = True,
+        startup_context: dict[str, Any] | None = None,
         started_at: datetime | None = None,
         stopped_at: datetime | None = None,
         last_price_seen: float | None = None,
@@ -87,6 +88,8 @@ class RuntimeStateService:
                 runtime_mode=runtime_mode or "NORMAL",
                 deployment_id=deployment_id,
                 active_profile_name=active_profile_name,
+                startup_context=startup_context
+                or getattr(engine, "startup_context", {}),
             )
 
         runtime.runtime_id = engine.runtime_id
@@ -112,6 +115,12 @@ class RuntimeStateService:
             or runtime.active_profile_name
         )
         runtime.auto_resume = auto_resume
+        runtime.startup_context = (
+            startup_context
+            or getattr(engine, "startup_context", None)
+            or runtime.startup_context
+            or {}
+        )
         runtime.started_at = started_at or runtime.started_at
         runtime.stopped_at = stopped_at
         runtime.last_heartbeat_at = engine.last_heartbeat_at or now
