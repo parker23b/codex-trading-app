@@ -376,6 +376,7 @@ def _seed_http_read_state(session: Session) -> dict[str, Any]:
         ("/strategy-watchlist", None),
         ("/market-data/feed-state", None),
         ("/market-data/feed-state/{instrument}", None),
+        ("/charts/risk-allocation", None),
         ("/positions", None),
         ("/executions", None),
         ("/trades", None),

@@ -3,6 +3,15 @@ export type BrokerExecutionSource =
   | "SIMULATED_LOCAL_FILL"
   | "SIMULATED_LOCAL_CLOSE";
 
+export type BrokerSyncStatus =
+  | "CONFIRMED"
+  | "PENDING"
+  | "MISSING_AT_BROKER"
+  | "UNKNOWN"
+  | "UNAVAILABLE"
+  | BrokerExecutionSource
+  | string;
+
 export type Trade = {
   id: number;
   strategy_name: string;
@@ -18,8 +27,11 @@ export type Trade = {
   close_time: string;
   pnl: number;
   account_type: "DEMO" | "LIVE";
+  entry_risk_amount?: number | null;
+  risk_truth_confidence?: RiskTruthConfidence | string | null;
   r_multiple?: number | null;
   reason?: string | null;
+  outcome?: string | null;
 };
 
 export type Execution = {
@@ -90,11 +102,12 @@ export type Position = {
   unrealized_pnl?: number | null;
   risk_percent?: number | null;
   entry_risk_amount?: number | null;
-  risk_truth_confidence?: string | null;
-  broker_sync_status?: string | null;
+  risk_truth_confidence?: RiskTruthConfidence | string | null;
+  broker_sync_status?: BrokerSyncStatus | null;
   close_execution_source?: BrokerExecutionSource | string | null;
   reason?: string | null;
   manual_override?: boolean;
+  time_in_trade_seconds?: number;
 };
 
 export type StrategyParameter = {
@@ -113,6 +126,11 @@ export type StrategyRuntime = {
   direction?: "BUY" | "SELL" | null;
   current_price?: number | null;
   unrealized_pnl?: number | null;
+  recovery_state?: string | null;
+  runtime_mode?: "NORMAL" | "EXITS_ONLY" | "STOPPED" | string | null;
+  control_mode?: "MANUAL" | "AUTO" | string | null;
+  deployment_id?: number | null;
+  recovery_reason?: string | null;
 };
 
 export type StrategyPositionSummary = {
@@ -141,6 +159,16 @@ export type StrategyDefinition = {
   account_type: "DEMO" | "LIVE";
   position_size: number;
   risk_per_trade: number;
+  supported_asset_classes?: string[];
+  available_profiles?: string[];
+  governance_approval_state?: string;
+  autonomous_operation_allowed?: boolean;
+  emergency_stop?: boolean;
+  deployment_state?: string;
+  deployment_profile?: string | null;
+  deployment_parameters?: Record<string, number>;
+  deployment_instrument?: string | null;
+  deployment_reason?: string | null;
   active_instruments?: string[];
   authorized?: boolean;
   evaluating_instrument_count?: number;
@@ -154,8 +182,43 @@ export type StrategyDefinition = {
   warning_status?: string | null;
   active_runtimes?: StrategyRuntime[];
   open_positions?: StrategyPositionSummary[];
+  persisted_runtimes?: Array<{
+    runtime_id: string;
+    instrument: string;
+    status: string;
+    recovery_state?: string | null;
+    recovery_reason?: string | null;
+    last_heartbeat_at?: string | null;
+    last_price_seen?: number | null;
+    last_price_seen_at?: string | null;
+    control_mode?: "MANUAL" | "AUTO" | string | null;
+    runtime_mode?: "NORMAL" | "EXITS_ONLY" | "STOPPED" | string | null;
+    deployment_id?: number | null;
+    active_profile_name?: string | null;
+    parameters: Record<string, number>;
+    auto_resume?: boolean | null;
+  }>;
   instrument_options?: { epic: string; label: string; category: string }[];
   parameters: StrategyParameter[];
+};
+
+export type StrategyMutationStatus = {
+  status: "started" | "stopped";
+  strategy?: string | null;
+  instrument?: string | null;
+};
+
+export type StrategyGovernanceMutationResponse = {
+  strategy_name: string;
+  approval_state: string;
+  autonomous_operation_allowed: boolean;
+  emergency_stop: boolean;
+  approved_asset_classes: string[];
+  approved_instruments: string[];
+  approved_profile_names: string[];
+  max_concurrent_deployments: number;
+  notes?: string | null;
+  updated_at: string;
 };
 
 export type MarketCatalogueInstrument = {
@@ -359,6 +422,8 @@ export type ControlPlaneFamily = {
     approved_profile_names: string[];
     supported_asset_classes: string[];
     available_profile_names: string[];
+    max_concurrent_deployments?: number | null;
+    notes?: string | null;
     updated_at?: string | null;
   };
   deployment: {
@@ -436,6 +501,8 @@ export type ControlPlaneSummary = {
   broker_connectivity_state?: "CONNECTED" | "DISCONNECTED";
   entry_eligible?: boolean;
   exit_eligible?: boolean;
+  entry_eligibility_state?: string | null;
+  exit_eligibility_state?: string | null;
   entry_block_reason?: string | null;
   exit_block_reason?: string | null;
   open_risk_management_state?: string;
@@ -1216,5 +1283,68 @@ export type AllocationExposureSummary = {
   by_currency: ExposureBucket[];
   currency_directional: DirectionalCurrencyExposureBucket[];
   hotspots: ExposureHotspot[];
+  notes: Record<string, string>;
+};
+
+export type RiskAllocationChartDataStatus =
+  | "READY"
+  | "PARTIAL"
+  | "DEGRADED"
+  | "UNAVAILABLE";
+
+export type RiskAllocationChartSource =
+  | "ALLOCATION_EXPOSURE_SUMMARY_PLUS_POSITION_INTENT_TRUTH";
+
+export type RiskAllocationChartTruthCount = {
+  confidence: RiskTruthConfidence | string;
+  count: number;
+};
+
+export type RiskAllocationChartSummary = {
+  reserved_risk_percent?: number | null;
+  live_risk_percent?: number | null;
+  provisional_live_risk_percent?: number | null;
+  total_active_risk_percent?: number | null;
+  remaining_portfolio_risk_percent?: number | null;
+  reserved_intent_count: number;
+  open_position_count: number;
+  chartable_bucket_count: number;
+  unavailable_bucket_count: number;
+  has_provisional_risk: boolean;
+  has_simulated_risk: boolean;
+  has_unknown_risk: boolean;
+  has_degraded_risk: boolean;
+  risk_truth_confidence_mix: RiskAllocationChartTruthCount[];
+  reasons: string[];
+};
+
+export type RiskAllocationChartBucket = {
+  instrument: string;
+  reserved_risk_percent?: number | null;
+  live_risk_percent?: number | null;
+  provisional_live_risk_percent?: number | null;
+  total_risk_percent?: number | null;
+  utilization_percent?: number | null;
+  budget_limit_percent: number;
+  reserved_intent_count: number;
+  open_position_count: number;
+  data_status: RiskAllocationChartDataStatus | string;
+  has_provisional_risk: boolean;
+  has_simulated_risk: boolean;
+  has_unknown_risk: boolean;
+  has_degraded_risk: boolean;
+  risk_basis: string[];
+  risk_truth_confidence_mix: RiskAllocationChartTruthCount[];
+  reasons: string[];
+};
+
+export type RiskAllocationChart = {
+  generated_at: string;
+  data_status: RiskAllocationChartDataStatus | string;
+  source: RiskAllocationChartSource | string;
+  chart_mode: string;
+  summary: RiskAllocationChartSummary;
+  bars: RiskAllocationChartBucket[];
+  reasons: string[];
   notes: Record<string, string>;
 };

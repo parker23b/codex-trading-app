@@ -21,7 +21,7 @@ The current blocking themes are:
 - simulated-vs-broker-confirmed provenance is still incomplete across broader frontend/browser surfaces
 - the spec coverage matrix still does not comprehensively map every P0/P1 boundary and surface requirement
 - `risk_truth_confidence` now has an authoritative backend/frontend contract, but broader enum-parity and operator-surface evidence are still incomplete
-- several operator-critical API responses outside the covered allocation/risk, AIMEE/review, and markets/watchlist/feed-state/live-chart slices are still raw dict/list contracts without modeled or documented schema ownership
+- any future operator-critical raw dict/list routes still need explicit contract ownership even though the currently known frontend-consumed route boundary is now modeled
 - durable audit preservation is still incomplete for remaining broker-action and background-event paths
 - frontend operator truth is still missing broad browser/e2e coverage for degraded, unknown, passive-vs-mutation, and mutation-failure states
 - logging redaction, secrets hygiene, dependency locking, migrations, and durable observability remain below readiness grade
@@ -32,7 +32,7 @@ The canonical blocker list is in [audit-status.md](audit-status.md).
 
 - Simulated/local execution and close provenance is not yet proved across broader frontend/browser operator surfaces.
 - Broader backend/frontend enum-parity proof is still incomplete even though `risk_truth_confidence` now has a central contract.
-- Several operator-critical routes outside allocation/risk and AIMEE/review still lack modeled or documented response schemas, making contract drift easier to miss.
+- Future raw operator-critical routes would make contract drift easier to miss even though the currently known frontend-consumed route boundary is now modeled.
 - Remaining mutation and broker-action paths still need durable audit-preservation proof at the route/background boundary.
 - Browser/e2e operator-state coverage is still too narrow for readiness claims.
 - Database evolution currently relies on `create_all()` plus SQLite patch helpers rather than versioned migrations.
@@ -44,7 +44,7 @@ The canonical blocker list is in [audit-status.md](audit-status.md).
 
 Before live or demo broker dealing, the app needs at least:
 
-- complete modeled/documented backend/frontend contracts for the remaining operator-critical API response families beyond allocation/risk and AIMEE/review
+- complete modeled/documented contracts for any future operator-critical raw response families
 - durable audit-preservation proof for remaining mutation, broker-action, reconciliation, recovery, and background-event paths
 - browser/e2e evidence for degraded, stale, simulated, unknown, manual-review, and mutation-failure operator states
 - migration, dependency, redaction, and secrets controls that are strong enough for broker-connected operation

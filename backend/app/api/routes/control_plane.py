@@ -1,10 +1,15 @@
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from app.api.audit import persist_required_domain_event
+from app.api.contracts.control_plane import (
+    ControlPlaneFamilyResponse,
+    ControlPlaneReconcileResponse,
+    ControlPlaneSummaryResponse,
+    GovernanceMutationResponse,
+    OperatorControlResponse,
+)
 from app.db.session import get_session
 from app.models.strategy_governance import GovernanceApprovalState
 from app.services.control_plane_service import ControlPlaneService
@@ -26,37 +31,6 @@ class GovernanceUpdateRequest(BaseModel):
     approved_profile_names: list[str] | None = Field(default=None)
     max_concurrent_deployments: int | None = Field(default=None, ge=1)
     notes: str | None = Field(default=None)
-
-
-class ControlPlaneSummaryResponse(BaseModel):
-    autonomous_control_enabled: bool
-    configured_autonomous_control_enabled: bool
-    effective_autonomous_control_enabled: bool
-    autonomy_override_active: bool
-    autonomy_override_value: bool | None
-    autonomy_override_reason: str | None
-    autonomy_updated_at: datetime | None
-    feed_source_state: str
-    feed_health_state: str
-    broker_connectivity_state: str
-    entry_eligible: bool
-    exit_eligible: bool
-    entry_block_reason: str | None
-    exit_block_reason: str | None
-    open_risk_management_state: str
-    open_risk_management_reason: str | None
-    families: list[dict[str, object]]
-    counts: dict[str, int]
-    misaligned_count: int
-
-
-class OperatorControlResponse(BaseModel):
-    configured_autonomous_control_enabled: bool
-    effective_autonomous_control_enabled: bool
-    override_active: bool
-    override_value: bool | None
-    override_reason: str | None
-    updated_at: datetime | None
 
 
 class OperatorControlUpdateRequest(BaseModel):
@@ -108,21 +82,28 @@ def update_operator_control_state(
     return OperatorControlResponse(**OperatorControlService(session).get_summary())
 
 
-@router.get("/control-plane/strategies/{strategy_name}")
+@router.get(
+    "/control-plane/strategies/{strategy_name}",
+    response_model=ControlPlaneFamilyResponse,
+)
 def get_control_plane_strategy_detail(
     strategy_name: str,
     session: Session = Depends(get_session),
-) -> dict[str, object]:
+) -> ControlPlaneFamilyResponse:
     try:
-        return ControlPlaneService(session).get_family_detail(strategy_name)
+        return ControlPlaneFamilyResponse(
+            **ControlPlaneService(session).get_family_detail(strategy_name)
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
         ) from exc
 
 
-@router.post("/control-plane/reconcile")
-def reconcile_control_plane(session: Session = Depends(get_session)) -> dict[str, int]:
+@router.post("/control-plane/reconcile", response_model=ControlPlaneReconcileResponse)
+def reconcile_control_plane(
+    session: Session = Depends(get_session),
+) -> ControlPlaneReconcileResponse:
     result = StrategyDeploymentManagerService(session).reconcile()
     persist_required_domain_event(
         session=session,
@@ -145,21 +126,24 @@ def reconcile_control_plane(session: Session = Depends(get_session)) -> dict[str
             "emergency_stopped": result.emergency_stopped,
         },
     )
-    return {
-        "deployed": result.deployed,
-        "paused": result.paused,
-        "blocked": result.blocked,
-        "degraded": result.degraded,
-        "emergency_stopped": result.emergency_stopped,
-    }
+    return ControlPlaneReconcileResponse(
+        deployed=result.deployed,
+        paused=result.paused,
+        blocked=result.blocked,
+        degraded=result.degraded,
+        emergency_stopped=result.emergency_stopped,
+    )
 
 
-@router.put("/control-plane/governance/{strategy_name}")
+@router.put(
+    "/control-plane/governance/{strategy_name}",
+    response_model=GovernanceMutationResponse,
+)
 def update_strategy_governance(
     strategy_name: str,
     payload: GovernanceUpdateRequest,
     session: Session = Depends(get_session),
-) -> dict[str, object]:
+) -> GovernanceMutationResponse:
     if payload.approval_state is not None and payload.approval_state not in {
         GovernanceApprovalState.NOT_APPROVED.value,
         GovernanceApprovalState.APPROVED.value,
@@ -207,13 +191,15 @@ def update_strategy_governance(
             "approved_profile_names": record.approved_profile_names,
         },
     )
-    return {
-        "strategy_name": record.strategy_name,
-        "approval_state": record.approval_state,
-        "autonomous_operation_allowed": record.autonomous_operation_allowed,
-        "emergency_stop": record.emergency_stop,
-        "approved_asset_classes": record.approved_asset_classes,
-        "approved_instruments": record.approved_instruments,
-        "approved_profile_names": record.approved_profile_names,
-        "updated_at": record.updated_at,
-    }
+    return GovernanceMutationResponse(
+        strategy_name=record.strategy_name,
+        approval_state=record.approval_state,
+        autonomous_operation_allowed=record.autonomous_operation_allowed,
+        emergency_stop=record.emergency_stop,
+        approved_asset_classes=record.approved_asset_classes,
+        approved_instruments=record.approved_instruments,
+        approved_profile_names=record.approved_profile_names,
+        max_concurrent_deployments=record.max_concurrent_deployments,
+        notes=record.notes,
+        updated_at=record.updated_at,
+    )

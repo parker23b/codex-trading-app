@@ -152,7 +152,7 @@ def test_audit_api_008_governance_mutation_persists_domain_event(session):
     )
 
     events = _events(session)
-    assert response["approval_state"] == "DISABLED"
+    assert response.approval_state == "DISABLED"
     assert [event.event_type for event in events] == ["operator.governance_updated"]
     assert events[0].strategy_name == "mean_reversion"
     assert events[0].payload_json["approval_state"] == "DISABLED"
@@ -163,7 +163,7 @@ def test_audit_api_008_control_plane_reconcile_persists_domain_event(session):
     response = reconcile_control_plane(session)
 
     events = _events(session)
-    assert set(response) == {
+    assert response.model_dump().keys() == {
         "deployed",
         "paused",
         "blocked",

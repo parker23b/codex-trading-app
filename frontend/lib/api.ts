@@ -4,6 +4,7 @@ import {
   AllocationDriftSummary,
   AllocationExposureSummary,
   AllocationIntent,
+  RiskAllocationChart,
   AimeeSnapshotResponse,
   BrokerAuthStatus,
   CoverageSummary,
@@ -30,7 +31,9 @@ import {
   StrategyWatchlistMutationResponse,
   StrategyWatchlistResponse,
   StreamHealthStatus,
+  StrategyGovernanceMutationResponse,
   Trade,
+  StrategyMutationStatus,
 } from "@/lib/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
@@ -398,8 +401,8 @@ export async function updateStrategyGovernance(
     max_concurrent_deployments?: number | null;
     notes?: string | null;
   },
-): Promise<Record<string, unknown>> {
-  return request<Record<string, unknown>>(`/control-plane/governance/${strategyName}`, {
+): Promise<StrategyGovernanceMutationResponse> {
+  return request<StrategyGovernanceMutationResponse>(`/control-plane/governance/${strategyName}`, {
     method: "PUT",
     body: JSON.stringify(payload),
   });
@@ -508,6 +511,10 @@ export async function resolveAllocationAlert(alertId: number, actorId = "operato
 
 export async function getAllocationExposureSummary(): Promise<AllocationExposureSummary> {
   return request<AllocationExposureSummary>("/allocation/exposure");
+}
+
+export async function getRiskAllocationChart(): Promise<RiskAllocationChart> {
+  return request<RiskAllocationChart>("/charts/risk-allocation");
 }
 
 export async function loadWithMeta<T>(loader: () => Promise<T>): Promise<LoadResult<T>> {
@@ -635,8 +642,8 @@ export async function getLiveInstrumentChart(instrumentId: string, timeframe = "
   });
 }
 
-export async function startStrategy(strategyName: string, instrument: string): Promise<{ status: string }> {
-  return request<{ status: string }>("/strategy/start", {
+export async function startStrategy(strategyName: string, instrument: string): Promise<StrategyMutationStatus> {
+  return request<StrategyMutationStatus>("/strategy/start", {
     method: "POST",
     body: JSON.stringify({
       strategy_name: strategyName,
@@ -645,8 +652,8 @@ export async function startStrategy(strategyName: string, instrument: string): P
   });
 }
 
-export async function stopStrategy(params: { instrument?: string; strategyName?: string }): Promise<{ status: string }> {
-  return request<{ status: string }>("/strategy/stop", {
+export async function stopStrategy(params: { instrument?: string; strategyName?: string }): Promise<StrategyMutationStatus> {
+  return request<StrategyMutationStatus>("/strategy/stop", {
     method: "POST",
     body: JSON.stringify({
       instrument: params.instrument,

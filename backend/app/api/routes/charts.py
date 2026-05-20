@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlmodel import Session
 
+from app.api.contracts.charts import RiskAllocationChartResponse
 from app.db.session import get_session
 from app.services.chart_service import ChartService
 from app.services.trade_service import TradeService
@@ -22,8 +23,8 @@ def get_drawdown_chart(
     return ChartService(TradeService(session)).get_drawdown_chart()
 
 
-@router.get("/risk-allocation")
+@router.get("/risk-allocation", response_model=RiskAllocationChartResponse)
 def get_risk_allocation_chart(
     session: Session = Depends(get_session),
-) -> dict[str, object]:
+) -> RiskAllocationChartResponse:
     return ChartService(TradeService(session)).get_risk_allocation_chart()

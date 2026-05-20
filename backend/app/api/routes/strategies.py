@@ -3,6 +3,8 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from app.api.audit import persist_required_domain_event
+from app.api.contracts.control_plane import StrategyMutationStatusResponse
+from app.api.contracts.strategies import StrategySummaryResponse
 from app.core.runtime import runtime_manager
 from app.db.session import get_session
 from app.services.strategy_service import StrategyService
@@ -24,23 +26,22 @@ class StopStrategyRequest(BaseModel):
     )
 
 
-class StrategyControlResponse(BaseModel):
-    status: str
-    strategy: str
-    instrument: str
-
-
-@router.get("/strategies")
-def list_strategies(session: Session = Depends(get_session)) -> list[dict[str, object]]:
+@router.get("/strategies", response_model=list[StrategySummaryResponse])
+def list_strategies(
+    session: Session = Depends(get_session),
+) -> list[StrategySummaryResponse]:
     """Return operator strategy state from persisted/runtime truth only."""
-    return StrategyService(session).list_strategies()
+    return [
+        StrategySummaryResponse(**strategy)
+        for strategy in StrategyService(session).list_strategies()
+    ]
 
 
-@router.post("/strategy/start")
+@router.post("/strategy/start", response_model=StrategyMutationStatusResponse)
 def start_strategy(
     payload: StartStrategyRequest,
     session: Session = Depends(get_session),
-) -> dict[str, str]:
+) -> StrategyMutationStatusResponse:
     try:
         StrategyService(session).start_strategy(
             strategy_name=payload.strategy_name,
@@ -70,14 +71,18 @@ def start_strategy(
         actor_id="api",
     )
 
-    return {"status": "started"}
+    return StrategyMutationStatusResponse(
+        status="started",
+        strategy=payload.strategy_name,
+        instrument=payload.instrument,
+    )
 
 
-@router.post("/strategy/stop")
+@router.post("/strategy/stop", response_model=StrategyMutationStatusResponse)
 def stop_strategy(
     payload: StopStrategyRequest,
     session: Session = Depends(get_session),
-) -> dict[str, str]:
+) -> StrategyMutationStatusResponse:
     try:
         StrategyService(session).stop_strategy(
             instrument=payload.instrument,
@@ -109,14 +114,18 @@ def stop_strategy(
         },
     )
 
-    return {"status": "stopped"}
+    return StrategyMutationStatusResponse(
+        status="stopped",
+        strategy=payload.strategy_name,
+        instrument=payload.instrument,
+    )
 
 
-@router.post("/strategies/{name}/start", response_model=StrategyControlResponse)
+@router.post("/strategies/{name}/start", response_model=StrategyMutationStatusResponse)
 def start_strategy_by_name(
     name: str,
     session: Session = Depends(get_session),
-) -> StrategyControlResponse:
+) -> StrategyMutationStatusResponse:
     service = StrategyService(session)
     strategies = {strategy["name"]: strategy for strategy in service.list_strategies()}
     strategy = strategies.get(name)
@@ -151,16 +160,16 @@ def start_strategy_by_name(
         actor_type="operator",
         actor_id="api",
     )
-    return StrategyControlResponse(
+    return StrategyMutationStatusResponse(
         status="started", strategy=name, instrument=instrument
     )
 
 
-@router.post("/strategies/{name}/stop", response_model=StrategyControlResponse)
+@router.post("/strategies/{name}/stop", response_model=StrategyMutationStatusResponse)
 def stop_strategy_by_name(
     name: str,
     session: Session = Depends(get_session),
-) -> StrategyControlResponse:
+) -> StrategyMutationStatusResponse:
     service = StrategyService(session)
     strategies = {strategy["name"]: strategy for strategy in service.list_strategies()}
     strategy = strategies.get(name)
@@ -193,6 +202,6 @@ def stop_strategy_by_name(
         actor_type="operator",
         actor_id="api",
     )
-    return StrategyControlResponse(
+    return StrategyMutationStatusResponse(
         status="stopped", strategy=name, instrument=instrument
     )

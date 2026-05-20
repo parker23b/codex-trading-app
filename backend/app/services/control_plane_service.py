@@ -178,6 +178,8 @@ class ControlPlaneService:
                 "available_profile_names": [
                     profile.name for profile in metadata.parameter_profiles
                 ],
+                "max_concurrent_deployments": None,
+                "notes": None,
                 "updated_at": None,
             }
         return {
@@ -191,6 +193,8 @@ class ControlPlaneService:
             "available_profile_names": [
                 profile.name for profile in metadata.parameter_profiles
             ],
+            "max_concurrent_deployments": record.max_concurrent_deployments,
+            "notes": record.notes,
             "updated_at": record.updated_at,
         }
 

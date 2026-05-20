@@ -71,8 +71,8 @@ def test_audit_api_001_control_plane_strategy_detail_does_not_seed_governance(
 ):
     detail = get_control_plane_strategy_detail("mean_reversion", session)
 
-    assert detail["strategy_name"] == "mean_reversion"
-    assert detail["governance"]["approval_state"] == "UNKNOWN"
+    assert detail.strategy_name == "mean_reversion"
+    assert detail.governance.approval_state == "UNKNOWN"
     assert session.exec(select(StrategyFamilyGovernance)).all() == []
 
 
@@ -81,10 +81,10 @@ def test_audit_api_001_strategy_list_get_does_not_seed_governance(session):
 
     assert strategies
     mean_reversion = next(
-        strategy for strategy in strategies if strategy["name"] == "mean_reversion"
+        strategy for strategy in strategies if strategy.name == "mean_reversion"
     )
-    assert mean_reversion["governance_approval_state"] == "UNKNOWN"
-    assert mean_reversion["authorized"] is False
+    assert mean_reversion.governance_approval_state == "UNKNOWN"
+    assert mean_reversion.authorized is False
     assert session.exec(select(StrategyFamilyGovernance)).all() == []
 
 
