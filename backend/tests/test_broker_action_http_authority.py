@@ -35,6 +35,7 @@ ROUTE_STARTUP_PATHS = (
     "backend/app/api/routes/strategies.py",
     "backend/app/api/routes/control_plane.py",
 )
+APP_ROOT = Path(__file__).resolve().parents[1] / "app"
 
 
 def _events(session) -> list[DomainEvent]:
@@ -145,6 +146,26 @@ def _call_names(path: str) -> set[str]:
             if name is not None:
                 names.add(name)
     return names
+
+
+def _app_call_sites(call_name: str) -> set[str]:
+    matches: set[str] = set()
+
+    def flatten(expr: ast.AST) -> str | None:
+        if isinstance(expr, ast.Name):
+            return expr.id
+        if isinstance(expr, ast.Attribute):
+            prefix = flatten(expr.value)
+            return f"{prefix}.{expr.attr}" if prefix else expr.attr
+        return None
+
+    for path in APP_ROOT.rglob("*.py"):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and flatten(node.func) == call_name:
+                matches.add(path.relative_to(APP_ROOT.parent).as_posix())
+                break
+    return matches
 
 
 def test_audit_api_008_strategy_start_http_route_reachable_entry_preserves_authority_and_audit(
@@ -546,3 +567,16 @@ def test_audit_api_008_scheduler_routes_do_not_call_broker_mutations_directly():
         call.endswith(".place_order") or call.endswith(".close_position")
         for call in strategy_calls | control_plane_calls
     )
+
+
+def test_audit_test_002_broker_mutation_and_runtime_start_call_graph_is_constrained():
+    assert _app_call_sites("engine.broker.place_order") == {
+        "app/services/strategy_service.py"
+    }
+    assert _app_call_sites("engine.broker.close_position") == {
+        "app/services/strategy_service.py"
+    }
+    assert _app_call_sites("runtime_manager.start") == {
+        "app/services/runtime_recovery_service.py",
+        "app/services/strategy_service.py",
+    }

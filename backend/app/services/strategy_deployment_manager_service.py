@@ -53,6 +53,10 @@ class StrategyDeploymentManagerService:
         startup_context: dict[str, object] | None = None,
     ) -> DeploymentReconcileResult:
         current_time = now.astimezone(UTC) if now is not None else datetime.now(UTC)
+        reconcile_startup_context = self._resolve_startup_context(
+            startup_context=startup_context,
+            current_time=current_time,
+        )
         governance_records = self.governance_service.list_strategies()
         counts = {
             StrategyDeploymentState.AUTO_DEPLOYED.value: 0,
@@ -99,7 +103,7 @@ class StrategyDeploymentManagerService:
                         deployment_id=deployment.id,
                         profile_name=selected_profile,
                         strategy_parameters=selected_parameters,
-                        startup_context=startup_context,
+                        startup_context=reconcile_startup_context,
                     )
                     if selected_instrument is not None:
                         selected_engine = runtime_manager.get_engine(
@@ -122,6 +126,12 @@ class StrategyDeploymentManagerService:
                             event_type="control_plane.runtime_restarted",
                             category="strategy",
                             severity="info",
+                            correlation_id=str(
+                                reconcile_startup_context.get("correlation_id")
+                            )
+                            if reconcile_startup_context.get("correlation_id")
+                            is not None
+                            else None,
                             source="strategy_deployment_manager.reconcile",
                             title="Autonomous runtime restarted",
                             message=f"{governance.strategy_name} runtime restarted to apply deployment change.",
@@ -134,6 +144,7 @@ class StrategyDeploymentManagerService:
                                 "reason": restart_reason,
                                 "selected_profile": selected_profile,
                                 "selected_parameters": selected_parameters,
+                                "startup_context": reconcile_startup_context,
                             },
                             created_at=current_time,
                         )
@@ -212,6 +223,9 @@ class StrategyDeploymentManagerService:
                     event_type="control_plane.deployment_state_changed",
                     category="strategy",
                     severity="info",
+                    correlation_id=str(reconcile_startup_context.get("correlation_id"))
+                    if reconcile_startup_context.get("correlation_id") is not None
+                    else None,
                     source="strategy_deployment_manager.reconcile",
                     title="Strategy deployment state changed",
                     message=f"{governance.strategy_name} moved from {previous_state} to {target_state}.",
@@ -229,6 +243,7 @@ class StrategyDeploymentManagerService:
                         "selected_asset_class": selected_asset_class,
                         "reason": reason,
                         "suitability_score": score,
+                        "startup_context": reconcile_startup_context,
                     },
                     created_at=current_time,
                 )
@@ -240,6 +255,22 @@ class StrategyDeploymentManagerService:
             degraded=counts[StrategyDeploymentState.DEGRADED.value],
             emergency_stopped=counts[StrategyDeploymentState.EMERGENCY_STOPPED.value],
         )
+
+    @staticmethod
+    def _resolve_startup_context(
+        *,
+        startup_context: dict[str, object] | None,
+        current_time: datetime,
+    ) -> dict[str, object]:
+        if startup_context:
+            return dict(startup_context)
+        return {
+            "authority_kind": "deployment_reconcile",
+            "authority_source": "strategy_deployment_manager.reconcile",
+            "actor_type": "service",
+            "actor_id": "strategy_deployment_manager",
+            "correlation_id": (f"deployment-reconcile:{current_time.isoformat()}"),
+        }
 
     def list_deployments(self) -> list[StrategyDeployment]:
         self.governance_service.ensure_defaults()

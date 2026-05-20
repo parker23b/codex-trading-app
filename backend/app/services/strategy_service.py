@@ -496,6 +496,9 @@ class StrategyService:
             source="strategy_service.start_strategy",
             title="Strategy runtime started",
             message=f"{strategy_name} started on {instrument}.",
+            correlation_id=str((engine.startup_context or {}).get("correlation_id"))
+            if (engine.startup_context or {}).get("correlation_id") is not None
+            else None,
             runtime_id=engine.runtime_id,
             strategy_name=strategy_name,
             instrument=instrument,

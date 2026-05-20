@@ -10,7 +10,7 @@ from app.models.domain_event import DomainEvent
 from app.models.runtime import StrategyRuntimeState
 from app.models.strategy_deployment import StrategyDeployment
 from app.models.strategy_governance import StrategyFamilyGovernance
-from app.models.trade import Position, TradeIntent, TradeIntentState
+from app.models.trade import Execution, Position, TradeIntent, TradeIntentState
 from app.services.control_plane_service import ControlPlaneService
 from app.services.health_service import get_health_service
 from app.services.operator_control_service import OperatorControlService
@@ -394,13 +394,124 @@ def test_audit_test_002_deployment_reconcile_persists_session_bound_domain_event
     assert mean_reversion_events[2].source == "strategy_deployment_manager.reconcile"
     assert mean_reversion_events[2].strategy_name == "mean_reversion"
     assert mean_reversion_events[2].instrument == "IX.D.FTSE.DAILY.IP"
+    assert mean_reversion_events[2].correlation_id is not None
     assert mean_reversion_events[2].payload_json["deployment_id"] == deployment.id
     assert mean_reversion_events[2].payload_json["reason"] == (
         "Runtime started with profile fast."
     )
+    assert (
+        mean_reversion_events[2].payload_json["startup_context"]["authority_kind"]
+        == "deployment_reconcile"
+    )
     assert mean_reversion_events[3].payload_json["previous_state"] == "NOT_APPROVED"
     assert mean_reversion_events[3].payload_json["new_state"] == "AUTO_DEPLOYED"
     assert mean_reversion_events[3].payload_json["deployment_id"] == deployment.id
+    assert (
+        mean_reversion_events[3].correlation_id
+        == mean_reversion_events[2].correlation_id
+    )
+
+
+def test_audit_test_002_background_reconcile_preserves_authority_for_later_entry(
+    session, broker, fixed_now, monkeypatch
+):
+    _enable_live_exit_context(monkeypatch, fixed_now)
+    governance_service = StrategyGovernanceService(session)
+    governance_service.ensure_defaults()
+    governance_service.upsert_strategy(
+        strategy_name="smoke_test_hold",
+        autonomous_operation_allowed=True,
+        approved_asset_classes=["FOREX"],
+        approved_instruments=["CS.D.EURUSD.MINI.IP"],
+        approved_profile_names=["default"],
+    )
+    manager = StrategyDeploymentManagerService(session)
+    manager.settings.autonomous_control_enabled = True
+    _force_deployable_candidate(manager, instrument="CS.D.EURUSD.MINI.IP")
+    broker.place_order_outcomes.append(
+        BrokerOrderResult(
+            broker_reference="background-reconcile-entry-1",
+            instrument="CS.D.EURUSD.MINI.IP",
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.5,
+            executed_at=fixed_now + timedelta(seconds=1),
+            status=BrokerOrderStatus.FILLED,
+            submitted_at=fixed_now + timedelta(seconds=1),
+            acknowledged_at=fixed_now + timedelta(seconds=1),
+        )
+    )
+
+    manager.reconcile(now=fixed_now)
+
+    service = StrategyService(session)
+    service.process_price_update(
+        "CS.D.EURUSD.MINI.IP",
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        "CS.D.EURUSD.MINI.IP",
+        100.5,
+        bid=100.49,
+        ask=100.51,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
+
+    runtime = session.exec(
+        select(StrategyRuntimeState).where(
+            StrategyRuntimeState.strategy_name == "smoke_test_hold",
+            StrategyRuntimeState.instrument == "CS.D.EURUSD.MINI.IP",
+        )
+    ).one()
+    execution = session.exec(select(Execution).order_by(Execution.id.desc())).first()
+    events = _domain_events(session)
+    runtime_started = next(
+        event
+        for event in events
+        if event.event_type == "strategy.runtime_started"
+        and event.strategy_name == "smoke_test_hold"
+    )
+    restarted = next(
+        event
+        for event in events
+        if event.event_type == "control_plane.runtime_restarted"
+        and event.strategy_name == "smoke_test_hold"
+    )
+    position_opened = next(
+        event
+        for event in events
+        if event.event_type == "execution.position_opened"
+        and event.strategy_name == "smoke_test_hold"
+    )
+
+    assert runtime.startup_context["authority_kind"] == "deployment_reconcile"
+    assert runtime.startup_context["authority_source"] == (
+        "strategy_deployment_manager.reconcile"
+    )
+    assert runtime.startup_context["actor_type"] == "service"
+    assert runtime.startup_context["actor_id"] == "strategy_deployment_manager"
+    assert runtime.startup_context["correlation_id"].startswith("deployment-reconcile:")
+    assert broker.placed_orders
+    assert broker.placed_orders[0].client_request_id == execution.client_request_id
+    assert execution.details["runtime_authority"] == runtime.startup_context
+    assert runtime_started.correlation_id == runtime.startup_context["correlation_id"]
+    assert runtime_started.payload_json["startup_context"] == runtime.startup_context
+    assert restarted.correlation_id == runtime.startup_context["correlation_id"]
+    assert restarted.payload_json["startup_context"] == runtime.startup_context
+    assert position_opened.correlation_id == execution.client_request_id
+    assert position_opened.execution_id == execution.id
+    assert position_opened.position_id == execution.local_position_id
+    assert (
+        position_opened.payload_json["details"]["runtime_authority"]
+        == runtime.startup_context
+    )
 
 
 def test_reconcile_emergency_stop_blocks_and_stops_auto_runtime(

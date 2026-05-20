@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+from datetime import datetime
 from datetime import timedelta
 
 import pytest
 from sqlmodel import select
 
-from app.core.broker import OrderDirection
+from app.core.broker import BrokerOrderResult, BrokerOrderStatus, OrderDirection
 from app.models.domain_event import DomainEvent
 from app.models.runtime import StrategyRuntimeState
-from app.models.trade import Position, TradeIntentState
+from app.models.trade import Execution, Position, Trade, TradeIntentState
 from app.services.audit_event_recorder import AuditEventPersistenceError
 from app.services.domain_event_service import domain_event_service
+from app.services.health_service import get_health_service
+from app.services.strategy_service import StrategyService
 from app.services.runtime_recovery_service import RuntimeRecoveryService
 from app.services.trade_service import TradeService
 from tests.fakes import make_broker_position
@@ -27,6 +30,36 @@ def _non_decision_domain_events(session) -> list[DomainEvent]:
         for event in _domain_events(session)
         if not event.event_type.startswith("trade_intent.")
     ]
+
+
+def _enable_live_operational_context(
+    monkeypatch: pytest.MonkeyPatch, *, at: datetime
+) -> None:
+    health_service = get_health_service()
+    health_service.update_broker_state(connected=True, latency_ms=5.0)
+    health_service.record_price_update(at, stream_connected=True)
+    stub = type(
+        "StreamService",
+        (),
+        {
+            "get_health": lambda self: type(
+                "Health",
+                (),
+                {
+                    "enabled": True,
+                    "connected": True,
+                    "subscribed_instruments": (),
+                    "desired_instruments": (),
+                    "last_tick_at": at,
+                },
+            )(),
+            "get_last_tick_at": lambda self, instrument: at,
+        },
+    )()
+    monkeypatch.setattr(
+        "app.services.operational_state_service.get_operational_streaming_service",
+        lambda: stub,
+    )
 
 
 def test_runtime_recovery_creates_trade_intent_before_recreating_position(
@@ -228,6 +261,121 @@ def test_audit_test_002_runtime_recovery_resumed_runtime_persists_domain_event(
     assert events[0].payload_json["previous_state"] == "RECOVERY_REQUIRED"
     assert events[0].payload_json["new_state"] == "RUNNING"
     assert events[0].payload_json["recovered"] is True
+    assert events[0].correlation_id == "runtime-recovery:runtime-recover-audit"
+    assert events[0].payload_json["startup_context"]["authority_kind"] == (
+        "runtime_recovery"
+    )
+
+
+def test_audit_test_002_runtime_recovery_resumed_runtime_preserves_authority_for_later_close(
+    session, broker, fixed_now, monkeypatch
+):
+    _enable_live_operational_context(monkeypatch, at=fixed_now)
+    session.add(
+        StrategyRuntimeState(
+            runtime_id="runtime-recover-close-authority",
+            strategy_name="smoke_test_hold",
+            instrument="CS.D.EURUSD.MINI.IP",
+            status="RUNNING",
+            recovery_state="RECOVERY_REQUIRED",
+            runtime_mode="NORMAL",
+            current_position_broker_reference="recover-close-authority-pos-1",
+            last_price_seen=101.0,
+            last_price_seen_at=fixed_now - timedelta(seconds=5),
+            strategy_state_snapshot={
+                "tick_count": 2,
+                "opened_at": (fixed_now - timedelta(seconds=30)).isoformat(),
+                "last_update_at": (fixed_now - timedelta(seconds=30)).isoformat(),
+                "in_position": True,
+            },
+        )
+    )
+    session.commit()
+    broker.remote_positions = [
+        make_broker_position(
+            broker_reference="recover-close-authority-pos-1",
+            instrument="CS.D.EURUSD.MINI.IP",
+            direction=OrderDirection.BUY,
+            size=0.4,
+            open_price=101.25,
+            opened_at=fixed_now - timedelta(minutes=3),
+        )
+    ]
+    broker.close_position_outcomes.append(
+        BrokerOrderResult(
+            broker_reference="recover-close-authority-close-1",
+            instrument="CS.D.EURUSD.MINI.IP",
+            direction=OrderDirection.SELL,
+            size=0.4,
+            price=101.7,
+            executed_at=fixed_now,
+            status=BrokerOrderStatus.FILLED,
+            submitted_at=fixed_now,
+            acknowledged_at=fixed_now,
+        )
+    )
+
+    RuntimeRecoveryService(session).recover()
+
+    service = StrategyService(session)
+    service.process_price_update(
+        "CS.D.EURUSD.MINI.IP",
+        101.7,
+        bid=101.69,
+        ask=101.71,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+
+    runtime = session.exec(
+        select(StrategyRuntimeState).where(
+            StrategyRuntimeState.runtime_id == "runtime-recover-close-authority"
+        )
+    ).one()
+    execution = session.exec(select(Execution).order_by(Execution.id.desc())).first()
+    trade = session.exec(select(Trade).order_by(Trade.id.desc())).first()
+    close_event = next(
+        event
+        for event in _non_decision_domain_events(session)
+        if event.event_type == "broker.close_confirmed"
+    )
+
+    assert runtime.startup_context["authority_kind"] == "runtime_recovery"
+    assert runtime.startup_context["authority_source"] == (
+        "runtime_recovery_service.recover"
+    )
+    assert runtime.startup_context["actor_type"] == "service"
+    assert runtime.startup_context["actor_id"] == "runtime_recovery_service"
+    assert runtime.startup_context["correlation_id"] == (
+        "runtime-recovery:runtime-recover-close-authority"
+    )
+    assert broker.close_requests == [
+        {
+            "instrument": "CS.D.EURUSD.MINI.IP",
+            "broker_reference": "recover-close-authority-pos-1",
+            "client_request_id": execution.client_request_id,
+        }
+    ]
+    assert execution.details["runtime_authority"] == runtime.startup_context
+    assert execution.status == "CLOSE_CONFIRMED"
+    assert trade is not None
+    assert close_event.source == "strategy_service.execute_exit_signal"
+    assert close_event.actor_type == "service"
+    assert close_event.actor_id == "strategy_service"
+    assert close_event.correlation_id == execution.client_request_id
+    assert close_event.position_id == execution.local_position_id
+    assert close_event.trade_id == trade.id
+    assert close_event.execution_id == execution.id
+    assert close_event.payload_json["previous_state"] == "FILL_FULL"
+    assert close_event.payload_json["new_state"] == "CLOSE_CONFIRMED"
+    assert (
+        close_event.payload_json["broker_reference"] == "recover-close-authority-pos-1"
+    )
+    assert (
+        close_event.payload_json["close_broker_reference"]
+        == "recover-close-authority-close-1"
+    )
 
 
 def test_audit_test_002_runtime_recovery_broker_mismatch_persists_domain_event(

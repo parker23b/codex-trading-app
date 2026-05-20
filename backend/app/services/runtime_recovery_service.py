@@ -66,6 +66,7 @@ class RuntimeRecoveryService:
 
         for runtime in runtimes:
             previous_recovery_state = runtime.recovery_state
+            startup_context = self._build_runtime_startup_context(runtime=runtime)
             runtime_manager.load_cached_price(
                 runtime.instrument,
                 price=runtime.last_price_seen,
@@ -371,6 +372,7 @@ class RuntimeRecoveryService:
                 strategy_parameters=runtime.parameters,
                 runtime_id=runtime.runtime_id,
                 strategy_snapshot=runtime.strategy_state_snapshot,
+                startup_context=startup_context,
                 current_position=clone_position(current_position),
                 runtime_mode=runtime.runtime_mode,
                 startup_source="runtime_recovery_service.recover",
@@ -387,6 +389,7 @@ class RuntimeRecoveryService:
                 active_profile_name=runtime.active_profile_name,
                 parameters=runtime.parameters,
                 auto_resume=runtime.auto_resume,
+                startup_context=engine.startup_context,
                 started_at=runtime.started_at,
                 last_price_seen=runtime.last_price_seen,
                 last_price_seen_at=runtime.last_price_seen_at,
@@ -422,7 +425,9 @@ class RuntimeRecoveryService:
                     "recovery_outcome": outcomes[-1]["outcome"],
                     "previous_state": previous_recovery_state,
                     "new_state": "RUNNING",
+                    "startup_context": engine.startup_context,
                 },
+                correlation_id=str(startup_context.get("correlation_id")),
             )
             logger.info(
                 "Recovered persisted runtime",
@@ -435,6 +440,19 @@ class RuntimeRecoveryService:
             )
 
         return outcomes
+
+    @staticmethod
+    def _build_runtime_startup_context(*, runtime) -> dict[str, object]:
+        existing = dict(getattr(runtime, "startup_context", {}) or {})
+        existing.setdefault("authority_kind", "runtime_recovery")
+        existing.setdefault("authority_source", "runtime_recovery_service.recover")
+        existing.setdefault("actor_type", "service")
+        existing.setdefault("actor_id", "runtime_recovery_service")
+        existing.setdefault(
+            "correlation_id",
+            f"runtime-recovery:{runtime.runtime_id}",
+        )
+        return existing
 
     def _record_required_runtime_event(
         self,
