@@ -20,8 +20,8 @@ The current blocking themes are:
 
 - simulated-vs-broker-confirmed provenance is still incomplete across broader frontend/browser surfaces
 - the spec coverage matrix still does not comprehensively map every P0/P1 boundary and surface requirement
-- `risk_truth_confidence` is still not owned by an authoritative backend/frontend contract
-- several operator-critical API responses are still raw dict/list contracts without modeled or documented schema ownership
+- `risk_truth_confidence` now has an authoritative backend/frontend contract, but broader enum-parity and operator-surface evidence are still incomplete
+- several operator-critical API responses outside the covered allocation/risk, AIMEE/review, and markets/watchlist/feed-state/live-chart slices are still raw dict/list contracts without modeled or documented schema ownership
 - durable audit preservation is still incomplete for remaining broker-action and background-event paths
 - frontend operator truth is still missing broad browser/e2e coverage for degraded, unknown, passive-vs-mutation, and mutation-failure states
 - logging redaction, secrets hygiene, dependency locking, migrations, and durable observability remain below readiness grade
@@ -31,8 +31,8 @@ The canonical blocker list is in [audit-status.md](audit-status.md).
 ## Known Risks
 
 - Simulated/local execution and close provenance is not yet proved across broader frontend/browser operator surfaces.
-- `risk_truth_confidence` labels remain provisional, which weakens backend/frontend parity for operator risk truth.
-- Several operator-critical routes still lack modeled or documented response schemas, making contract drift easier to miss.
+- Broader backend/frontend enum-parity proof is still incomplete even though `risk_truth_confidence` now has a central contract.
+- Several operator-critical routes outside allocation/risk and AIMEE/review still lack modeled or documented response schemas, making contract drift easier to miss.
 - Remaining mutation and broker-action paths still need durable audit-preservation proof at the route/background boundary.
 - Browser/e2e operator-state coverage is still too narrow for readiness claims.
 - Database evolution currently relies on `create_all()` plus SQLite patch helpers rather than versioned migrations.
@@ -44,7 +44,7 @@ The canonical blocker list is in [audit-status.md](audit-status.md).
 
 Before live or demo broker dealing, the app needs at least:
 
-- authoritative backend/frontend contracts for `risk_truth_confidence` and operator-critical API response schemas
+- complete modeled/documented backend/frontend contracts for the remaining operator-critical API response families beyond allocation/risk and AIMEE/review
 - durable audit-preservation proof for remaining mutation, broker-action, reconciliation, recovery, and background-event paths
 - browser/e2e evidence for degraded, stale, simulated, unknown, manual-review, and mutation-failure operator states
 - migration, dependency, redaction, and secrets controls that are strong enough for broker-connected operation

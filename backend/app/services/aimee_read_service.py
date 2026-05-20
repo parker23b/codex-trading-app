@@ -7,14 +7,12 @@ from sqlmodel import Session, desc, select
 
 from app.core.config import get_settings
 from app.models.domain_event import DomainEvent
-from app.models.operator_control import OperatorControlState
 from app.models.promotion_request import PromotionRequest
 from app.models.runtime import StrategyRuntimeState
-from app.models.strategy_deployment import StrategyDeployment
-from app.models.strategy_governance import StrategyFamilyGovernance
 from app.models.trade import Execution, ExecutionStatus, TradeIntent, TradeIntentState
 from app.models.watchlist import WatchlistEntry, WatchlistStatus, WatchlistTier
 from app.reviewer.service import AIReviewerService
+from app.services.control_plane_service import ControlPlaneService
 from app.services.operational_telemetry_service import OperationalTelemetryService
 from app.strategies.registry import strategy_registry
 
@@ -35,93 +33,60 @@ class AimeeReadService:
     def get_snapshot(self) -> dict[str, object]:
         now = datetime.now(UTC)
         reviewer = AIReviewerService(self.session)
+        telemetry = OperationalTelemetryService(self.session).get_summary()
         return {
             "review": reviewer.get_operator_summary(persist=False),
             "history": reviewer.list_review_history(
                 review_type="operator_summary", limit=6
             ),
-            "controlPlane": self._control_plane_summary(),
+            "controlPlane": self._control_plane_summary(telemetry=telemetry),
             "coverage": self._coverage_summary(),
-            "telemetry": OperationalTelemetryService(self.session).get_summary(),
+            "telemetry": telemetry,
             "events": self._events(limit=8),
             "strategies": self._strategies(),
             "updatedAt": now,
         }
 
-    def _control_plane_summary(self) -> dict[str, object]:
-        control_state = self.session.get(OperatorControlState, 1)
-        effective_autonomy = (
-            self.settings.autonomous_control_enabled
-            if control_state is None
-            or control_state.autonomous_control_override is None
-            else control_state.autonomous_control_override
-        )
-        governance_by_name = {
-            record.strategy_name: record
-            for record in self.session.exec(select(StrategyFamilyGovernance)).all()
-        }
-        deployment_by_name = {
-            deployment.strategy_name: deployment
-            for deployment in self.session.exec(select(StrategyDeployment)).all()
-        }
-        runtimes_by_strategy: dict[str, list[StrategyRuntimeState]] = defaultdict(list)
-        for runtime in self.session.exec(
-            select(StrategyRuntimeState).order_by(
-                StrategyRuntimeState.updated_at.desc()
-            )
-        ).all():
-            runtimes_by_strategy[runtime.strategy_name].append(runtime)
-
-        families: list[dict[str, object]] = []
-        misaligned_count = 0
-        for metadata in strategy_registry.list_metadata():
-            strategy_name = metadata.name
-            governance = governance_by_name.get(strategy_name)
-            deployment = deployment_by_name.get(strategy_name)
-            runtimes = runtimes_by_strategy.get(strategy_name, [])
-            active_runtime = self._select_active_runtime(runtimes)
-            alignment = self._alignment(
-                deployment=deployment, active_runtime=active_runtime
-            )
-            if alignment["is_aligned"] is False:
-                misaligned_count += 1
-            families.append(
-                {
-                    "strategy_name": strategy_name,
-                    "deployment": self._serialize_deployment(deployment),
-                    "runtime": self._serialize_runtime(active_runtime, runtimes),
-                    "alignment": alignment,
-                    "governance": {
-                        "approval_state": governance.approval_state
-                        if governance is not None
-                        else "UNKNOWN",
-                        "autonomous_operation_allowed": governance.autonomous_operation_allowed
-                        if governance is not None
-                        else False,
-                        "emergency_stop": governance.emergency_stop
-                        if governance is not None
-                        else False,
-                    },
-                }
-            )
-
-        counts = Counter(
-            family["deployment"]["state"]
-            for family in families
-            if isinstance(family.get("deployment"), dict)
-            and family["deployment"].get("state") is not None
-        )
+    def _control_plane_summary(
+        self, *, telemetry: dict[str, object]
+    ) -> dict[str, object]:
+        summary = ControlPlaneService(self.session).get_summary()
         return {
-            "effective_autonomous_control_enabled": effective_autonomy,
-            "configured_autonomous_control_enabled": self.settings.autonomous_control_enabled,
-            "autonomy_override_active": control_state is not None
-            and control_state.autonomous_control_override is not None,
-            "autonomy_override_reason": control_state.override_reason
-            if control_state is not None
-            else None,
-            "misaligned_count": misaligned_count,
-            "counts": dict(counts),
-            "families": families,
+            "effective_autonomous_control_enabled": summary[
+                "effective_autonomous_control_enabled"
+            ],
+            "configured_autonomous_control_enabled": summary[
+                "configured_autonomous_control_enabled"
+            ],
+            "autonomy_override_active": summary["autonomy_override_active"],
+            "autonomy_override_value": summary["autonomy_override_value"],
+            "autonomy_override_reason": summary["autonomy_override_reason"],
+            "autonomy_updated_at": summary["autonomy_updated_at"],
+            "feed_source_state": telemetry["feed_source_state"],
+            "feed_health_state": telemetry["feed_health_state"],
+            "broker_connectivity_state": telemetry["broker_connectivity_state"],
+            "entry_eligible": telemetry["entry_eligible"],
+            "exit_eligible": telemetry["exit_eligible"],
+            "entry_block_reason": telemetry["entry_block_reason"],
+            "exit_block_reason": telemetry["exit_block_reason"],
+            "open_risk_management_state": telemetry["open_risk_management_state"],
+            "open_risk_management_reason": telemetry["open_risk_management_reason"],
+            "misaligned_count": summary["misaligned_count"],
+            "counts": summary["counts"],
+            "families": [
+                {
+                    "strategy_name": family["strategy_name"],
+                    "deployment": self._serialize_aimee_deployment(
+                        family.get("deployment")
+                    ),
+                    "runtime": self._serialize_aimee_runtime(family["runtime"]),
+                    "alignment": self._serialize_aimee_alignment(family["alignment"]),
+                    "governance": self._serialize_aimee_governance(
+                        family["governance"]
+                    ),
+                }
+                for family in summary["families"]
+            ],
         }
 
     def _coverage_summary(self) -> dict[str, object]:
@@ -285,100 +250,47 @@ class AimeeReadService:
         ]
 
     @staticmethod
-    def _select_active_runtime(
-        runtimes: list[StrategyRuntimeState],
-    ) -> StrategyRuntimeState | None:
-        running = [runtime for runtime in runtimes if runtime.status == "RUNNING"]
-        if not running:
-            return None
-        return sorted(
-            running,
-            key=lambda runtime: (
-                0 if runtime.control_mode == "AUTO" else 1,
-                runtime.updated_at,
-            ),
-            reverse=True,
-        )[0]
+    def _serialize_aimee_governance(governance: dict[str, object]) -> dict[str, object]:
+        return {
+            "approval_state": governance["approval_state"],
+            "autonomous_operation_allowed": governance["autonomous_operation_allowed"],
+            "emergency_stop": governance["emergency_stop"],
+        }
 
     @staticmethod
-    def _serialize_deployment(
-        deployment: StrategyDeployment | None,
+    def _serialize_aimee_deployment(
+        deployment: dict[str, object] | None,
     ) -> dict[str, object] | None:
         if deployment is None:
             return None
         return {
-            "state": deployment.state,
-            "blocked_reason": deployment.blocked_reason,
-            "degraded_reason": deployment.degraded_reason,
-            "selected_instrument": deployment.selected_instrument,
-            "selected_profile": deployment.selected_profile,
-            "updated_at": deployment.updated_at,
+            "state": deployment["state"],
+            "open_risk_management_state": deployment.get("open_risk_management_state"),
+            "open_risk_management_reason": deployment.get(
+                "open_risk_management_reason"
+            ),
+            "blocked_reason": deployment.get("blocked_reason"),
+            "degraded_reason": deployment.get("degraded_reason"),
+            "selected_instrument": deployment.get("selected_instrument"),
+            "selected_profile": deployment.get("selected_profile"),
+            "updated_at": deployment.get("updated_at"),
         }
 
     @staticmethod
-    def _serialize_runtime(
-        active_runtime: StrategyRuntimeState | None,
-        runtimes: list[StrategyRuntimeState],
-    ) -> dict[str, object]:
-        if active_runtime is None:
-            return {
-                "is_running": False,
-                "active_instrument": None,
-                "active_profile_name": None,
-                "control_mode": None,
-                "persisted_runtime_count": len(runtimes),
-            }
+    def _serialize_aimee_runtime(runtime: dict[str, object]) -> dict[str, object]:
         return {
-            "is_running": True,
-            "active_instrument": active_runtime.instrument,
-            "active_profile_name": active_runtime.active_profile_name,
-            "control_mode": active_runtime.control_mode,
-            "persisted_runtime_count": len(runtimes),
+            "is_running": runtime["is_running"],
+            "active_instrument": runtime.get("active_instrument"),
+            "active_profile_name": runtime.get("active_profile_name"),
+            "control_mode": runtime.get("control_mode"),
+            "persisted_runtime_count": len(runtime.get("persisted_runtimes", [])),
         }
 
     @staticmethod
-    def _alignment(
-        *,
-        deployment: StrategyDeployment | None,
-        active_runtime: StrategyRuntimeState | None,
-    ) -> dict[str, object]:
-        if deployment is None:
-            return {
-                "is_aligned": None,
-                "reason": "No deployment record exists for this strategy family yet.",
-            }
-        if deployment.state == "AUTO_DEPLOYED":
-            if active_runtime is None:
-                return {
-                    "is_aligned": False,
-                    "reason": "Deployment expects an autonomous runtime, but none is running.",
-                }
-            if active_runtime.control_mode != "AUTO":
-                return {
-                    "is_aligned": False,
-                    "reason": "Deployment expects AUTO control mode, but the runtime is not autonomous.",
-                }
-            if active_runtime.instrument != deployment.selected_instrument:
-                return {
-                    "is_aligned": False,
-                    "reason": "Runtime instrument differs from the deployed instrument.",
-                }
-            return {
-                "is_aligned": True,
-                "reason": "Deployment and runtime are aligned.",
-            }
-        if active_runtime is not None and deployment.state in {
-            "BLOCKED",
-            "AUTO_PAUSED",
-            "EMERGENCY_STOPPED",
-        }:
-            return {
-                "is_aligned": False,
-                "reason": "Runtime is still active despite the deployment state requiring it to be stopped.",
-            }
+    def _serialize_aimee_alignment(alignment: dict[str, object]) -> dict[str, object]:
         return {
-            "is_aligned": True,
-            "reason": "Runtime state matches the deployment expectation.",
+            "is_aligned": alignment.get("is_aligned"),
+            "reason": alignment["reason"],
         }
 
     def _compute_streaming_plan(

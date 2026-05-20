@@ -245,8 +245,8 @@ def test_audit_api_008_allocation_alert_mutations_persist_domain_events(session)
     )
 
     events = _events(session)
-    assert acknowledged_response["state"] == "ACKNOWLEDGED"
-    assert resolved_response["state"] == "RESOLVED"
+    assert acknowledged_response.state == "ACKNOWLEDGED"
+    assert resolved_response.state == "RESOLVED"
     assert [event.event_type for event in events] == [
         "operator.allocation_alert_acknowledged",
         "operator.allocation_alert_resolved",

@@ -3,6 +3,18 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.api.audit import persist_required_domain_event
+from app.api.contracts.markets import (
+    FeedStateInstrumentResponse,
+    FeedStateResponse,
+    LiveChartResponse,
+    MarketCategoryOverviewResponse,
+    MarketCatalogueResponse,
+    ShortlistMutationResponse,
+    ShortlistResponse,
+    StrategyWatchlistBulkResponse,
+    StrategyWatchlistMutationResponse,
+    StrategyWatchlistResponse,
+)
 from app.db.session import get_session
 from app.core.broker import BrokerError
 from app.models.watchlist import OperatorShortlistEntry, WatchlistEntry
@@ -40,7 +52,7 @@ def _strategy_watchlist_state(entry: WatchlistEntry | None) -> str:
     return str(entry.status)
 
 
-@router.get("/markets/overview")
+@router.get("/markets/overview", response_model=MarketCategoryOverviewResponse)
 def get_market_overview(
     category: str = Query(default="forex"),
     session: Session = Depends(get_session),
@@ -59,17 +71,19 @@ def get_market_overview(
         ) from exc
 
 
-@router.get("/markets/catalogue")
+@router.get("/markets/catalogue", response_model=MarketCatalogueResponse)
 def get_market_catalogue(session: Session = Depends(get_session)) -> dict[str, object]:
     return WatchlistService(session).catalogue_response()
 
 
-@router.get("/watchlist/shortlist")
+@router.get("/watchlist/shortlist", response_model=ShortlistResponse)
 def get_shortlist(session: Session = Depends(get_session)) -> dict[str, object]:
     return WatchlistService(session).shortlist_response()
 
 
-@router.post("/watchlist/shortlist/{instrument_id}")
+@router.post(
+    "/watchlist/shortlist/{instrument_id}", response_model=ShortlistMutationResponse
+)
 def add_shortlist_item(
     instrument_id: str, session: Session = Depends(get_session)
 ) -> dict[str, object]:
@@ -105,7 +119,10 @@ def add_shortlist_item(
     return {"status": "shortlisted", "instrument": instrument}
 
 
-@router.delete("/watchlist/shortlist/{instrument_id}")
+@router.delete(
+    "/watchlist/shortlist/{instrument_id}",
+    response_model=ShortlistMutationResponse,
+)
 def remove_shortlist_item(
     instrument_id: str, session: Session = Depends(get_session)
 ) -> dict[str, object]:
@@ -136,7 +153,7 @@ def remove_shortlist_item(
     return {"status": "removed", "instrument": instrument_id}
 
 
-@router.post("/strategy-watchlist/bulk")
+@router.post("/strategy-watchlist/bulk", response_model=StrategyWatchlistBulkResponse)
 def add_strategy_watchlist_items(
     payload: BulkStrategyWatchlistRequest,
     session: Session = Depends(get_session),
@@ -191,14 +208,17 @@ def add_strategy_watchlist_items(
     return response
 
 
-@router.get("/strategy-watchlist")
+@router.get("/strategy-watchlist", response_model=StrategyWatchlistResponse)
 def get_strategy_watchlist(
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     return WatchlistService(session).strategy_watchlist_response(sync=False)
 
 
-@router.delete("/strategy-watchlist/{instrument_id}")
+@router.delete(
+    "/strategy-watchlist/{instrument_id}",
+    response_model=StrategyWatchlistMutationResponse,
+)
 def remove_strategy_watchlist_item(
     instrument_id: str, session: Session = Depends(get_session)
 ) -> dict[str, object]:
@@ -231,19 +251,22 @@ def remove_strategy_watchlist_item(
     return {"status": "removed", "instrument": instrument_id}
 
 
-@router.get("/market-data/feed-state")
+@router.get("/market-data/feed-state", response_model=FeedStateResponse)
 def get_feed_state(session: Session = Depends(get_session)) -> dict[str, object]:
     return WatchlistService(session).feed_state_response(sync=False)
 
 
-@router.get("/market-data/feed-state/{instrument_id}")
+@router.get(
+    "/market-data/feed-state/{instrument_id}",
+    response_model=FeedStateInstrumentResponse,
+)
 def get_instrument_feed_state(
     instrument_id: str, session: Session = Depends(get_session)
 ) -> dict[str, object]:
     return WatchlistService(session).feed_state_for_instrument(instrument_id)
 
 
-@router.get("/live/instruments/{instrument_id}/chart")
+@router.get("/live/instruments/{instrument_id}/chart", response_model=LiveChartResponse)
 def get_live_instrument_chart(
     instrument_id: str,
     timeframe: str = Query(default="1m"),

@@ -23,9 +23,11 @@ import {
   OperationalQuestionReviewResponse,
   Position,
   ReviewHistoryItem,
+  ShortlistMutationResponse,
   SystemOperatingLimits,
   StrategyDefinition,
   StrategyWatchlistBulkResult,
+  StrategyWatchlistMutationResponse,
   StrategyWatchlistResponse,
   StreamHealthStatus,
   Trade,
@@ -590,14 +592,14 @@ export async function getMarketCatalogue(): Promise<MarketCatalogueResponse> {
   });
 }
 
-export async function addShortlistInstrument(instrumentId: string): Promise<Record<string, unknown>> {
-  return request<Record<string, unknown>>(`/watchlist/shortlist/${encodeURIComponent(instrumentId)}`, {
+export async function addShortlistInstrument(instrumentId: string): Promise<ShortlistMutationResponse> {
+  return request<ShortlistMutationResponse>(`/watchlist/shortlist/${encodeURIComponent(instrumentId)}`, {
     method: "POST",
   });
 }
 
-export async function removeShortlistInstrument(instrumentId: string): Promise<Record<string, unknown>> {
-  return request<Record<string, unknown>>(`/watchlist/shortlist/${encodeURIComponent(instrumentId)}`, {
+export async function removeShortlistInstrument(instrumentId: string): Promise<ShortlistMutationResponse> {
+  return request<ShortlistMutationResponse>(`/watchlist/shortlist/${encodeURIComponent(instrumentId)}`, {
     method: "DELETE",
   });
 }
@@ -613,8 +615,8 @@ export async function getStrategyWatchlist(): Promise<StrategyWatchlistResponse>
   return request<StrategyWatchlistResponse>("/strategy-watchlist");
 }
 
-export async function removeStrategyWatchlistInstrument(instrumentId: string): Promise<Record<string, unknown>> {
-  return request<Record<string, unknown>>(`/strategy-watchlist/${encodeURIComponent(instrumentId)}`, {
+export async function removeStrategyWatchlistInstrument(instrumentId: string): Promise<StrategyWatchlistMutationResponse> {
+  return request<StrategyWatchlistMutationResponse>(`/strategy-watchlist/${encodeURIComponent(instrumentId)}`, {
     method: "DELETE",
   });
 }

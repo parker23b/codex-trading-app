@@ -280,10 +280,10 @@ def test_aimee_snapshot_route_is_side_effect_free(session, fixed_now, monkeypatc
     second = get_aimee_snapshot_route(session)
     after_second = _fingerprint_state(session)
 
-    assert first["review"] is not None
-    assert second["review"] is not None
-    assert first["review"].metadata.review_id is None
-    assert second["review"].metadata.review_id is None
+    assert first.review is not None
+    assert second.review is not None
+    assert first.review.metadata.review_id is None
+    assert second.review.metadata.review_id is None
     assert persisted_types == []
     assert before == after_first == after_second
 
@@ -312,8 +312,8 @@ def test_audit_api_007_aimee_passive_snapshot_does_not_call_broker_account(
 
     snapshot = get_aimee_snapshot_route(session)
 
-    assert snapshot["review"] is not None
-    assert snapshot["review"].metadata.review_id is None
+    assert snapshot.review is not None
+    assert snapshot.review.metadata.review_id is None
     assert broker_account_reads == 0
 
 

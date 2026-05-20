@@ -198,7 +198,7 @@ function baseAlert(overrides = {}) {
     alert_type: "material_execution_drift",
     severity: "error",
     state: "OPEN",
-    escalation_level: 2,
+    escalation_level: "critical",
     title: "Material execution drift",
     message: "Submitted risk moved materially from approved allocation.",
     count: 1,

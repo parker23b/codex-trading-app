@@ -204,6 +204,11 @@ export type ShortlistResponse = {
   count: number;
 };
 
+export type ShortlistMutationResponse = {
+  status: "shortlisted" | "removed";
+  instrument: MarketCatalogueInstrument | string;
+};
+
 export type StrategyWatchlistEntry = CoverageWatchlistEntry;
 
 export type StrategyWatchlistResponse = {
@@ -223,9 +228,28 @@ export type StrategyWatchlistBulkResult = {
   limit: number;
 };
 
+export type StrategyWatchlistMutationResponse = {
+  status: "removed";
+  instrument: string;
+};
+
+export type FeedMarketStatus = {
+  instrument: string;
+  is_ok: boolean;
+  market_open: boolean;
+  tradable: boolean;
+  quote_fresh: boolean;
+  spread_ok: boolean;
+  session_valid: boolean;
+  dealing_allowed: boolean;
+  last_price_age_ms: number;
+  spread?: number | null;
+  reason?: string | null;
+};
+
 export type FeedState = {
   instrument: string;
-  stream_status: string;
+  stream_status: "streaming" | "stale" | "desired" | "capped" | "inactive";
   stream_connected: boolean;
   stream_enabled: boolean;
   streaming_now: boolean;
@@ -234,9 +258,9 @@ export type FeedState = {
   last_tick_at?: string | null;
   last_tick_age_ms?: number | null;
   spread?: number | null;
-  price_source: string;
+  price_source: "STREAM" | "SNAPSHOT" | "STALE" | "UNAVAILABLE";
   stream_reason?: OperatorReason;
-  market_status?: CoverageSummary["streaming"]["execution_readiness"][number] | Record<string, unknown> | null;
+  market_status?: FeedMarketStatus | null;
   market_error?: string | null;
   entry_eligibility: string;
   entry_eligibility_reason?: OperatorReason;
@@ -578,8 +602,8 @@ export type DomainEvent = {
   id: number;
   created_at: string;
   event_type: string;
-  category: "strategy" | "risk" | "execution" | "reconciliation" | "operator" | "health";
-  severity: "info" | "warning" | "error";
+  category: string;
+  severity: string;
   error_type?: string | null;
   source: string;
   correlation_id?: string | null;
@@ -844,7 +868,12 @@ export type AimeeControlPlaneSummary = {
   effective_autonomous_control_enabled: boolean;
   configured_autonomous_control_enabled: boolean;
   autonomy_override_active: boolean;
+  autonomy_override_value?: boolean | null;
   autonomy_override_reason?: string | null;
+  autonomy_updated_at?: string | null;
+  feed_source_state: string;
+  feed_health_state: string;
+  broker_connectivity_state: string;
   entry_eligible?: boolean;
   exit_eligible?: boolean;
   entry_block_reason?: string | null;
@@ -912,14 +941,14 @@ export type AimeeStrategySummary = {
 };
 
 export type AimeeSnapshotResponse = {
-  review: OperatorSummaryReview | null;
+  review: OperatorSummaryReview;
   history: ReviewHistoryItem[];
-  controlPlane: AimeeControlPlaneSummary | null;
-  coverage: AimeeCoverageSummary | null;
-  telemetry: OperationalTelemetry | null;
+  controlPlane: AimeeControlPlaneSummary;
+  coverage: AimeeCoverageSummary;
+  telemetry: OperationalTelemetry;
   events: DomainEvent[];
   strategies: AimeeStrategySummary[];
-  updatedAt?: string | null;
+  updatedAt: string;
 };
 
 export type OperationalQuestionReviewResponse = {
@@ -1107,6 +1136,7 @@ export type AllocationDriftSummary = {
 
 export type AllocationAlertState = "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
 export type AllocationAlertSeverity = "info" | "warning" | "error";
+export type AllocationAlertEscalationLevel = "none" | "warning" | "critical";
 
 export type AllocationAlert = {
   id: number;
@@ -1114,7 +1144,7 @@ export type AllocationAlert = {
   alert_type: string;
   severity: AllocationAlertSeverity;
   state: AllocationAlertState;
-  escalation_level: number;
+  escalation_level: AllocationAlertEscalationLevel;
   title: string;
   message: string;
   count: number;

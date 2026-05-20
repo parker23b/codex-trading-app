@@ -95,7 +95,7 @@ def test_audit_003_unresolved_critical_route_reads_persisted_alerts_without_refr
     )
 
     assert len(alerts) == 1
-    assert alerts[0]["alert_key"] == "seeded-error"
+    assert alerts[0].alert_key == "seeded-error"
     assert not requires_operator_auth(
         method="GET", path="/allocation/alerts/unresolved-critical"
     )
