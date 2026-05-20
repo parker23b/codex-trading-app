@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, Session, create_engine
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.runtime import runtime_manager
+from app.db.session import get_session
+from app.main import create_app
 from app.models.allocation_alert import AllocationAlert
 from app.models.domain_event import DomainEvent
 from app.models.operator_control import OperatorControlState
@@ -74,6 +78,9 @@ def patch_external_boundaries(
 ) -> None:
     monkeypatch.setattr("app.core.runtime.get_broker", lambda: broker)
     monkeypatch.setattr("app.core.broker_factory.get_broker", lambda: broker)
+    monkeypatch.setattr(
+        "app.services.market_overview_service.get_broker", lambda: broker
+    )
     monkeypatch.setattr("app.services.market_status_service.get_broker", lambda: broker)
     monkeypatch.setattr(
         "app.services.reconciliation_service.get_broker", lambda: broker
@@ -117,3 +124,29 @@ def session() -> Iterator[Session]:
 @pytest.fixture
 def fixed_now() -> datetime:
     return datetime(2026, 4, 7, 12, 0, tzinfo=UTC)
+
+
+@pytest.fixture
+def app_factory(session: Session):
+    def _build_app(**setting_overrides):
+        settings = Settings(**{**get_settings().model_dump(), **setting_overrides})
+        app = create_app(active_settings=settings, enable_lifespan=False)
+
+        def override_get_session():
+            yield session
+
+        app.dependency_overrides[get_session] = override_get_session
+        return app
+
+    return _build_app
+
+
+@pytest.fixture
+def client_factory(app_factory):
+    @contextmanager
+    def _build_client(**setting_overrides):
+        app = app_factory(**setting_overrides)
+        with TestClient(app) as client:
+            yield client
+
+    return _build_client

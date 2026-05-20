@@ -14,7 +14,7 @@ from starlette.responses import JSONResponse, Response
 from sqlmodel import Session
 
 from app.api.auth import require_operator_identity, requires_operator_auth
-from app.api.router import api_router
+from app.api.router import build_api_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.db.init_db import initialize_database
@@ -140,94 +140,9 @@ def _make_runtime_leader_owner_id() -> str:
     return f"{socket.gethostname()}:{os.getpid()}:{uuid4()}"
 
 
-app = FastAPI(title=settings.app_name, lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-@app.middleware("http")
-async def enforce_operator_auth(request: Request, call_next):
-    if requires_operator_auth(
-        method=request.method,
-        path=request.url.path,
-        query_params=request.query_params,
-    ):
-        try:
-            require_operator_identity(request)
-        except HTTPException as exc:
-            return JSONResponse(
-                {"detail": exc.detail},
-                status_code=exc.status_code,
-                headers=exc.headers,
-            )
-    return await call_next(request)
-
-
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    started_at = perf_counter()
-    try:
-        response = await call_next(request)
-    except Exception:
-        duration_ms = round((perf_counter() - started_at) * 1000, 2)
-        domain_event_service.record_error(
-            error_type="UnhandledRequestException",
-            source="main.log_requests",
-            event_type="api.request_failed",
-            title="Unhandled API request exception",
-            message=f"{request.method} {request.url.path} failed with an unhandled exception.",
-            payload_json={
-                "method": request.method,
-                "path": request.url.path,
-                "status_code": 500,
-                "duration_ms": duration_ms,
-            },
-        )
-        logger.exception(
-            "API request failed",
-            extra={
-                "method": request.method,
-                "path": request.url.path,
-                "status_code": 500,
-                "duration_ms": duration_ms,
-            },
-        )
-        raise
-    duration_ms = round((perf_counter() - started_at) * 1000, 2)
-    if response.status_code >= 500:
-        domain_event_service.record_error(
-            error_type=f"HTTP{response.status_code}",
-            source="main.log_requests",
-            event_type="api.request_failed",
-            title="API request returned server error",
-            message=f"{request.method} {request.url.path} returned {response.status_code}.",
-            payload_json={
-                "method": request.method,
-                "path": request.url.path,
-                "status_code": response.status_code,
-                "duration_ms": duration_ms,
-            },
-        )
-    log_level = _classify_request_log_level(
-        request=request, response=response, duration_ms=duration_ms
-    )
-    logger.log(
-        log_level,
-        "API request handled",
-        extra={
-            "method": request.method,
-            "path": request.url.path,
-            "status_code": response.status_code,
-            "duration_ms": duration_ms,
-        },
-    )
-    return response
+@asynccontextmanager
+async def _noop_lifespan(_: FastAPI):
+    yield
 
 
 def _classify_request_log_level(
@@ -246,4 +161,104 @@ def _classify_request_log_level(
     return logging.INFO
 
 
-app.include_router(api_router)
+def create_app(
+    *,
+    active_settings: object | None = None,
+    enable_lifespan: bool = True,
+) -> FastAPI:
+    app_settings = active_settings or get_settings()
+    app = FastAPI(
+        title=app_settings.app_name,
+        lifespan=lifespan if enable_lifespan else _noop_lifespan,
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=app_settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    @app.middleware("http")
+    async def enforce_operator_auth(request: Request, call_next):
+        if requires_operator_auth(
+            method=request.method,
+            path=request.url.path,
+            query_params=request.query_params,
+        ):
+            try:
+                require_operator_identity(request, settings=app_settings)
+            except HTTPException as exc:
+                return JSONResponse(
+                    {"detail": exc.detail},
+                    status_code=exc.status_code,
+                    headers=exc.headers,
+                )
+        return await call_next(request)
+
+    @app.middleware("http")
+    async def log_requests(request: Request, call_next):
+        started_at = perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            duration_ms = round((perf_counter() - started_at) * 1000, 2)
+            domain_event_service.record_error(
+                error_type="UnhandledRequestException",
+                source="main.log_requests",
+                event_type="api.request_failed",
+                title="Unhandled API request exception",
+                message=f"{request.method} {request.url.path} failed with an unhandled exception.",
+                payload_json={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": 500,
+                    "duration_ms": duration_ms,
+                },
+            )
+            logger.exception(
+                "API request failed",
+                extra={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": 500,
+                    "duration_ms": duration_ms,
+                },
+            )
+            raise
+        duration_ms = round((perf_counter() - started_at) * 1000, 2)
+        if response.status_code >= 500:
+            domain_event_service.record_error(
+                error_type=f"HTTP{response.status_code}",
+                source="main.log_requests",
+                event_type="api.request_failed",
+                title="API request returned server error",
+                message=f"{request.method} {request.url.path} returned {response.status_code}.",
+                payload_json={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": response.status_code,
+                    "duration_ms": duration_ms,
+                },
+            )
+        log_level = _classify_request_log_level(
+            request=request, response=response, duration_ms=duration_ms
+        )
+        logger.log(
+            log_level,
+            "API request handled",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "duration_ms": duration_ms,
+            },
+        )
+        return response
+
+    app.include_router(build_api_router(app_settings))
+    return app
+
+
+app = create_app(active_settings=settings)
