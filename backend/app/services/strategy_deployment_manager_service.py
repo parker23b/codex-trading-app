@@ -162,6 +162,7 @@ class StrategyDeploymentManagerService:
                         open_positions=open_positions,
                         target_state=target_state,
                         target_reason=reason,
+                        stop_context=reconcile_startup_context,
                     )
                 )
 
@@ -500,7 +501,10 @@ class StrategyDeploymentManagerService:
                     )
                 else:
                     self.strategy_service.stop_strategy(
-                        strategy_name=strategy_name, instrument=runtime.instrument
+                        strategy_name=strategy_name,
+                        instrument=runtime.instrument,
+                        stop_context=startup_context,
+                        stop_reason=restart_reason,
                     )
             elif (
                 runtime.active_profile_name != profile_name
@@ -508,7 +512,10 @@ class StrategyDeploymentManagerService:
             ):
                 restart_reason = f"Profile changed from {runtime.active_profile_name or 'unassigned'} to {profile_name or 'default'}."
                 self.strategy_service.stop_strategy(
-                    strategy_name=strategy_name, instrument=runtime.instrument
+                    strategy_name=strategy_name,
+                    instrument=runtime.instrument,
+                    stop_context=startup_context,
+                    stop_reason=restart_reason,
                 )
         if runtime_manager.get_engine(strategy_name, instrument) is None:
             self.strategy_service.start_strategy(
@@ -533,14 +540,24 @@ class StrategyDeploymentManagerService:
     ) -> bool:
         return any(position.instrument == instrument for position in open_positions)
 
-    def _stop_auto_runtimes(self, strategy_name: str) -> None:
+    def _stop_auto_runtimes(
+        self,
+        strategy_name: str,
+        *,
+        stop_context: dict[str, object] | None = None,
+        stop_reason: str | None = None,
+    ) -> None:
         for runtime in self._get_running_auto_runtimes(strategy_name):
             if (
                 runtime_manager.get_engine(strategy_name, runtime.instrument)
                 is not None
             ):
                 self.strategy_service.stop_strategy(
-                    strategy_name=strategy_name, instrument=runtime.instrument
+                    strategy_name=strategy_name,
+                    instrument=runtime.instrument,
+                    stop_context=stop_context,
+                    stop_reason=stop_reason
+                    or "Autonomous deployment no longer permits this runtime.",
                 )
 
     def _list_open_positions(self, strategy_name: str) -> list[Position]:
@@ -558,9 +575,14 @@ class StrategyDeploymentManagerService:
         open_positions: list[Position],
         target_state: str,
         target_reason: str,
+        stop_context: dict[str, object] | None = None,
     ) -> tuple[str, str | None]:
         if not open_positions:
-            self._stop_auto_runtimes(strategy_name)
+            self._stop_auto_runtimes(
+                strategy_name,
+                stop_context=stop_context,
+                stop_reason=target_reason,
+            )
             return (OpenRiskManagementState.NO_OPEN_RISK.value, None)
 
         running_auto_runtimes = self._get_running_auto_runtimes(strategy_name)
@@ -603,11 +625,18 @@ class StrategyDeploymentManagerService:
                     is not None
                 ):
                     self.strategy_service.stop_strategy(
-                        strategy_name=strategy_name, instrument=runtime.instrument
+                        strategy_name=strategy_name,
+                        instrument=runtime.instrument,
+                        stop_context=stop_context,
+                        stop_reason=reason,
                     )
             return (OpenRiskManagementState.EXITS_ONLY.value, reason)
 
-        self._stop_auto_runtimes(strategy_name)
+        self._stop_auto_runtimes(
+            strategy_name,
+            stop_context=stop_context,
+            stop_reason=target_reason,
+        )
         exit_block_reason = (
             blocked_instruments[0][1]
             if blocked_instruments

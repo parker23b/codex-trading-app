@@ -26,11 +26,15 @@ class SystemHealth(BaseModel):
     last_heartbeat: datetime
     last_price_update: datetime | None
     last_reconciliation: datetime | None
+    last_audit_write_failure: datetime | None
     stream_connected: bool
     broker_connected: bool
     broker_latency_ms: float | None
     order_failures_last_5m: int
     rejected_orders_last_5m: int
+    audit_write_failures_last_5m: int
+    polling_fallback_active_instrument_count: int
+    stale_stream_instrument_count: int
     reconciliation_mismatches: int
     strategies_paused_by_health: int
 
@@ -50,11 +54,15 @@ class HealthService:
             self._last_heartbeat = now
             self._last_price_update: datetime | None = None
             self._last_reconciliation: datetime | None = None
+            self._last_audit_write_failure: datetime | None = None
             self._stream_connected = False
             self._broker_connected = False
             self._broker_latency_ms: float | None = None
             self._order_failures: deque[datetime] = deque()
             self._rejected_orders: deque[datetime] = deque()
+            self._audit_write_failures: deque[datetime] = deque()
+            self._polling_fallback_active_instruments: set[str] = set()
+            self._stale_stream_instruments: set[str] = set()
             self._reconciliation_mismatches = 0
             self._strategies_paused_by_health = 0
             self._last_reported_status: str | None = None
@@ -118,6 +126,32 @@ class HealthService:
             self._strategies_paused_by_health = max(count, 0)
         self._emit_status_transition_if_needed()
 
+    def record_audit_write_failure(self, when: datetime | None = None) -> None:
+        timestamp = self._normalize_time(when)
+        with self._lock:
+            self._last_audit_write_failure = timestamp
+            self._audit_write_failures.append(timestamp)
+            self._trim_windows(timestamp)
+        self._emit_status_transition_if_needed()
+
+    def set_polling_fallback_active(self, instrument: str, active: bool) -> None:
+        normalized = str(instrument)
+        with self._lock:
+            if active:
+                self._polling_fallback_active_instruments.add(normalized)
+            else:
+                self._polling_fallback_active_instruments.discard(normalized)
+        self._emit_status_transition_if_needed()
+
+    def set_stream_stale(self, instrument: str, stale: bool) -> None:
+        normalized = str(instrument)
+        with self._lock:
+            if stale:
+                self._stale_stream_instruments.add(normalized)
+            else:
+                self._stale_stream_instruments.discard(normalized)
+        self._emit_status_transition_if_needed()
+
     def get_system_health(self) -> SystemHealth:
         with self._lock:
             now = datetime.now(UTC)
@@ -126,11 +160,17 @@ class HealthService:
                 last_heartbeat=self._last_heartbeat,
                 last_price_update=self._last_price_update,
                 last_reconciliation=self._last_reconciliation,
+                last_audit_write_failure=self._last_audit_write_failure,
                 stream_connected=self._stream_connected,
                 broker_connected=self._broker_connected,
                 broker_latency_ms=self._broker_latency_ms,
                 order_failures_last_5m=len(self._order_failures),
                 rejected_orders_last_5m=len(self._rejected_orders),
+                audit_write_failures_last_5m=len(self._audit_write_failures),
+                polling_fallback_active_instrument_count=len(
+                    self._polling_fallback_active_instruments
+                ),
+                stale_stream_instrument_count=len(self._stale_stream_instruments),
                 reconciliation_mismatches=self._reconciliation_mismatches,
                 strategies_paused_by_health=self._strategies_paused_by_health,
             )
@@ -167,7 +207,11 @@ class HealthService:
             or not details.stream_connected
         ):
             return "critical"
-        if not price_is_fresh or details.order_failures_last_5m >= 3:
+        if (
+            not price_is_fresh
+            or details.order_failures_last_5m >= 3
+            or details.audit_write_failures_last_5m > 0
+        ):
             return "degraded"
         return "ok"
 
@@ -221,6 +265,8 @@ class HealthService:
             self._order_failures.popleft()
         while self._rejected_orders and self._rejected_orders[0] < cutoff:
             self._rejected_orders.popleft()
+        while self._audit_write_failures and self._audit_write_failures[0] < cutoff:
+            self._audit_write_failures.popleft()
 
     @staticmethod
     def _normalize_time(when: datetime | None) -> datetime:

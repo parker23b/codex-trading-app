@@ -10,8 +10,15 @@ from app.models.promotion_request import PromotionRequest
 from app.models.watchlist import WatchlistEntry, WatchlistTier
 from app.services.domain_event_service import domain_event_service
 from app.services.health_service import get_health_service
-from app.services.market_data_service import MarketDataService
+from app.services.market_data_service import (
+    AUDIT_PERSISTENCE_BEST_EFFORT,
+    AUDIT_PERSISTENCE_REQUIRED,
+    MarketDataService,
+)
 from app.services.watchlist_service import StreamingPlan, Tier2RefreshPlan
+
+
+pytestmark = pytest.mark.usefixtures("audit_critical_domain_events")
 
 
 def _domain_events(session) -> list[DomainEvent]:
@@ -196,6 +203,8 @@ def test_audit_test_002_polling_health_transitions_persist_with_session(
         event.source == "market_data_service.polling_fallback" for event in events
     )
     assert events[0].instrument == instrument
+    assert events[0].payload_json["audit_persistence"] == AUDIT_PERSISTENCE_REQUIRED
+    assert events[0].payload_json["audit_role"] == "operational_degradation"
     assert events[0].payload_json["previous_state"] == "STREAM_HEALTHY"
     assert events[0].payload_json["new_state"] == "POLLING_FALLBACK"
     assert events[1].payload_json["previous_state"] == "STREAM_FRESH"
@@ -204,6 +213,43 @@ def test_audit_test_002_polling_health_transitions_persist_with_session(
     assert events[2].payload_json["new_state"] == "STREAM_HEALTHY"
     assert events[3].payload_json["previous_state"] == "STREAM_STALE"
     assert events[3].payload_json["new_state"] == "STREAM_RECOVERED"
+    details = get_health_service().get_system_health()
+    assert details.polling_fallback_active_instrument_count == 0
+    assert details.stale_stream_instrument_count == 0
+
+
+def test_audit_obs_001_sessionless_polling_events_are_explicitly_best_effort(
+    monkeypatch,
+):
+    service = MarketDataService(poll_prices=False)
+    captured: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        domain_event_service,
+        "record_event",
+        lambda **kwargs: captured.append(kwargs) or None,
+        raising=False,
+    )
+
+    service._record_polling_health_event(
+        audit_persistence=AUDIT_PERSISTENCE_BEST_EFFORT,
+        event_type="health.polling_fallback_started",
+        category="health",
+        source="market_data_service.polling_fallback",
+        title="Polling fallback started",
+        instrument="CS.D.EURUSD.CFD.IP",
+        payload_json={
+            "previous_state": "STREAM_HEALTHY",
+            "new_state": "POLLING_FALLBACK",
+        },
+    )
+
+    assert captured[0]["payload_json"] == {
+        "previous_state": "STREAM_HEALTHY",
+        "new_state": "POLLING_FALLBACK",
+        "audit_persistence": AUDIT_PERSISTENCE_BEST_EFFORT,
+        "audit_role": "operational_degradation",
+    }
 
 
 def test_audit_obs_001_polling_health_audit_failure_blocks_clean_transition(
@@ -487,3 +533,98 @@ def test_audit_test_002_tier2_refresh_persists_session_bound_domain_events(
     assert coverage_events[2].payload_json["previous_state"] == "PENDING"
     assert coverage_events[2].payload_json["new_state"] == "ACCEPTED"
     assert coverage_events[3].payload_json["accepted"] == 1
+
+
+def test_audit_test_002_tier2_refresh_persists_reconcile_cycle_event(
+    session, monkeypatch
+):
+    service = MarketDataService(poll_prices=False)
+    service.settings.tier2_refresh_interval_seconds = 1
+    now = datetime(2026, 4, 8, 18, 0, tzinfo=UTC)
+    service._now = lambda: now  # type: ignore[method-assign]
+
+    broker = type(
+        "Broker",
+        (),
+        {
+            "get_market_details": lambda self, instrument: type(
+                "Details",
+                (),
+                {
+                    "bid": 1.0,
+                    "offer": 1.1,
+                    "high": 1.2,
+                    "low": 0.9,
+                    "market_status": "TRADEABLE",
+                    "tradable": True,
+                    "percentage_change": 1.2,
+                },
+            )()
+        },
+    )()
+    service.broker = broker
+
+    watchlist = type(
+        "Watchlist",
+        (),
+        {
+            "get_tier2_refresh_plan": lambda self: Tier2RefreshPlan(
+                instruments=("CS.D.GBPJPY.CFD.IP",),
+                streamed_instruments=(),
+                capped_instruments=("CS.D.GBPJPY.CFD.IP",),
+            ),
+            "record_tier2_refresh": lambda self, *, instrument, refreshed_at: (
+                session.add(
+                    WatchlistEntry(
+                        instrument=instrument,
+                        tier=WatchlistTier.TIER2.value,
+                        status="ACTIVE",
+                        assigned_at=refreshed_at,
+                        last_refreshed_at=refreshed_at,
+                        updated_at=refreshed_at,
+                    )
+                )
+                or session.commit()
+            ),
+        },
+    )()
+    reconcile_result = type(
+        "ReconcileResult",
+        (),
+        {
+            "deployed": 1,
+            "paused": 0,
+            "blocked": 0,
+            "degraded": 0,
+            "emergency_stopped": 0,
+        },
+    )()
+    monkeypatch.setattr(
+        "app.services.market_data_service.get_watchlist_service", lambda: watchlist
+    )
+    monkeypatch.setattr("app.services.market_data_service.engine", session.get_bind())
+    monkeypatch.setattr(
+        "app.services.market_data_service.StrategyDeploymentManagerService.reconcile",
+        lambda self, now=None: reconcile_result,
+    )
+
+    import asyncio
+
+    asyncio.run(service._refresh_tier2_once())
+
+    events = _domain_events(session)
+    cycle_event = next(
+        event
+        for event in events
+        if event.event_type == "control_plane.reconciliation_cycle_completed"
+    )
+    assert cycle_event.source == "market_data_service.tier2_refresh"
+    assert cycle_event.actor_type == "service"
+    assert cycle_event.actor_id == "market_data_service"
+    assert cycle_event.payload_json == {
+        "deployed": 1,
+        "paused": 0,
+        "blocked": 0,
+        "degraded": 0,
+        "emergency_stopped": 0,
+    }

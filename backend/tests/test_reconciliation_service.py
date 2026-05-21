@@ -24,6 +24,9 @@ from app.services.trade_service import TradeService
 from tests.fakes import make_broker_position
 
 
+pytestmark = pytest.mark.usefixtures("audit_critical_domain_events")
+
+
 def _domain_events(session) -> list[DomainEvent]:
     return list(session.exec(select(DomainEvent).order_by(DomainEvent.id)))
 

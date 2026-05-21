@@ -29,6 +29,9 @@ from app.services.watchlist_service import get_watchlist_service
 
 logger = get_logger(__name__)
 
+AUDIT_PERSISTENCE_REQUIRED = "REQUIRED_DURABLE"
+AUDIT_PERSISTENCE_BEST_EFFORT = "BEST_EFFORT_INFORMATIONAL"
+
 
 class MarketDataService:
     """
@@ -382,8 +385,14 @@ class MarketDataService:
 
         if reason is not None and instrument not in self._fallback_active_instruments:
             self._fallback_active_instruments.add(instrument)
+            self.health_service.set_polling_fallback_active(instrument, True)
             self._record_polling_health_event(
                 session=session,
+                audit_persistence=(
+                    AUDIT_PERSISTENCE_REQUIRED
+                    if session is not None
+                    else AUDIT_PERSISTENCE_BEST_EFFORT
+                ),
                 event_type="health.polling_fallback_started",
                 category="health",
                 severity="warning",
@@ -400,8 +409,14 @@ class MarketDataService:
         if reason is None and instrument in self._fallback_active_instruments:
             self._fallback_active_instruments.remove(instrument)
             self._healthy_first_seen_at.pop(instrument, None)
+            self.health_service.set_polling_fallback_active(instrument, False)
             self._record_polling_health_event(
                 session=session,
+                audit_persistence=(
+                    AUDIT_PERSISTENCE_REQUIRED
+                    if session is not None
+                    else AUDIT_PERSISTENCE_BEST_EFFORT
+                ),
                 event_type="health.polling_fallback_stopped",
                 category="health",
                 severity="info",
@@ -420,8 +435,14 @@ class MarketDataService:
             and instrument not in self._stale_stream_instruments
         ):
             self._stale_stream_instruments.add(instrument)
+            self.health_service.set_stream_stale(instrument, True)
             self._record_polling_health_event(
                 session=session,
+                audit_persistence=(
+                    AUDIT_PERSISTENCE_REQUIRED
+                    if session is not None
+                    else AUDIT_PERSISTENCE_BEST_EFFORT
+                ),
                 event_type="health.stream_stale",
                 category="health",
                 severity="warning",
@@ -438,8 +459,14 @@ class MarketDataService:
         if reason != "stale_stream" and instrument in self._stale_stream_instruments:
             self._stale_stream_instruments.remove(instrument)
             self._healthy_first_seen_at.pop(instrument, None)
+            self.health_service.set_stream_stale(instrument, False)
             self._record_polling_health_event(
                 session=session,
+                audit_persistence=(
+                    AUDIT_PERSISTENCE_REQUIRED
+                    if session is not None
+                    else AUDIT_PERSISTENCE_BEST_EFFORT
+                ),
                 event_type="health.stream_recovered",
                 category="health",
                 severity="info",
@@ -455,8 +482,16 @@ class MarketDataService:
             )
 
     def _record_polling_health_event(
-        self, *, session: Session | None = None, **kwargs: object
+        self,
+        *,
+        session: Session | None = None,
+        audit_persistence: str = AUDIT_PERSISTENCE_REQUIRED,
+        **kwargs: object,
     ) -> None:
+        payload = dict(kwargs.get("payload_json") or {})
+        payload.setdefault("audit_persistence", audit_persistence)
+        payload.setdefault("audit_role", "operational_degradation")
+        kwargs["payload_json"] = payload
         kwargs.setdefault("actor_type", "service")
         kwargs.setdefault("actor_id", "market_data_service")
         if session is None:

@@ -48,6 +48,9 @@ from app.services.trade_service import TradeService
 
 logger = get_logger(__name__)
 
+AUDIT_PERSISTENCE_REQUIRED = "REQUIRED_DURABLE"
+AUDIT_PERSISTENCE_BEST_EFFORT = "BEST_EFFORT_INFORMATIONAL"
+
 
 AMBIGUOUS_BROKER_ORDER_STATUSES = {
     BrokerOrderStatus.ACKNOWLEDGED,
@@ -490,6 +493,7 @@ class StrategyService:
                 current_position=engine.current_position,
             )
         self._record_domain_event(
+            audit_persistence=AUDIT_PERSISTENCE_REQUIRED,
             event_type="strategy.runtime_started",
             category="strategy",
             severity="info",
@@ -597,6 +601,7 @@ class StrategyService:
                 recovery_reason=recovery_reason,
             )
         self._record_domain_event(
+            audit_persistence=AUDIT_PERSISTENCE_REQUIRED,
             event_type="strategy.runtime_mode_changed",
             category="strategy",
             severity="warning" if runtime_mode == "EXITS_ONLY" else "info",
@@ -622,22 +627,49 @@ class StrategyService:
         )
 
     def stop_strategy(
-        self, instrument: str | None = None, strategy_name: str | None = None
-    ) -> None:
+        self,
+        instrument: str | None = None,
+        strategy_name: str | None = None,
+        *,
+        stop_context: dict[str, object] | None = None,
+        stop_reason: str | None = None,
+    ) -> list[dict[str, object]]:
         stopped_engines = runtime_manager.stop(
             instrument=instrument, strategy_name=strategy_name
         )
+        stopped_runtime_details = [
+            {
+                "runtime_id": engine.runtime_id,
+                "strategy_name": engine.strategy.name,
+                "instrument": engine.instrument,
+                "control_mode": getattr(engine, "control_mode", None),
+                "previous_runtime_mode": getattr(engine, "runtime_mode", None),
+                "current_position_broker_reference": (
+                    engine.current_position.broker_reference
+                    if getattr(engine, "current_position", None) is not None
+                    else None
+                ),
+            }
+            for engine in stopped_engines
+        ]
         if self.runtime_state_service is not None:
             for engine in stopped_engines:
                 self.runtime_state_service.mark_stopped(engine.runtime_id)
-        for engine in stopped_engines:
+        normalized_stop_context = dict(stop_context or {})
+        for engine, runtime_detail in zip(
+            stopped_engines, stopped_runtime_details, strict=True
+        ):
             self._record_domain_event(
+                audit_persistence=AUDIT_PERSISTENCE_REQUIRED,
                 event_type="strategy.runtime_stopped",
                 category="strategy",
                 severity="info",
                 source="strategy_service.stop_strategy",
                 title="Strategy runtime stopped",
                 message=f"{engine.strategy.name} stopped on {engine.instrument}.",
+                correlation_id=str(normalized_stop_context.get("correlation_id"))
+                if normalized_stop_context.get("correlation_id") is not None
+                else None,
                 runtime_id=engine.runtime_id,
                 strategy_name=engine.strategy.name,
                 instrument=engine.instrument,
@@ -647,14 +679,43 @@ class StrategyService:
                     "previous_state": "RUNNING",
                     "new_state": "STOPPED",
                     "status": "STOPPED",
+                    "control_mode": runtime_detail["control_mode"],
+                    "previous_runtime_mode": runtime_detail["previous_runtime_mode"],
+                    "new_runtime_mode": "STOPPED",
+                    "current_position_broker_reference": runtime_detail[
+                        "current_position_broker_reference"
+                    ],
+                    "reason": stop_reason,
+                    "stop_context": normalized_stop_context,
                 },
             )
         self._refresh_paused_strategy_count()
+        return stopped_runtime_details
 
-    def _record_domain_event(self, **kwargs: object) -> None:
-        if self.session is None:
+    def _record_domain_event(
+        self,
+        *,
+        audit_persistence: str = AUDIT_PERSISTENCE_REQUIRED,
+        **kwargs: object,
+    ) -> None:
+        payload = dict(kwargs.get("payload_json") or {})
+        payload.setdefault("audit_persistence", audit_persistence)
+        payload.setdefault(
+            "audit_role",
+            (
+                "candidate_signal"
+                if audit_persistence == AUDIT_PERSISTENCE_BEST_EFFORT
+                else "lifecycle_or_operational_evidence"
+            ),
+        )
+        kwargs["payload_json"] = payload
+        if audit_persistence == AUDIT_PERSISTENCE_BEST_EFFORT:
             self.event_service.record_event(**kwargs)
             return
+        if self.session is None:
+            raise RuntimeError(
+                "A database session is required for durable strategy audit events."
+            )
         record_required_domain_event(session=self.session, **kwargs)
 
     def _refresh_paused_strategy_count(self) -> None:
@@ -937,6 +998,7 @@ class StrategyService:
                     if not should_submit:
                         continue
                     self._record_domain_event(
+                        audit_persistence=AUDIT_PERSISTENCE_BEST_EFFORT,
                         event_type="strategy.entry_candidate",
                         category="strategy",
                         severity="info",
@@ -1147,34 +1209,35 @@ class StrategyService:
                 )
                 if not should_submit:
                     continue
-                self._record_domain_event(
-                    event_type="strategy.exit_candidate",
-                    category="strategy",
-                    severity="info",
-                    source="strategy_service.process_price_update",
-                    title="Strategy produced exit candidate",
-                    message=f"{signal.strategy_name} proposed an exit on {signal.instrument}.",
-                    correlation_id=execution.client_request_id,
-                    strategy_name=signal.strategy_name,
-                    instrument=signal.instrument,
-                    position_id=signal.position.id
-                    if signal.position is not None
-                    else None,
-                    execution_id=execution.id,
-                    actor_type="service",
-                    actor_id="strategy_service",
-                    payload_json={
-                        "trade_intent_id": intent.id,
-                        "observed_price": signal.observed_price,
-                        "market_status": signal.market_status,
-                        "tradable": signal.tradable,
-                        "broker_reference": signal.position.broker_reference
+                    self._record_domain_event(
+                        audit_persistence=AUDIT_PERSISTENCE_BEST_EFFORT,
+                        event_type="strategy.exit_candidate",
+                        category="strategy",
+                        severity="info",
+                        source="strategy_service.process_price_update",
+                        title="Strategy produced exit candidate",
+                        message=f"{signal.strategy_name} proposed an exit on {signal.instrument}.",
+                        correlation_id=execution.client_request_id,
+                        strategy_name=signal.strategy_name,
+                        instrument=signal.instrument,
+                        position_id=signal.position.id
                         if signal.position is not None
                         else None,
-                        "source_tier": candidate.source_tier,
-                    },
-                    created_at=signal.signal_at,
-                )
+                        execution_id=execution.id,
+                        actor_type="service",
+                        actor_id="strategy_service",
+                        payload_json={
+                            "trade_intent_id": intent.id,
+                            "observed_price": signal.observed_price,
+                            "market_status": signal.market_status,
+                            "tradable": signal.tradable,
+                            "broker_reference": signal.position.broker_reference
+                            if signal.position is not None
+                            else None,
+                            "source_tier": candidate.source_tier,
+                        },
+                        created_at=signal.signal_at,
+                    )
                 try:
                     trade = self._execute_exit_signal(
                         engine=engine,

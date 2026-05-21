@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
 from sqlmodel import select
 
 from app.models.domain_event import DomainEvent
 from app.models.trade import Execution, ExecutionPhase, ExecutionStatus, TradeIntent
 from app.services.domain_event_service import domain_event_service
 from app.services.trade_service import TradeService
+
+
+pytestmark = pytest.mark.usefixtures("audit_critical_domain_events")
 
 
 def _events(session) -> list[DomainEvent]:

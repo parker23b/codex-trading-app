@@ -7,6 +7,7 @@ from sqlmodel import Session
 
 from app.core.redaction import sanitize_payload
 from app.services.domain_event_service import domain_event_service
+from app.services.health_service import get_health_service
 
 
 def persist_required_domain_event(
@@ -52,6 +53,7 @@ def persist_required_domain_event(
         payload_json=sanitize_payload(payload_json),
     )
     if event is None:
+        get_health_service().record_audit_write_failure()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=failure_detail,

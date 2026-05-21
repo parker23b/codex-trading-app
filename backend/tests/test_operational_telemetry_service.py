@@ -40,6 +40,7 @@ def test_operational_telemetry_service_summarizes_runtime_stream_and_broker_heal
     health_service.record_reconciliation(mismatches=2, when=now - timedelta(seconds=4))
     health_service.record_order_failure(now - timedelta(seconds=10))
     health_service.record_order_rejection(now - timedelta(seconds=5))
+    health_service.record_audit_write_failure(now - timedelta(seconds=3))
     health_service.set_paused_strategies(1)
     monkeypatch.setattr(
         "app.services.operational_telemetry_service.get_ig_streaming_service",
@@ -59,13 +60,22 @@ def test_operational_telemetry_service_summarizes_runtime_stream_and_broker_heal
     assert summary["broker_connected"] is True
     assert summary["stream_connected"] is True
     assert summary["feed_source_state"] == "LIVE"
+    assert summary["audit_write_degraded"] is True
+    assert summary["polling_fallback_active"] is False
+    assert summary["stream_degraded"] is False
+    assert summary["runtime_degraded"] is True
     assert summary["entry_eligible"] is True
     assert summary["exit_eligible"] is True
     assert summary["broker_latency_ms"] == 18.5
     assert summary["reconciliation_mismatches"] == 2
     assert summary["order_failures_last_5m"] == 2
     assert summary["rejected_orders_last_5m"] == 1
+    assert summary["audit_write_failures_last_5m"] == 1
+    assert summary["last_audit_write_failure"] == now - timedelta(seconds=3)
+    assert summary["last_audit_write_failure_age_ms"] is not None
     assert summary["strategies_paused_by_health"] == 1
+    assert "audit_write_degraded" in summary["degradation_reasons"]
+    assert "runtime_paused_or_restricted" in summary["degradation_reasons"]
 
 
 def test_operational_telemetry_reports_fallback_without_marking_stream_connected(
@@ -93,6 +103,11 @@ def test_operational_telemetry_reports_fallback_without_marking_stream_connected
 
     assert summary["stream_connected"] is False
     assert summary["feed_source_state"] == "POLLING_FALLBACK"
+    assert summary["polling_fallback_active"] is True
+    assert summary["stream_degraded"] is True
+    assert summary["runtime_degraded"] is False
     assert summary["entry_eligible"] is False
     assert summary["entry_block_reason"] == "polling_fallback_active"
     assert summary["exit_eligible"] is True
+    assert "polling_fallback_active" in summary["degradation_reasons"]
+    assert "stream_degraded" in summary["degradation_reasons"]

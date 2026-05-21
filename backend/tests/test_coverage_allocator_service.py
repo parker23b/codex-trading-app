@@ -12,6 +12,9 @@ from app.services.coverage_allocator_service import CoverageAllocatorService
 from app.services.domain_event_service import domain_event_service
 
 
+pytestmark = pytest.mark.usefixtures("audit_critical_domain_events")
+
+
 def _domain_events(session) -> list[DomainEvent]:
     return list(session.exec(select(DomainEvent).order_by(DomainEvent.id)))
 

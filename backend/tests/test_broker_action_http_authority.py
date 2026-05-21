@@ -28,6 +28,8 @@ from app.services.domain_event_service import domain_event_service
 from tests.fakes import make_order_result
 
 
+pytestmark = pytest.mark.usefixtures("audit_critical_domain_events")
+
 AUTH_HEADER = {"Authorization": "Bearer expected-token"}
 INSTRUMENT = "CS.D.EURUSD.MINI.IP"
 STRATEGY = "smoke_test_hold"
@@ -430,6 +432,88 @@ def test_audit_test_002_control_plane_reconcile_http_route_reachable_entry_prese
     )
 
 
+def test_audit_api_008_strategy_stop_http_route_persists_stop_context_and_runtime_ids(
+    client_factory, session
+):
+    service = StrategyService(session)
+    service.start_strategy(strategy_name=STRATEGY, instrument=INSTRUMENT)
+
+    with client_factory(
+        app_env="production",
+        operator_api_token="expected-token",
+    ) as client:
+        response = client.post(
+            "/strategy/stop",
+            headers={**AUTH_HEADER, "X-Request-ID": "route-stop-1"},
+            json={"strategy_name": STRATEGY, "instrument": INSTRUMENT},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "stopped"
+
+    runtime = _runtime(session)
+    events = _events(session)
+    stopped = [
+        event for event in events if event.event_type == "strategy.runtime_stopped"
+    ][-1]
+    operator_stopped = [
+        event for event in events if event.event_type == "operator.runtime_stopped"
+    ][-1]
+
+    assert runtime.status == "STOPPED"
+    assert runtime.runtime_mode == "STOPPED"
+    assert runtime_manager.get_engine(STRATEGY, INSTRUMENT) is None
+    assert stopped.correlation_id == "route-stop-1"
+    assert stopped.runtime_id == runtime.runtime_id
+    assert stopped.payload_json["previous_state"] == "RUNNING"
+    assert stopped.payload_json["new_state"] == "STOPPED"
+    assert stopped.payload_json["stop_context"]["route_source"] == "api.strategy.stop"
+    assert stopped.payload_json["reason"] == "Operator requested runtime stop."
+    assert operator_stopped.correlation_id == "route-stop-1"
+    assert operator_stopped.payload_json["previous_state"] == "RUNNING"
+    assert operator_stopped.payload_json["new_state"] == "STOPPED"
+    assert operator_stopped.payload_json["stopped_runtime_ids"] == [runtime.runtime_id]
+
+
+def test_audit_api_008_strategy_stop_by_name_http_route_persists_stop_context_and_runtime_ids(
+    client_factory, session
+):
+    service = StrategyService(session)
+    service.start_strategy(strategy_name=STRATEGY, instrument=INSTRUMENT)
+
+    with client_factory(
+        app_env="production",
+        operator_api_token="expected-token",
+    ) as client:
+        response = client.post(
+            f"/strategies/{STRATEGY}/stop",
+            headers={**AUTH_HEADER, "X-Request-ID": "route-stop-name-1"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "stopped"
+
+    runtime = _runtime(session)
+    events = _events(session)
+    stopped = [
+        event for event in events if event.event_type == "strategy.runtime_stopped"
+    ][-1]
+    operator_stopped = [
+        event for event in events if event.event_type == "operator.runtime_stopped"
+    ][-1]
+
+    assert runtime.status == "STOPPED"
+    assert runtime_manager.get_engine(STRATEGY, INSTRUMENT) is None
+    assert stopped.correlation_id == "route-stop-name-1"
+    assert (
+        stopped.payload_json["stop_context"]["route_source"]
+        == "api.strategies.stop_by_name"
+    )
+    assert operator_stopped.correlation_id == "route-stop-name-1"
+    assert operator_stopped.payload_json["stopped_runtime_count"] == 1
+    assert operator_stopped.payload_json["stopped_instruments"] == [INSTRUMENT]
+
+
 @pytest.mark.parametrize(
     ("path", "body"),
     [
@@ -550,6 +634,59 @@ def test_audit_api_008_scheduler_route_audit_write_failure_is_not_clean_success(
 
     assert response.status_code == 503
     assert "durable audit persistence failed" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("path", "body", "failed_event_type"),
+    [
+        (
+            "/strategy/stop",
+            {"strategy_name": STRATEGY, "instrument": INSTRUMENT},
+            "operator.runtime_stopped",
+        ),
+        (f"/strategies/{STRATEGY}/stop", None, "operator.runtime_stopped"),
+    ],
+)
+def test_audit_api_008_stop_route_audit_write_failure_is_not_clean_success(
+    client_factory,
+    session,
+    monkeypatch,
+    path,
+    body,
+    failed_event_type,
+):
+    StrategyService(session).start_strategy(
+        strategy_name=STRATEGY, instrument=INSTRUMENT
+    )
+    original_record_event_in_session = domain_event_service.record_event_in_session
+
+    def fail_selected_route_event(**kwargs):
+        if kwargs.get("event_type") == failed_event_type:
+            return None
+        return original_record_event_in_session(**kwargs)
+
+    monkeypatch.setattr(
+        domain_event_service,
+        "record_event_in_session",
+        fail_selected_route_event,
+        raising=False,
+    )
+
+    with client_factory(
+        app_env="production",
+        operator_api_token="expected-token",
+    ) as client:
+        response = client.post(
+            path,
+            headers={**AUTH_HEADER, "X-Request-ID": "route-stop-audit-failure-1"},
+            json=body,
+        )
+
+    runtime = _runtime(session)
+    assert response.status_code == 503
+    assert "durable audit persistence failed" in response.json()["detail"]
+    assert runtime.status == "STOPPED"
+    assert runtime_manager.get_engine(STRATEGY, INSTRUMENT) is None
 
 
 def test_audit_api_008_scheduler_routes_do_not_call_broker_mutations_directly():

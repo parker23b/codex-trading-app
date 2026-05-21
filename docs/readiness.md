@@ -21,9 +21,9 @@ The current blocking themes are:
 - simulated-vs-broker-confirmed provenance is still incomplete across broader frontend/browser surfaces, even though dashboard trade truth and dashboard position sync truth now have explicit simulated/local browser coverage
 - backend/frontend enum parity is stronger for the covered vocabulary slice (`risk_truth_confidence`, `BrokerExecutionSource`, `broker_sync_status`, `ExecutionStatus`, and `TradeIntentState`), but broader operator-surface evidence is still incomplete
 - any future operator-critical raw dict/list routes still need explicit contract ownership even though the currently known frontend-consumed route boundary is now modeled
-- durable audit preservation is still incomplete for remaining broker-action HTTP authority and background-event paths outside the covered entry/close, runtime-start/control-plane-reconcile scheduler, autonomous deployment-reconcile/runtime-recovery startup-authority, and selected recovery/reconciliation slices
+- current backend durable-audit coverage is now inventory-backed for the present mutation, broker-action, and safety-critical background path set; remaining best-effort events are intentional informational paths, and future broker-action/route risk is now handled by guard tests instead of remaining a present-tense backend blocker
 - frontend operator truth now has selected browser/e2e coverage for stale, degraded, manual-review, passive-vs-mutation, simulated-vs-broker-confirmed, and mutation-failure states across dashboard/live/risk/strategies/AIMEE/control-plane/coverage/markets, but broad browser/e2e coverage is still incomplete
-- covered backend logging/API-error/domain-event redaction is now in place, covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position payloads now sanitize free-text and detail fields before commit, repo-level secret/history scan guardrails now block common local secret/SQLite/dump/test-artifact commits, dependency lock/audit tooling is now repeatable for Python and npm, and versioned Alembic migrations plus SQLite drift checks now exist, but broader secrets hygiene, supply-chain provenance, non-SQLite migration evidence, functional raw-identifier columns, historical cleanup, and durable observability remain below readiness grade
+- covered backend logging/API-error/domain-event redaction is now in place, covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position payloads now sanitize free-text and detail fields before commit, repo-level secret/history scan guardrails now block common local secret/SQLite/dump/test-artifact commits, dependency lock/audit tooling is now repeatable for Python and npm, and versioned Alembic migrations plus SQLite drift checks now exist. Health and telemetry now expose explicit audit-write, polling-fallback, stale-stream, stream-degraded, and runtime-degraded state, but broader secrets hygiene, supply-chain provenance, non-SQLite migration evidence, functional raw-identifier columns, historical cleanup, and durable multi-process observability remain below readiness grade
 
 The canonical blocker list is in [audit-status.md](audit-status.md).
 
@@ -32,11 +32,12 @@ The canonical blocker list is in [audit-status.md](audit-status.md).
 - Simulated/local execution and close provenance is not yet proved across broader frontend/browser operator surfaces outside the covered dashboard trade and dashboard position sync slices.
 - Broader backend/frontend enum-parity proof is still incomplete even though the covered vocabulary slice now includes `risk_truth_confidence`, `BrokerExecutionSource`, `broker_sync_status`, `ExecutionStatus`, and `TradeIntentState`.
 - Future raw operator-critical routes would make contract drift easier to miss even though the currently known frontend-consumed route boundary is now modeled.
-- Remaining broker-action HTTP authority and mutation/background paths still need durable audit-preservation proof at the route/background boundary beyond the covered runtime-start/control-plane-reconcile scheduler slice, the autonomous deployment-reconcile startup slice, and the runtime-recovery startup slice.
+- The remaining backend audit risk is no longer “unknown current mutation/background paths”; it is future-path discipline plus platform observability aggregation.
+- Candidate-only strategy events are intentionally best-effort informational, not lifecycle audit proof, even when they remain useful for observability.
 - Browser/e2e operator-state coverage is improved, including selected manual-review, control-plane mismatch, and market-data fallback truth, but it is still too narrow for readiness claims.
 - Database evolution now uses Alembic plus migration/drift tests, but existing unversioned non-SQLite databases still require explicit manual upgrade and SQLite expression-index drift still depends on targeted checks.
 - Python and npm dependency locking plus vulnerability gates are now repeatable, but the repo still lacks stronger supply-chain controls such as hash-verified Python installs, SBOM/provenance generation, and non-Python/Node dependency scanning.
-- Covered logs, mirrored domain events, IG adapter failures, and operator-facing API errors now redact tokens, account identifiers, broker references, raw adapter payloads, and tracebacks, and covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position free-text and detail fields now redact the same patterns before commit. Remaining readiness gaps still include raw identifier columns required for lifecycle authority, broader secrets hygiene, and durable observability.
+- Covered logs, mirrored domain events, IG adapter failures, and operator-facing API errors now redact tokens, account identifiers, broker references, raw adapter payloads, and tracebacks, and covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position free-text and detail fields now redact the same patterns before commit. Required audit-write failures now also surface in health/telemetry as degraded state, but remaining readiness gaps still include raw identifier columns required for lifecycle authority, broader secrets hygiene, and durable multi-process observability. Intentional best-effort informational events are not counted as durable lifecycle audit proof.
 - Repo-local guardrails now make it harder to commit `.env*` secrets, SQLite DBs, broker dumps, captured session tokens, logs, and Playwright/test artifacts, but historical repository cleanup and credential rotation still require manual action outside this repository.
 - Secrets hygiene, historical repository scanning follow-through, and multi-process observability still need platform hardening.
 
@@ -45,11 +46,47 @@ The canonical blocker list is in [audit-status.md](audit-status.md).
 Before live or demo broker dealing, the app needs at least:
 
 - complete modeled/documented contracts for any future operator-critical raw response families
-- durable audit-preservation proof for remaining mutation, broker-action, and background-event paths beyond the covered entry/close, runtime-start/control-plane-reconcile scheduler, autonomous deployment-reconcile/runtime-recovery startup-authority, and selected recovery/reconciliation slices
+- multi-process/platform observability that aggregates audit-write, polling-fallback, stale-stream, and runtime degradation across workers rather than only within the current process
 - browser/e2e evidence for degraded, stale, simulated, unknown, manual-review, and mutation-failure operator states
 - migration, dependency, redaction, identifier-minimization, and secrets controls that are strong enough for broker-connected operation
 - stronger supply-chain provenance than the current lock-and-audit baseline, including Python hash verification or an equivalent integrity mechanism plus broader dependency scanning
 - regression tests for every fixed P0/P1 behaviour that still lacks route, frontend, or full-stack evidence
+
+## 2026-05-21 Backend Audit Closure Slice
+
+This remediation closes the current backend durable-audit inventory without pretending platform observability is finished.
+
+- Current inventory classification:
+  - `REQUIRED_DURABLE`: current mutation helpers, broker-action HTTP routes, strategy/deployment/recovery/reconciliation/coverage/Tier 2 background lifecycle events, and required broker-action service events
+  - `SESSION_BOUND_DURABLE`: TradeIntent create/transition, Execution create/transition, and allocation-cycle completion
+  - `BEST_EFFORT_INFORMATIONAL`: `strategy.entry_candidate`, `strategy.exit_candidate`, sessionless polling-health helper calls, and `api.request_failed` error journaling
+  - `LEGACY/OBSOLETE`: none found in current app code
+- Current-code gap found and fixed:
+  - added direct evidence for `control_plane.reconciliation_cycle_completed` from the Tier 2 background loop
+- Guardrails added:
+  - a machine-checkable AST inventory of current backend audit write paths
+  - guard tests blocking new unexpected direct `record_event()` use in audit-critical suites
+  - guard tests limiting best-effort strategy and polling-health event families to the current allowlists
+  - guard tests requiring the current broker-action HTTP routes to keep the existing authority-plus-audit pattern
+- What is no longer a current backend blocker:
+  - hypothetical future broker-action HTTP routes
+  - hypothetical future background event families
+  - intentional candidate-only/best-effort informational events
+- What remains open:
+  - multi-process/platform observability aggregation
+  - broader frontend/operator visibility breadth
+- New operator-visible observability state remains:
+  - `/system/health` includes a `degradations` block for audit-write, polling-fallback, stream, and runtime degradation
+  - `/system/telemetry` exposes explicit degradation booleans, counts, and reason codes
+- Commands run for this closure slice:
+  - `backend/.venv/bin/pytest backend/tests/test_audit_closure_inventory.py backend/tests/test_broker_action_http_authority.py -q` -> `19 passed`
+  - `backend/.venv/bin/pytest backend/tests/test_mutation_audit_events.py backend/tests/test_decision_audit_events.py backend/tests/test_lifecycle_audit_events.py backend/tests/test_strategy_service.py backend/tests/test_control_plane_service.py backend/tests/test_runtime_recovery_service.py backend/tests/test_reconciliation_service.py backend/tests/test_coverage_allocator_service.py backend/tests/test_market_data_service.py -q` -> `149 passed`
+  - `backend/.venv/bin/pytest backend/tests/test_health_service.py backend/tests/test_operational_telemetry_service.py backend/tests/test_http_route_harness.py -q` -> `71 passed`
+  - `backend/.venv/bin/pytest backend/tests -q` -> `445 passed`
+  - `python3 scripts/check_spec_coverage_matrix.py` -> `PASS`
+  - `git diff --check` -> `PASS`
+
+This does not make the repository demo-safe or live-safe. It fixes `AUDIT-API-008` and `AUDIT-TEST-002` for the current backend path set, and it narrows `AUDIT-OBS-001` to a platform observability gap rather than a current backend durable-audit coverage gap.
 
 ## Dependency Hygiene Status
 

@@ -49,15 +49,45 @@ def stream_health_check() -> StreamHealthResponse:
     )
 
 
+class OperationalDegradationResponse(BaseModel):
+    audit_write_degraded: bool
+    polling_fallback_active: bool
+    polling_fallback_active_instrument_count: int
+    stale_stream_instrument_count: int
+    stream_degraded: bool
+    runtime_degraded: bool
+    degradation_reasons: list[str]
+
+
 class SystemHealthResponse(BaseModel):
     status: str
     details: SystemHealth
+    degradations: OperationalDegradationResponse
 
 
 @router.get("/system/health", response_model=SystemHealthResponse)
-def system_health_check() -> SystemHealthResponse:
+def system_health_check(
+    session: Session = Depends(get_session),
+) -> SystemHealthResponse:
     report = get_health_service().get_health_report()
-    return SystemHealthResponse(status=str(report["status"]), details=report["details"])
+    telemetry = OperationalTelemetryService(session).get_summary()
+    return SystemHealthResponse(
+        status=str(report["status"]),
+        details=report["details"],
+        degradations=OperationalDegradationResponse(
+            audit_write_degraded=bool(telemetry["audit_write_degraded"]),
+            polling_fallback_active=bool(telemetry["polling_fallback_active"]),
+            polling_fallback_active_instrument_count=int(
+                telemetry["polling_fallback_active_instrument_count"]
+            ),
+            stale_stream_instrument_count=int(
+                telemetry["stale_stream_instrument_count"]
+            ),
+            stream_degraded=bool(telemetry["stream_degraded"]),
+            runtime_degraded=bool(telemetry["runtime_degraded"]),
+            degradation_reasons=list(telemetry["degradation_reasons"]),
+        ),
+    )
 
 
 class OperationalTelemetryResponse(BaseModel):
@@ -68,6 +98,8 @@ class OperationalTelemetryResponse(BaseModel):
     last_price_age_ms: float | None
     last_reconciliation: datetime | None
     last_reconciliation_age_ms: float | None
+    last_audit_write_failure: datetime | None
+    last_audit_write_failure_age_ms: float | None
     stream_connected: bool
     stream_last_tick_at: datetime | None
     stream_last_tick_age_ms: float | None
@@ -83,6 +115,13 @@ class OperationalTelemetryResponse(BaseModel):
     exit_block_reason: str | None
     open_risk_management_state: str
     open_risk_management_reason: str | None
+    audit_write_degraded: bool
+    polling_fallback_active: bool
+    polling_fallback_active_instrument_count: int
+    stale_stream_instrument_count: int
+    stream_degraded: bool
+    runtime_degraded: bool
+    degradation_reasons: list[str]
     broker_latency_ms: float | None
     runtime_count: int
     active_runtime_count: int
@@ -91,6 +130,7 @@ class OperationalTelemetryResponse(BaseModel):
     reconciliation_mismatches: int
     order_failures_last_5m: int
     rejected_orders_last_5m: int
+    audit_write_failures_last_5m: int
     strategies_paused_by_health: int
 
 

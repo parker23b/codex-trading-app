@@ -26,6 +26,9 @@ from tests.fakes import make_broker_position
 from app.core.runtime import runtime_manager
 
 
+pytestmark = pytest.mark.usefixtures("audit_critical_domain_events")
+
+
 def _domain_events(session) -> list[DomainEvent]:
     return list(session.exec(select(DomainEvent).order_by(DomainEvent.id)))
 

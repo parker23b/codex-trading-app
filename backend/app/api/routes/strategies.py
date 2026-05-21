@@ -110,9 +110,18 @@ def stop_strategy(
         request, settings=resolve_request_settings(request)
     )
     try:
-        StrategyService(session).stop_strategy(
+        stopped_runtimes = StrategyService(session).stop_strategy(
             instrument=payload.instrument,
             strategy_name=payload.strategy_name,
+            stop_context={
+                "authority_kind": "http_route",
+                "route_source": "api.strategy.stop",
+                "route_path": request.url.path,
+                "actor_type": operator_context["actor_type"],
+                "actor_id": operator_context["actor_id"],
+                "correlation_id": operator_context["correlation_id"],
+            },
+            stop_reason="Operator requested runtime stop.",
         )
     except ValueError as exc:
         raise HTTPException(
@@ -141,6 +150,16 @@ def stop_strategy(
         payload_json={
             "strategy_name": payload.strategy_name,
             "instrument": payload.instrument,
+            "previous_state": "RUNNING",
+            "new_state": "STOPPED",
+            "stopped_runtime_ids": [
+                runtime["runtime_id"] for runtime in stopped_runtimes
+            ],
+            "stopped_runtime_count": len(stopped_runtimes),
+            "stopped_instruments": [
+                str(runtime["instrument"]) for runtime in stopped_runtimes
+            ],
+            "stop_reason": "Operator requested runtime stop.",
         },
     )
 
@@ -239,7 +258,18 @@ def stop_strategy_by_name(
 
     instrument = str(strategy["instrument"])
     try:
-        service.stop_strategy(strategy_name=name)
+        stopped_runtimes = service.stop_strategy(
+            strategy_name=name,
+            stop_context={
+                "authority_kind": "http_route",
+                "route_source": "api.strategies.stop_by_name",
+                "route_path": request.url.path,
+                "actor_type": operator_context["actor_type"],
+                "actor_id": operator_context["actor_id"],
+                "correlation_id": operator_context["correlation_id"],
+            },
+            stop_reason="Operator requested runtime stop.",
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -264,6 +294,18 @@ def stop_strategy_by_name(
         instrument=instrument,
         actor_type=str(operator_context["actor_type"]),
         actor_id=str(operator_context["actor_id"]),
+        payload_json={
+            "previous_state": "RUNNING",
+            "new_state": "STOPPED",
+            "stopped_runtime_ids": [
+                runtime["runtime_id"] for runtime in stopped_runtimes
+            ],
+            "stopped_runtime_count": len(stopped_runtimes),
+            "stopped_instruments": [
+                str(runtime["instrument"]) for runtime in stopped_runtimes
+            ],
+            "stop_reason": "Operator requested runtime stop.",
+        },
     )
     return StrategyMutationStatusResponse(
         status="stopped", strategy=name, instrument=instrument

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
+import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 from sqlmodel import select
@@ -49,6 +50,9 @@ from app.models.strategy_governance import StrategyFamilyGovernance
 from app.models.trade import Trade
 from app.models.watchlist import OperatorShortlistEntry, WatchlistEntry
 from app.services.domain_event_service import domain_event_service
+
+
+pytestmark = pytest.mark.usefixtures("audit_critical_domain_events")
 
 
 def _events(session) -> list[DomainEvent]:
@@ -234,10 +238,13 @@ def test_audit_api_008_strategy_start_stop_mutations_persist_domain_events(sessi
     assert events[1].source == "api.strategy.start"
     assert events[2].payload_json["previous_state"] == "RUNNING"
     assert events[2].payload_json["new_state"] == "STOPPED"
-    assert events[3].payload_json == {
-        "strategy_name": "mean_reversion",
-        "instrument": "CS.D.EURUSD.CFD.IP",
-    }
+    assert events[3].payload_json["strategy_name"] == "mean_reversion"
+    assert events[3].payload_json["instrument"] == "CS.D.EURUSD.CFD.IP"
+    assert events[3].payload_json["previous_state"] == "RUNNING"
+    assert events[3].payload_json["new_state"] == "STOPPED"
+    assert events[3].payload_json["stopped_runtime_count"] == 1
+    assert len(events[3].payload_json["stopped_runtime_ids"]) == 1
+    assert events[3].payload_json["stop_reason"] == "Operator requested runtime stop."
 
 
 def test_audit_api_008_strategy_by_name_mutations_persist_domain_events(session):
@@ -265,6 +272,10 @@ def test_audit_api_008_strategy_by_name_mutations_persist_domain_events(session)
     assert events[1].source == "api.strategies.start_by_name"
     assert events[2].source == "strategy_service.stop_strategy"
     assert events[3].source == "api.strategies.stop_by_name"
+    assert events[2].payload_json["stop_context"]["route_source"] == (
+        "api.strategies.stop_by_name"
+    )
+    assert events[3].payload_json["stopped_runtime_count"] == 1
 
 
 def test_audit_api_008_allocation_alert_mutations_persist_domain_events(session):

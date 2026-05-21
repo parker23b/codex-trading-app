@@ -6,6 +6,7 @@ from typing import Any
 from sqlmodel import Session
 
 from app.models.domain_event import DomainEvent
+from app.services.health_service import get_health_service
 from app.services.domain_event_service import domain_event_service
 
 
@@ -57,6 +58,7 @@ def record_required_domain_event(
         created_at=created_at,
     )
     if event is None:
+        get_health_service().record_audit_write_failure()
         session.rollback()
         raise AuditEventPersistenceError(
             f"Failed to persist required durable audit event {event_type} from {source}."

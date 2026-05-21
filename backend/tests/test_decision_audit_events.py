@@ -24,6 +24,8 @@ from app.services.trade_decision_service import TradeDecisionService
 from app.services.trade_service import TradeService
 
 
+pytestmark = pytest.mark.usefixtures("audit_critical_domain_events")
+
 INSTRUMENT = "CS.D.EURUSD.CFD.IP"
 STRATEGY = "mean_reversion"
 

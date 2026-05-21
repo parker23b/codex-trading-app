@@ -38,10 +38,16 @@ from app.models.trade import (
 from app.services.audit_event_recorder import AuditEventPersistenceError
 from app.services.health_service import get_health_service
 from app.services.market_status_service import MarketStatus, get_market_status_service
-from app.services.strategy_service import StrategyService
+from app.services.strategy_service import (
+    AUDIT_PERSISTENCE_BEST_EFFORT,
+    AUDIT_PERSISTENCE_REQUIRED,
+    StrategyService,
+)
 from app.services.domain_event_service import domain_event_service
 from app.services.trade_service import TradeService
 from tests.fakes import make_order_result
+
+pytestmark = pytest.mark.usefixtures("audit_critical_domain_events")
 
 
 INSTRUMENT = "CS.D.EURUSD.MINI.IP"
@@ -135,11 +141,60 @@ def test_audit_test_002_strategy_start_stop_persist_session_bound_domain_events(
     assert events[0].payload_json["new_state"] == "RUNNING"
     assert events[0].payload_json["control_mode"] == "MANUAL"
     assert events[0].payload_json["runtime_mode"] == "NORMAL"
+    assert events[0].payload_json["audit_persistence"] == AUDIT_PERSISTENCE_REQUIRED
+    assert events[0].payload_json["audit_role"] == "lifecycle_or_operational_evidence"
     assert events[1].runtime_id == runtime.runtime_id
     assert events[1].actor_type == "service"
     assert events[1].actor_id == "strategy_service"
     assert events[1].payload_json["previous_state"] == "RUNNING"
     assert events[1].payload_json["new_state"] == "STOPPED"
+    assert events[1].payload_json["audit_persistence"] == AUDIT_PERSISTENCE_REQUIRED
+
+
+def test_audit_test_002_runtime_events_require_session_for_durable_persistence():
+    service = StrategyService()
+
+    with pytest.raises(
+        RuntimeError, match="database session is required for durable strategy audit"
+    ):
+        service._record_domain_event(
+            audit_persistence=AUDIT_PERSISTENCE_REQUIRED,
+            event_type="strategy.runtime_started",
+            category="strategy",
+            source="test",
+            title="runtime start",
+        )
+
+
+def test_audit_obs_001_candidate_events_are_best_effort_informational(
+    session, monkeypatch
+):
+    service = StrategyService(session)
+    captured: dict[str, object] = {}
+
+    def record_event(**kwargs: object):
+        captured.update(kwargs)
+        return None
+
+    monkeypatch.setattr(domain_event_service, "record_event", record_event)
+
+    service._record_domain_event(
+        audit_persistence=AUDIT_PERSISTENCE_BEST_EFFORT,
+        event_type="strategy.entry_candidate",
+        category="strategy",
+        source="strategy_service.process_price_update",
+        title="Strategy produced entry candidate",
+        payload_json={"trade_intent_id": 123},
+    )
+
+    assert captured["event_type"] == "strategy.entry_candidate"
+    assert captured["source"] == "strategy_service.process_price_update"
+    assert captured["payload_json"] == {
+        "trade_intent_id": 123,
+        "audit_persistence": AUDIT_PERSISTENCE_BEST_EFFORT,
+        "audit_role": "candidate_signal",
+    }
+    assert _domain_events(session) == []
 
 
 def test_prepare_execution_reuses_existing_entry_attempt_for_same_opportunity(

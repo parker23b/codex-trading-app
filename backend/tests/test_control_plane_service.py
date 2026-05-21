@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlmodel import select
 
 from app.core.broker import BrokerOrderResult, BrokerOrderStatus, OrderDirection
@@ -11,7 +12,9 @@ from app.models.runtime import StrategyRuntimeState
 from app.models.strategy_deployment import StrategyDeployment
 from app.models.strategy_governance import StrategyFamilyGovernance
 from app.models.trade import Execution, Position, TradeIntent, TradeIntentState
+from app.services.audit_event_recorder import AuditEventPersistenceError
 from app.services.control_plane_service import ControlPlaneService
+from app.services.domain_event_service import domain_event_service
 from app.services.health_service import get_health_service
 from app.services.operator_control_service import OperatorControlService
 from app.services.market_status_service import MarketStatus
@@ -859,6 +862,114 @@ def test_audit_test_002_unmanaged_open_risk_persists_domain_event(
     )
     assert event.payload_json["deployment_state"] == "EMERGENCY_STOPPED"
     assert event.payload_json["exit_block_reason"] == "broker_disconnected"
+
+
+def test_audit_test_002_background_reconcile_stop_persists_correlation_and_reason(
+    session, broker, fixed_now
+):
+    health_service = get_health_service()
+    health_service.update_broker_state(connected=True, latency_ms=2.0)
+    health_service.set_stream_connected(True)
+    health_service.record_price_update(fixed_now, stream_connected=True)
+    governance_service = StrategyGovernanceService(session)
+    governance_service.ensure_defaults()
+    governance_service.upsert_strategy(
+        strategy_name="mean_reversion",
+        autonomous_operation_allowed=True,
+        approved_asset_classes=["INDICES"],
+        approved_instruments=["IX.D.FTSE.DAILY.IP"],
+        approved_profile_names=["default"],
+    )
+    manager = StrategyDeploymentManagerService(session)
+    manager.settings.autonomous_control_enabled = True
+    _force_deployable_candidate(manager, instrument="IX.D.FTSE.DAILY.IP")
+    manager.reconcile(now=fixed_now)
+
+    governance_service.upsert_strategy(
+        strategy_name="mean_reversion", emergency_stop=True
+    )
+    manager.reconcile(now=fixed_now + timedelta(minutes=1))
+
+    runtime = session.exec(
+        select(StrategyRuntimeState).where(
+            StrategyRuntimeState.strategy_name == "mean_reversion"
+        )
+    ).one()
+    events = _domain_events(session)
+    stopped = [
+        event
+        for event in events
+        if event.event_type == "strategy.runtime_stopped"
+        and event.strategy_name == "mean_reversion"
+    ][-1]
+    deployment_changed = [
+        event
+        for event in events
+        if event.event_type == "control_plane.deployment_state_changed"
+        and event.strategy_name == "mean_reversion"
+    ][-1]
+
+    assert stopped.runtime_id == runtime.runtime_id
+    assert stopped.correlation_id == deployment_changed.correlation_id
+    assert stopped.payload_json["previous_state"] == "RUNNING"
+    assert stopped.payload_json["new_state"] == "STOPPED"
+    assert (
+        stopped.payload_json["stop_context"]["authority_kind"] == "deployment_reconcile"
+    )
+    assert stopped.payload_json["reason"] == (
+        "Operator emergency stop is active for this strategy family."
+    )
+    assert stopped.payload_json["new_runtime_mode"] == "STOPPED"
+    assert deployment_changed.payload_json["new_state"] == "EMERGENCY_STOPPED"
+
+
+def test_audit_obs_001_background_reconcile_audit_failure_marks_health_degraded(
+    session, broker, fixed_now, monkeypatch
+):
+    health_service = get_health_service()
+    health_service.update_broker_state(connected=True, latency_ms=2.0)
+    health_service.set_stream_connected(True)
+    health_service.record_price_update(fixed_now, stream_connected=True)
+    governance_service = StrategyGovernanceService(session)
+    governance_service.ensure_defaults()
+    governance_service.upsert_strategy(
+        strategy_name="mean_reversion",
+        autonomous_operation_allowed=True,
+        approved_asset_classes=["INDICES"],
+        approved_instruments=["IX.D.FTSE.DAILY.IP"],
+        approved_profile_names=["default"],
+    )
+    manager = StrategyDeploymentManagerService(session)
+    manager.settings.autonomous_control_enabled = True
+    _force_deployable_candidate(manager, instrument="IX.D.FTSE.DAILY.IP")
+    manager.reconcile(now=fixed_now)
+    governance_service.upsert_strategy(
+        strategy_name="mean_reversion", emergency_stop=True
+    )
+    original_record_event_in_session = domain_event_service.record_event_in_session
+
+    def fail_runtime_stopped(**kwargs):
+        if kwargs.get("event_type") == "strategy.runtime_stopped":
+            return None
+        return original_record_event_in_session(**kwargs)
+
+    monkeypatch.setattr(
+        domain_event_service,
+        "record_event_in_session",
+        fail_runtime_stopped,
+        raising=False,
+    )
+
+    with pytest.raises(AuditEventPersistenceError, match="strategy.runtime_stopped"):
+        manager.reconcile(now=fixed_now + timedelta(minutes=1))
+
+    telemetry = OperationalTelemetryService(session).get_summary()
+    report = health_service.get_health_report()
+    assert report["status"] == "degraded"
+    assert report["details"].audit_write_failures_last_5m == 1
+    assert report["details"].last_audit_write_failure is not None
+    assert telemetry["audit_write_failures_last_5m"] == 1
+    assert telemetry["last_audit_write_failure"] is not None
 
 
 def test_reconcile_rotation_keeps_old_open_risk_exit_capable(

@@ -76,6 +76,32 @@ def patch_external_boundaries(
     monkeypatch.setattr(domain_event_service, "record_event", lambda **_: None)
 
 
+@pytest.fixture
+def audit_critical_domain_events(monkeypatch: pytest.MonkeyPatch) -> None:
+    allowed_best_effort_events = {
+        "api.request_failed",
+        "strategy.entry_candidate",
+        "strategy.exit_candidate",
+        "health.polling_fallback_started",
+        "health.polling_fallback_stopped",
+        "health.stream_stale",
+        "health.stream_recovered",
+    }
+
+    def _unexpected_record_event(**kwargs: object) -> None:
+        event_type = kwargs.get("event_type")
+        if event_type in allowed_best_effort_events:
+            return
+        raise AssertionError(
+            "Audit-critical tests must not rely on the global record_event no-op "
+            f"for unexpected best-effort event '{event_type}'. Persist through a "
+            "session-bound path or explicitly monkeypatch record_event for an "
+            "intentional best-effort assertion."
+        )
+
+    monkeypatch.setattr(domain_event_service, "record_event", _unexpected_record_event)
+
+
 @pytest.fixture(scope="session")
 def migrated_sqlite_template(tmp_path_factory) -> str:
     template_dir = tmp_path_factory.mktemp("sqlite-template")
