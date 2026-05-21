@@ -19,6 +19,12 @@ jobs:
             - name: Checkout
               uses: actions/checkout@v6
 
+            - name: Repo secrets scan
+              run: python ../scripts/repo_secrets_scan.py --mode working-tree
+
+            - name: Repo history scan (advisory)
+              run: python ../scripts/repo_secrets_scan.py --mode history --allow-history-findings
+
             - name: Set up Python
               uses: actions/setup-python@v5
               with:

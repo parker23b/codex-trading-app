@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from app.models.trade import Position, Trade
+from app.services.trade_service import TradeService
 from tests.test_http_route_harness import _snapshot_rows
 
 
@@ -234,3 +235,72 @@ def test_api_004_trade_route_family_preserves_provenance_and_consumer_shape(
     assert unknown_position_payload["risk_truth_confidence"] == "UNKNOWN"
     assert unknown_position_payload["broker_reference"] is None
     assert unknown_position_payload["reason"] == "Broker sync state unavailable."
+
+
+def test_audit_sec_002_trade_route_family_serializes_redacted_persisted_reason_fields(
+    session, client_factory, fixed_now
+):
+    trade_service = TradeService(session)
+    trade_service.record_trade(
+        Trade(
+            strategy_name="mean_reversion",
+            broker_reference="trade-redaction-entry-1",
+            close_broker_reference="trade-redaction-close-1",
+            instrument="CS.D.EURUSD.CFD.IP",
+            direction="BUY",
+            size=0.8,
+            open_price=1.08,
+            close_price=1.075,
+            open_time=fixed_now - timedelta(hours=5),
+            close_time=fixed_now - timedelta(hours=1),
+            pnl=-40.0,
+            entry_risk_amount=100.0,
+            risk_truth_confidence="SIMULATED_LOCAL_FILL",
+            close_execution_source="SIMULATED_LOCAL_CLOSE",
+            reason=(
+                "Authorization: Bearer trade-route-secret accountId=ACC-43210 "
+                "dealReference=DEAL-43210"
+            ),
+            account_type="DEMO",
+        )
+    )
+    trade_service.record_broker_position(
+        Position(
+            strategy_name="mean_reversion",
+            broker_reference="pos-redaction-1",
+            instrument="CS.D.EURUSD.CFD.IP",
+            direction="BUY",
+            size=0.8,
+            open_price=1.08,
+            open_time=fixed_now - timedelta(minutes=30),
+            current_price=1.0825,
+            unrealized_pnl=20.0,
+            risk_percent=0.6,
+            entry_risk_amount=100.0,
+            risk_truth_confidence="SIMULATED_LOCAL_FILL",
+            manual_override=False,
+            account_type="DEMO",
+            broker_sync_status="SIMULATED_LOCAL_FILL",
+            reason=(
+                "Authorization: Bearer position-route-secret accountId=ACC-54321 "
+                "dealReference=DEAL-54321"
+            ),
+        )
+    )
+
+    with client_factory() as client:
+        trades_response = client.get("/trades")
+        positions_response = client.get("/positions")
+
+    assert trades_response.status_code == 200, trades_response.text
+    assert positions_response.status_code == 200, positions_response.text
+
+    trade_payload = trades_response.json()[0]
+    position_payload = positions_response.json()[0]
+
+    assert trade_payload["reason"] == (
+        "Authorization: Bearer [REDACTED] accountId=[REDACTED] dealReference=[REDACTED]"
+    )
+    assert position_payload["reason"] == (
+        "Authorization: Bearer [REDACTED] accountId=[REDACTED] dealReference=[REDACTED]"
+    )

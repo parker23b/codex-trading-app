@@ -11,7 +11,16 @@ from app.core.broker import AccountType, BrokerError
 from app.core.logging import DomainEventErrorHandler, StructuredFormatter
 from app.core.ig_broker import IGBroker, IGBrokerError
 from app.models.domain_event import DomainEvent
-from app.models.trade import Execution, ExecutionPhase, ExecutionStatus, TradeIntent
+from app.models.trade import (
+    Execution,
+    ExecutionPhase,
+    ExecutionStatus,
+    Position,
+    ReconciliationEvent,
+    Trade,
+    TradeIntent,
+    TradeIntentState,
+)
 from app.services.domain_event_service import domain_event_service
 from app.services.trade_service import TradeService
 
@@ -270,3 +279,191 @@ def test_audit_sec_002_structured_formatter_redacts_tracebacks():
     assert "Traceback (most recent call last)" not in output
     assert "trace-secret" not in output
     assert "[TRACEBACK REDACTED]" in output
+
+
+def test_audit_sec_002_trade_service_redacts_persisted_execution_and_intent_fields(
+    session,
+):
+    trade_service = TradeService(session)
+    intent = trade_service.create_trade_intent(
+        TradeIntent(
+            strategy_name="mean_reversion",
+            instrument="CS.D.EURUSD.CFD.IP",
+            direction="BUY",
+            state=TradeIntentState.APPROVED.value,
+            signal_time=datetime(2026, 5, 1, 9, 0, tzinfo=UTC),
+            decision_reason="Approved for persistence redaction coverage.",
+        )
+    )
+    execution = trade_service.create_execution(
+        Execution(
+            trade_intent_id=intent.id,
+            strategy_name="mean_reversion",
+            instrument="CS.D.EURUSD.CFD.IP",
+            phase=ExecutionPhase.CLOSE.value,
+            status=ExecutionStatus.SUBMISSION_PENDING.value,
+            client_request_id="close-redaction-1",
+            signal_time=intent.signal_time,
+            details={"action_key": "close:redaction"},
+        )
+    )
+
+    trade_service.transition_execution(
+        execution,
+        status=ExecutionStatus.NEEDS_MANUAL_REVIEW,
+        error_code="BROKER_CLOSE_AMBIGUOUS",
+        error_message=(
+            "Authorization: Bearer secret-token accountId=ACC-99999 "
+            "dealReference=DEAL-12345"
+        ),
+        requires_manual_review=True,
+        details={
+            "broker_result": {
+                "broker_reference": "DEAL-12345",
+                "account_id": "ACC-99999",
+                "response_body": {"Authorization": "Bearer secret-token"},
+                "error_message": (
+                    "Authorization: Bearer secret-token dealReference=DEAL-12345"
+                ),
+            },
+            "raw_traceback": 'Traceback (most recent call last): File "secret.py"',
+        },
+    )
+    trade_service.transition_trade_intent(
+        intent,
+        state=TradeIntentState.CLOSE_REQUESTED,
+        close_reason=(
+            "Close failed for Authorization: Bearer close-secret "
+            "accountId=ACC-55555 dealReference=DEAL-55555"
+        ),
+        details={
+            "error_message": (
+                "Authorization: Bearer close-secret "
+                "accountId=ACC-55555 dealReference=DEAL-55555"
+            ),
+            "broker_result": {
+                "broker_reference": "DEAL-55555",
+                "response_text": '{"Authorization":"Bearer close-secret"}',
+            },
+        },
+    )
+
+    persisted_execution = trade_service.get_latest_execution_for_trade_intent(intent.id)
+    persisted_intent = trade_service.get_trade_intent(intent.id)
+
+    assert persisted_execution is not None
+    assert persisted_execution.error_message == (
+        "Authorization: Bearer [REDACTED] accountId=[REDACTED] dealReference=[REDACTED]"
+    )
+    assert persisted_execution.details["broker_result"]["broker_reference"].startswith(
+        "[REDACTED_BROKER_REF:"
+    )
+    assert persisted_execution.details["broker_result"]["account_id"].startswith(
+        "[REDACTED_ACCOUNT_ID:"
+    )
+    assert (
+        persisted_execution.details["broker_result"]["response_body"]
+        == "[RAW_BROKER_PAYLOAD REDACTED]"
+    )
+    assert persisted_execution.details["raw_traceback"] == "[TRACEBACK REDACTED]"
+
+    assert persisted_intent is not None
+    assert persisted_intent.close_reason == (
+        "Close failed for Authorization: Bearer [REDACTED] "
+        "accountId=[REDACTED] dealReference=[REDACTED]"
+    )
+    assert persisted_intent.details["error_message"] == (
+        "Authorization: Bearer [REDACTED] accountId=[REDACTED] dealReference=[REDACTED]"
+    )
+    assert persisted_intent.details["broker_result"]["broker_reference"].startswith(
+        "[REDACTED_BROKER_REF:"
+    )
+    assert (
+        persisted_intent.details["broker_result"]["response_text"]
+        == "[RAW_BROKER_PAYLOAD REDACTED]"
+    )
+
+
+def test_audit_sec_002_trade_service_redacts_persisted_reconciliation_trade_and_position_fields(
+    session,
+):
+    trade_service = TradeService(session)
+    position = trade_service.record_broker_position(
+        Position(
+            strategy_name="mean_reversion",
+            broker_reference="position-redaction-1",
+            instrument="CS.D.EURUSD.CFD.IP",
+            direction="BUY",
+            size=1.0,
+            open_price=1.1,
+            open_time=datetime(2026, 5, 1, 9, 0, tzinfo=UTC),
+            current_price=1.1,
+            unrealized_pnl=0.0,
+            account_type="DEMO",
+            reason=(
+                "Recovered via Authorization: Bearer pos-secret "
+                "accountId=ACC-33333 dealReference=DEAL-33333"
+            ),
+        )
+    )
+    trade = trade_service.record_trade(
+        Trade(
+            strategy_name="mean_reversion",
+            family_name="mean_reversion",
+            broker_reference="trade-entry-redaction-1",
+            close_broker_reference="trade-close-redaction-1",
+            instrument="CS.D.EURUSD.CFD.IP",
+            direction="BUY",
+            size=1.0,
+            open_price=1.1,
+            close_price=1.09,
+            open_time=datetime(2026, 5, 1, 9, 0, tzinfo=UTC),
+            close_time=datetime(2026, 5, 1, 10, 0, tzinfo=UTC),
+            pnl=-10.0,
+            reason=(
+                "Closed after Authorization: Bearer trade-secret "
+                "accountId=ACC-44444 dealReference=DEAL-44444"
+            ),
+            account_type="DEMO",
+        )
+    )
+    event = trade_service.record_reconciliation_event(
+        event_type="RUNTIME_RECOVERY_REQUIRED",
+        trade_intent_id=None,
+        strategy_name="mean_reversion",
+        instrument="CS.D.EURUSD.CFD.IP",
+        broker_reference="broker-reconcile-redaction-1",
+        local_position_id=position.id,
+        details={
+            "reason": (
+                "Broker positions unavailable: Authorization: Bearer recover-secret "
+                "accountId=ACC-77777 dealReference=DEAL-77777"
+            ),
+            "response_headers": {"Authorization": "Bearer recover-secret"},
+            "traceback": 'Traceback (most recent call last): File "recover.py"',
+        },
+    )
+
+    persisted_trade = trade_service.get_trade(trade.id)
+    persisted_position = trade_service.get_position_by_id(position.id)
+    persisted_event = session.exec(select(ReconciliationEvent)).one()
+
+    assert persisted_trade is not None
+    assert persisted_trade.reason == (
+        "Closed after Authorization: Bearer [REDACTED] "
+        "accountId=[REDACTED] dealReference=[REDACTED]"
+    )
+    assert persisted_position is not None
+    assert persisted_position.reason == (
+        "Recovered via Authorization: Bearer [REDACTED] "
+        "accountId=[REDACTED] dealReference=[REDACTED]"
+    )
+    assert event.id == persisted_event.id
+    assert persisted_event.details["reason"] == (
+        "Broker positions unavailable: Authorization: Bearer [REDACTED] "
+        "accountId=[REDACTED] dealReference=[REDACTED]"
+    )
+    assert (
+        persisted_event.details["response_headers"] == "[RAW_BROKER_PAYLOAD REDACTED]"
+    )
+    assert persisted_event.details["traceback"] == "[TRACEBACK REDACTED]"

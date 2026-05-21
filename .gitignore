@@ -1,34 +1,69 @@
 .DS_Store
+
+# Local environment and credentials
 .env
-.env.local
+.env.*
+!.env.example
+!.env.*.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+!backend/.env.*.example
+frontend/.env.local
+frontend/.env.*
+!frontend/.env.example
+!frontend/.env.*.example
+*.local.json
+*.local.yaml
+*.local.yml
+*.local.toml
+*.local.ini
+local.settings.json
+
+# Python
 .venv/
+venv/
+backend/.venv/
 __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-backend/.venv/
-backend/.env
-frontend/.next/
-frontend/node_modules/
-
-# Python
-venv/
-__pycache__/
 *.pyc
-.env
+*.egg-info/
 
 # Node
 node_modules/
+frontend/node_modules/
 .next/
+frontend/.next/
 out/
-
-# OS
-.DS_Store
-
-# Logs
-*.log
-
-*.db
-
-*.egg-info/
 *.tsbuildinfo
+
+# Logs and local runtime artifacts
+logs/
+*.log
+*.out
+*.err
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+
+# Broker dumps and captured payloads
+broker-dumps/
+broker-payloads/
+broker-responses/
+captures/
+*.har
+*.trace
+*.trace.zip
+
+# Browser/test artifacts
+playwright-report/
+test-results/
+artifacts/

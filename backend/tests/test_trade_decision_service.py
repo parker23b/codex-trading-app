@@ -253,6 +253,40 @@ def test_decision_service_resolves_same_instrument_competition_explicitly(
     assert by_strategy["mean_reversion"].reason_code == "opposing_signal_blocked"
 
 
+def test_audit_sec_002_decision_service_redacts_persisted_allocation_error_details(
+    session, broker, fixed_now, monkeypatch
+):
+    _enable_live_entry_context(monkeypatch)
+    runtime_manager.last_price_updated_at[INSTRUMENT] = fixed_now
+    broker.market_details_outcomes[INSTRUMENT] = [
+        RuntimeError(
+            "Authorization: Bearer alloc-secret accountId=ACC-66666 "
+            "dealReference=DEAL-66666"
+        )
+    ]
+    decision_service = TradeDecisionService(session)
+    candidate = _candidate(
+        strategy_name="smoke_test_hold",
+        instrument=INSTRUMENT,
+        direction=OrderDirection.BUY,
+        signal_at=fixed_now,
+        confidence=0.9,
+        broker=broker,
+        position_size=0.2,
+        risk_per_trade=0.1,
+    )
+
+    result = decision_service.decide_signal_candidates(
+        [candidate], received_at=fixed_now
+    )[0]
+
+    assert result.intent is not None
+    assert result.intent.state == TradeIntentState.REJECTED.value
+    assert result.intent.details["allocation"]["sizing_details"]["error"] == (
+        "Authorization: Bearer [REDACTED] accountId=[REDACTED] dealReference=[REDACTED]"
+    )
+
+
 def test_decision_service_rejects_and_persists_below_min_size_reason(
     session, broker, fixed_now
 ):

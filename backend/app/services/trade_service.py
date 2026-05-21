@@ -4,6 +4,7 @@ from typing import Any
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, desc, select
 
+from app.core.redaction import sanitize_payload, sanitize_text
 from app.models.allocation_alert import AllocationAlert
 from app.models.trade import (
     ACTIVE_INSTRUMENT_OWNERSHIP_STATES,
@@ -35,6 +36,60 @@ class ActiveTradeIntentConflictError(RuntimeError):
 class TradeService:
     def __init__(self, session: Session):
         self.session = session
+
+    @staticmethod
+    def _sanitize_text_field(value: str | None) -> str | None:
+        if value is None:
+            return None
+        return sanitize_text(value)
+
+    @classmethod
+    def _sanitize_details_update(
+        cls,
+        existing: dict[str, Any] | None,
+        incoming: dict[str, object] | None,
+    ) -> dict[str, Any]:
+        sanitized_existing = sanitize_payload(existing or {})
+        sanitized_incoming = sanitize_payload(incoming or {})
+        return {**sanitized_existing, **sanitized_incoming}
+
+    @classmethod
+    def _sanitize_position(cls, position: Position) -> Position:
+        position.reason = cls._sanitize_text_field(position.reason)
+        return position
+
+    @classmethod
+    def _sanitize_trade(cls, trade: Trade) -> Trade:
+        trade.reason = cls._sanitize_text_field(trade.reason)
+        return trade
+
+    @classmethod
+    def _sanitize_execution(cls, execution: Execution) -> Execution:
+        execution.reason = cls._sanitize_text_field(execution.reason)
+        execution.error_message = cls._sanitize_text_field(execution.error_message)
+        execution.details = sanitize_payload(execution.details or {})
+        return execution
+
+    @classmethod
+    def _sanitize_trade_intent(cls, intent: TradeIntent) -> TradeIntent:
+        intent.decision_reason = cls._sanitize_text_field(intent.decision_reason)
+        intent.close_reason = cls._sanitize_text_field(intent.close_reason)
+        intent.details = sanitize_payload(intent.details or {})
+        return intent
+
+    @classmethod
+    def _sanitize_allocation_cycle(
+        cls, allocation_cycle: AllocationCycle
+    ) -> AllocationCycle:
+        allocation_cycle.details = sanitize_payload(allocation_cycle.details or {})
+        return allocation_cycle
+
+    @classmethod
+    def _sanitize_allocation_alert(cls, alert: AllocationAlert) -> AllocationAlert:
+        alert.title = cls._sanitize_text_field(alert.title) or alert.title
+        alert.message = cls._sanitize_text_field(alert.message)
+        alert.details = sanitize_payload(alert.details or {})
+        return alert
 
     def list_trades(
         self,
@@ -161,12 +216,14 @@ class TradeService:
         return self.session.exec(statement).first()
 
     def record_trade(self, trade: Trade) -> Trade:
+        self._sanitize_trade(trade)
         self.session.add(trade)
         self.session.commit()
         self.session.refresh(trade)
         return trade
 
     def create_trade_intent(self, intent: TradeIntent) -> TradeIntent:
+        self._sanitize_trade_intent(intent)
         try:
             self.session.add(intent)
             self.session.commit()
@@ -207,6 +264,7 @@ class TradeService:
     def record_allocation_cycle(
         self, allocation_cycle: AllocationCycle
     ) -> AllocationCycle:
+        self._sanitize_allocation_cycle(allocation_cycle)
         self.session.add(allocation_cycle)
         self.session.commit()
         self.session.refresh(allocation_cycle)
@@ -237,6 +295,7 @@ class TradeService:
         return self.session.exec(statement).first()
 
     def upsert_allocation_alert(self, alert: AllocationAlert) -> AllocationAlert:
+        self._sanitize_allocation_alert(alert)
         self.session.add(alert)
         self.session.commit()
         self.session.refresh(alert)
@@ -444,11 +503,15 @@ class TradeService:
         if close_reason_code is not None:
             intent.close_reason_code = close_reason_code
         if close_reason is not None:
-            intent.close_reason = close_reason
+            intent.close_reason = self._sanitize_text_field(close_reason)
         if execution_client_request_id is not None:
             intent.execution_client_request_id = execution_client_request_id
         if details:
-            intent.details = {**(intent.details or {}), **details}
+            intent.details = self._sanitize_details_update(intent.details, details)
+        else:
+            intent.details = sanitize_payload(intent.details or {})
+        intent.decision_reason = self._sanitize_text_field(intent.decision_reason)
+        intent.close_reason = self._sanitize_text_field(intent.close_reason)
         if submitted_at is not None:
             intent.submitted_at = submitted_at
         if acknowledged_at is not None:
@@ -490,6 +553,7 @@ class TradeService:
             and execution.completed_at is None
         ):
             execution.last_transition_at = execution.signal_time
+        self._sanitize_execution(execution)
         self.session.add(execution)
         self.session.commit()
         self.session.refresh(execution)
@@ -587,15 +651,21 @@ class TradeService:
         if risk_truth_confidence is not None:
             execution.risk_truth_confidence = risk_truth_confidence
         if reason is not None:
-            execution.reason = reason
+            execution.reason = self._sanitize_text_field(reason)
         if error_code is not None:
             execution.error_code = error_code
         if error_message is not None:
-            execution.error_message = error_message
+            execution.error_message = self._sanitize_text_field(error_message)
         if requires_manual_review is not None:
             execution.requires_manual_review = requires_manual_review
         if details:
-            execution.details = {**(execution.details or {}), **details}
+            execution.details = self._sanitize_details_update(
+                execution.details, details
+            )
+        else:
+            execution.details = sanitize_payload(execution.details or {})
+        execution.reason = self._sanitize_text_field(execution.reason)
+        execution.error_message = self._sanitize_text_field(execution.error_message)
         self.session.add(execution)
         self.session.commit()
         self.session.refresh(execution)
@@ -627,13 +697,16 @@ class TradeService:
         if pnl is not None:
             position.pnl = round(pnl, 2)
         if reason is not None:
-            position.reason = reason
+            position.reason = self._sanitize_text_field(reason)
+        else:
+            position.reason = self._sanitize_text_field(position.reason)
         self.session.add(position)
         self.session.commit()
         self.session.refresh(position)
         return position
 
     def upsert_position(self, position: Position) -> Position:
+        self._sanitize_position(position)
         existing = self.get_open_position(
             position.instrument,
             strategy_name=position.strategy_name,
@@ -712,7 +785,9 @@ class TradeService:
         )
         position.last_reconciled_at = utc_now()
         if close_reason is not None:
-            position.reason = close_reason
+            position.reason = self._sanitize_text_field(close_reason)
+        else:
+            position.reason = self._sanitize_text_field(position.reason)
         self.session.add(position)
         self.session.commit()
         self.session.refresh(position)
@@ -736,7 +811,7 @@ class TradeService:
             instrument=instrument,
             broker_reference=broker_reference,
             local_position_id=local_position_id,
-            details=details or {},
+            details=sanitize_payload(details or {}),
         )
         self.session.add(event)
         self.session.commit()

@@ -9,7 +9,13 @@ from sqlmodel import select
 from app.core.broker import BrokerOrderResult, BrokerOrderStatus, OrderDirection
 from app.models.domain_event import DomainEvent
 from app.models.runtime import StrategyRuntimeState
-from app.models.trade import Execution, Position, Trade, TradeIntentState
+from app.models.trade import (
+    Execution,
+    Position,
+    ReconciliationEvent,
+    Trade,
+    TradeIntentState,
+)
 from app.services.audit_event_recorder import AuditEventPersistenceError
 from app.services.domain_event_service import domain_event_service
 from app.services.health_service import get_health_service
@@ -497,6 +503,48 @@ def test_audit_test_002_runtime_recovery_broker_auth_failure_persists_domain_eve
     assert event.payload_json["reason"] == "auth denied by broker"
     assert event.payload_json["previous_state"] == "RUNNING"
     assert event.payload_json["new_state"] == "RECOVERY_REQUIRED"
+
+
+def test_audit_sec_002_runtime_recovery_redacts_persisted_recovery_reason(
+    session, broker, fixed_now
+):
+    session.add(
+        StrategyRuntimeState(
+            runtime_id="runtime-recover-redaction-audit",
+            strategy_name="smoke_test_hold",
+            instrument="CS.D.EURUSD.MINI.IP",
+            status="RUNNING",
+            recovery_state="RUNNING",
+            current_position_broker_reference="recover-redaction-broker-ref",
+            last_price_seen=101.0,
+            last_price_seen_at=fixed_now - timedelta(seconds=5),
+        )
+    )
+    session.commit()
+
+    def raise_sensitive_transport_error():
+        raise RuntimeError(
+            "Authorization: Bearer recover-secret accountId=ACC-88888 "
+            "dealReference=DEAL-88888"
+        )
+
+    broker.get_positions = raise_sensitive_transport_error
+
+    RuntimeRecoveryService(session).recover()
+
+    runtime = session.exec(select(StrategyRuntimeState)).one()
+    reconciliation_event = session.exec(select(ReconciliationEvent)).one()
+
+    assert runtime.recovery_reason == (
+        "Broker positions unavailable during startup recovery: "
+        "Authorization: Bearer [REDACTED] accountId=[REDACTED] "
+        "dealReference=[REDACTED]"
+    )
+    assert reconciliation_event.details["reason"] == (
+        "Broker positions unavailable during startup recovery: "
+        "Authorization: Bearer [REDACTED] accountId=[REDACTED] "
+        "dealReference=[REDACTED]"
+    )
 
 
 def test_audit_test_002_runtime_recovery_stopped_open_risk_persists_domain_event(

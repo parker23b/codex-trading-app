@@ -20,6 +20,12 @@ repos:
 
   - repo: local
     hooks:
+      - id: repo-secrets-scan
+        name: repo secrets scan
+        entry: python3 scripts/repo_secrets_scan.py --mode staged
+        language: system
+        pass_filenames: false
+
       - id: backend-tests
         name: backend tests
         entry: bash -c 'cd backend && .venv/bin/python -m pytest -q'

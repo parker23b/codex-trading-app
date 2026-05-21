@@ -6,6 +6,7 @@ from typing import Any
 from sqlmodel import Session, select
 
 from app.core.runtime import runtime_manager
+from app.core.redaction import sanitize_text
 from app.models.runtime import StrategyRuntimeState
 from app.models.trade import Position
 from app.strategies.registry import strategy_registry
@@ -14,6 +15,12 @@ from app.strategies.registry import strategy_registry
 class RuntimeStateService:
     def __init__(self, session: Session):
         self.session = session
+
+    @staticmethod
+    def _sanitize_recovery_reason(value: str | None) -> str | None:
+        if value is None:
+            return None
+        return sanitize_text(value)
 
     def list_runtimes(self) -> list[StrategyRuntimeState]:
         statement = select(StrategyRuntimeState).order_by(
@@ -103,7 +110,7 @@ class RuntimeStateService:
         )
         runtime.status = status
         runtime.recovery_state = recovery_state
-        runtime.recovery_reason = recovery_reason
+        runtime.recovery_reason = self._sanitize_recovery_reason(recovery_reason)
         runtime.control_mode = control_mode or runtime.control_mode or "MANUAL"
         runtime.runtime_mode = runtime_mode or runtime.runtime_mode or "NORMAL"
         runtime.deployment_id = (
@@ -180,7 +187,7 @@ class RuntimeStateService:
         if runtime is None:
             return None
         runtime.recovery_state = recovery_state
-        runtime.recovery_reason = recovery_reason
+        runtime.recovery_reason = self._sanitize_recovery_reason(recovery_reason)
         if status is not None:
             runtime.status = status
         if runtime_mode is not None:

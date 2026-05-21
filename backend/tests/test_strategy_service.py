@@ -2651,6 +2651,154 @@ def test_entry_broker_failure_fails_safely_without_opening_position(
     assert engine.current_position_broker_reference is None
 
 
+def test_audit_sec_002_entry_failure_persists_redacted_broker_result_details(
+    session, broker, fixed_now
+):
+    service = StrategyService(session)
+    trade_service = TradeService(session)
+    service.start_strategy(STRATEGY, INSTRUMENT)
+    broker.place_order_outcomes.append(
+        BrokerOrderResult(
+            broker_reference="entry-redaction-sensitive-1",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.5,
+            executed_at=fixed_now + timedelta(seconds=1),
+            submitted_at=fixed_now + timedelta(seconds=1),
+            acknowledged_at=fixed_now + timedelta(seconds=1),
+            status=BrokerOrderStatus.FAILED,
+            error_code="BROKER_REJECTED",
+            error_message=(
+                "Authorization: Bearer order-secret accountId=ACC-11111 "
+                "dealReference=DEAL-11111"
+            ),
+            reason="Broker rejected the order.",
+        )
+    )
+
+    service.process_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        100.5,
+        bid=100.49,
+        ask=100.51,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
+
+    execution = trade_service.list_executions(limit=1)[0]
+    intent = trade_service.list_trade_intents(limit=1)[0]
+
+    assert execution.status == ExecutionStatus.FAILED.value
+    assert execution.error_message == (
+        "Authorization: Bearer [REDACTED] accountId=[REDACTED] dealReference=[REDACTED]"
+    )
+    assert execution.details["broker_result"]["broker_reference"].startswith(
+        "[REDACTED_BROKER_REF:"
+    )
+    assert execution.details["broker_result"]["error_message"] == (
+        "Authorization: Bearer [REDACTED] accountId=[REDACTED] dealReference=[REDACTED]"
+    )
+    assert intent.details["broker_result"]["broker_reference"].startswith(
+        "[REDACTED_BROKER_REF:"
+    )
+
+
+def test_audit_sec_002_close_manual_review_persists_redacted_broker_result_details(
+    session, broker, fixed_now
+):
+    service = StrategyService(session)
+    trade_service = TradeService(session)
+    service.start_strategy(STRATEGY, INSTRUMENT)
+    broker.place_order_outcomes.append(
+        make_order_result(
+            broker_reference="entry-redaction-close-1",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.BUY,
+            size=0.2,
+            price=100.5,
+            executed_at=fixed_now + timedelta(seconds=1),
+        )
+    )
+    broker.close_position_outcomes.append(
+        BrokerOrderResult(
+            broker_reference="close-redaction-sensitive-1",
+            instrument=INSTRUMENT,
+            direction=OrderDirection.SELL,
+            size=0.2,
+            price=101.0,
+            executed_at=fixed_now + timedelta(seconds=40),
+            status=BrokerOrderStatus.PARTIALLY_FILLED,
+            filled_size=0.1,
+            average_fill_price=101.0,
+            submitted_at=fixed_now + timedelta(seconds=40),
+            acknowledged_at=fixed_now + timedelta(seconds=40),
+            requires_manual_review=True,
+            error_message=(
+                "Authorization: Bearer close-secret accountId=ACC-22222 "
+                "dealReference=DEAL-22222"
+            ),
+            reason="Close remained partial.",
+        )
+    )
+
+    service.process_price_update(
+        INSTRUMENT,
+        100.0,
+        bid=99.99,
+        ask=100.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now,
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        100.5,
+        bid=100.49,
+        ask=100.51,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=1),
+    )
+    service.process_price_update(
+        INSTRUMENT,
+        101.0,
+        bid=100.99,
+        ask=101.01,
+        market_status="TRADEABLE",
+        tradable=True,
+        received_at=fixed_now + timedelta(seconds=40),
+    )
+
+    close_execution = trade_service.list_executions(limit=10)[0]
+    intent = trade_service.list_trade_intents(limit=1)[0]
+
+    assert close_execution.phase == ExecutionPhase.CLOSE.value
+    assert close_execution.status == ExecutionStatus.NEEDS_MANUAL_REVIEW.value
+    assert close_execution.error_message == (
+        "Authorization: Bearer [REDACTED] accountId=[REDACTED] dealReference=[REDACTED]"
+    )
+    assert close_execution.details["broker_result"]["broker_reference"].startswith(
+        "[REDACTED_BROKER_REF:"
+    )
+    assert close_execution.details["broker_result"]["error_message"] == (
+        "Authorization: Bearer [REDACTED] accountId=[REDACTED] dealReference=[REDACTED]"
+    )
+    assert intent.details["broker_result"]["broker_reference"].startswith(
+        "[REDACTED_BROKER_REF:"
+    )
+
+
 def test_entry_below_broker_minimum_is_risk_rejected_before_submission(
     session, broker, fixed_now
 ):
