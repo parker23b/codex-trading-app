@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import Column
+from sqlalchemy import Column, Index, text
 from sqlalchemy.types import JSON
 from sqlmodel import Field, SQLModel
 
@@ -13,6 +13,20 @@ def utc_now() -> datetime:
 
 
 class AllocationAlert(SQLModel, table=True):
+    __table_args__ = (
+        Index("ix_allocationalert_updated_at_desc", text("updated_at DESC")),
+        Index(
+            "ix_allocationalert_state_updated_at",
+            "state",
+            text("updated_at DESC"),
+        ),
+        Index(
+            "ix_allocationalert_severity_updated_at",
+            "severity",
+            text("updated_at DESC"),
+        ),
+    )
+
     id: Optional[int] = Field(default=None, primary_key=True)
     alert_key: str = Field(index=True, unique=True)
     alert_type: str = Field(index=True)

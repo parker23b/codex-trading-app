@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import Column
+from sqlalchemy import Column, text
 from sqlalchemy.types import JSON
 from sqlmodel import Field, SQLModel
 
@@ -28,8 +28,16 @@ class StrategyRuntimeState(SQLModel, table=True):
     last_price_seen: float | None = None
     last_price_seen_at: datetime | None = None
     current_position_broker_reference: str | None = Field(default=None, index=True)
-    control_mode: str = Field(default="MANUAL", index=True)
-    runtime_mode: str = Field(default="NORMAL", index=True)
+    control_mode: str = Field(
+        default="MANUAL",
+        index=True,
+        sa_column_kwargs={"server_default": text("'MANUAL'")},
+    )
+    runtime_mode: str = Field(
+        default="NORMAL",
+        index=True,
+        sa_column_kwargs={"server_default": text("'NORMAL'")},
+    )
     deployment_id: int | None = Field(default=None, index=True)
     active_profile_name: str | None = Field(default=None, index=True)
     auto_resume: bool = True

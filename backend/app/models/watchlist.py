@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
+from sqlalchemy import Index, text
 from sqlmodel import Field, SQLModel
 
 
@@ -25,6 +26,16 @@ class WatchlistStatus(str, Enum):
 
 class WatchlistEntry(SQLModel, table=True):
     __tablename__ = "watchlist_entry"
+    __table_args__ = (
+        Index(
+            "ix_watchlist_entry_tier_status_priority",
+            "tier",
+            "status",
+            text("pinned DESC"),
+            text("priority_score DESC"),
+            text("assigned_at ASC"),
+        ),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     instrument: str = Field(index=True, nullable=False)

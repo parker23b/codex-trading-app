@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -7,29 +8,13 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, create_engine
 
 from app.core.config import Settings, get_settings
 from app.core.runtime import runtime_manager
+from app.db.migrations import ensure_database_schema_current
 from app.db.session import get_session
 from app.main import create_app
-from app.models.allocation_alert import AllocationAlert
-from app.models.domain_event import DomainEvent
-from app.models.operator_control import OperatorControlState
-from app.models.promotion_request import PromotionRequest
-from app.models.runtime import StrategyRuntimeState
-from app.models.runtime_leadership import RuntimeLease
-from app.models.strategy_deployment import StrategyDeployment
-from app.models.strategy_governance import StrategyFamilyGovernance
-from app.models.trade import (
-    AllocationCycle,
-    Execution,
-    Position,
-    ReconciliationEvent,
-    Trade,
-    TradeIntent,
-)
-from app.models.watchlist import OperatorShortlistEntry, WatchlistEntry
 from app.services.domain_event_service import domain_event_service
 from app.services.health_service import get_health_service
 from app.services.market_status_service import get_market_status_service
@@ -91,34 +76,31 @@ def patch_external_boundaries(
     monkeypatch.setattr(domain_event_service, "record_event", lambda **_: None)
 
 
-@pytest.fixture
-def session() -> Iterator[Session]:
-    _ = (
-        Trade,
-        TradeIntent,
-        AllocationCycle,
-        AllocationAlert,
-        Position,
-        RuntimeLease,
-        StrategyRuntimeState,
-        ReconciliationEvent,
-        Execution,
-        DomainEvent,
-        OperatorControlState,
-        WatchlistEntry,
-        OperatorShortlistEntry,
-        PromotionRequest,
-        StrategyFamilyGovernance,
-        StrategyDeployment,
-    )
+@pytest.fixture(scope="session")
+def migrated_sqlite_template(tmp_path_factory) -> str:
+    template_dir = tmp_path_factory.mktemp("sqlite-template")
+    template_path = template_dir / "template.sqlite"
     engine = create_engine(
-        "sqlite://",
+        f"sqlite:///{template_path}",
+        connect_args={"check_same_thread": False},
+    )
+    ensure_database_schema_current(engine)
+    engine.dispose()
+    return str(template_path)
+
+
+@pytest.fixture
+def session(tmp_path, migrated_sqlite_template: str) -> Iterator[Session]:
+    db_path = tmp_path / "test.sqlite"
+    shutil.copyfile(migrated_sqlite_template, db_path)
+    engine = create_engine(
+        f"sqlite:///{db_path}",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    SQLModel.metadata.create_all(engine)
     with Session(engine) as db_session:
         yield db_session
+    engine.dispose()
 
 
 @pytest.fixture

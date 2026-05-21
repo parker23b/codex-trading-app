@@ -15,15 +15,18 @@ This guide covers local development setup and operator-facing surfaces. It is no
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -c requirements.txt -e .
+pip install -r requirements-dev.txt
 cp .env.example .env
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
 Default backend behavior:
 
 - uses SQLite at `backend/trading_platform.db`
-- creates tables automatically on startup
+- applies Alembic migrations automatically on startup
+- upgrades existing unversioned SQLite dev databases through a legacy compatibility bridge before stamping the baseline revision
 - uses the IG broker adapter in `DEMO` mode
 - keeps `IG_TRADING_ENABLED=false`
 - enables IG streaming by default
@@ -129,6 +132,16 @@ Backend tests:
 cd backend
 source .venv/bin/activate
 pytest
+```
+
+Backend migration and drift checks:
+
+```bash
+cd backend
+source .venv/bin/activate
+alembic current
+alembic upgrade head
+pytest tests/test_database_migrations.py tests/test_initialize_database.py -q
 ```
 
 Frontend static checks:

@@ -3,12 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from sqlalchemy import text
-from sqlmodel import create_engine
+from sqlmodel import Session, create_engine
 
 from app.db import init_db
 
 
-def test_initialize_database_adds_trade_intent_columns_to_legacy_sqlite_schema(
+def test_initialize_database_upgrades_legacy_sqlite_and_stamps_revision(
     tmp_path, monkeypatch
 ):
     db_path = Path(tmp_path) / "legacy.sqlite"
@@ -21,48 +21,17 @@ def test_initialize_database_adds_trade_intent_columns_to_legacy_sqlite_schema(
         connection.execute(
             text(
                 """
-                CREATE TABLE position (
+                CREATE TABLE strategyruntimestate (
                     id INTEGER PRIMARY KEY,
+                    runtime_id VARCHAR NOT NULL,
                     strategy_name VARCHAR NOT NULL,
                     instrument VARCHAR NOT NULL,
-                    direction VARCHAR NOT NULL,
-                    size FLOAT NOT NULL,
-                    open_price FLOAT NOT NULL,
-                    open_time TIMESTAMP NOT NULL,
-                    account_type VARCHAR NOT NULL,
-                    is_open BOOLEAN NOT NULL
-                )
-                """
-            )
-        )
-        connection.execute(
-            text(
-                """
-                CREATE TABLE trade (
-                    id INTEGER PRIMARY KEY,
-                    strategy_name VARCHAR NOT NULL,
-                    instrument VARCHAR NOT NULL,
-                    direction VARCHAR NOT NULL,
-                    size FLOAT NOT NULL,
-                    open_price FLOAT NOT NULL,
-                    close_price FLOAT NOT NULL,
-                    open_time TIMESTAMP NOT NULL,
-                    close_time TIMESTAMP NOT NULL,
-                    account_type VARCHAR NOT NULL
-                )
-                """
-            )
-        )
-        connection.execute(
-            text(
-                """
-                CREATE TABLE execution (
-                    id INTEGER PRIMARY KEY,
-                    strategy_name VARCHAR NOT NULL,
-                    instrument VARCHAR NOT NULL,
-                    phase VARCHAR NOT NULL,
                     status VARCHAR NOT NULL,
-                    signal_time TIMESTAMP NOT NULL
+                    started_at TIMESTAMP NOT NULL,
+                    control_mode VARCHAR,
+                    runtime_mode VARCHAR,
+                    created_at TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP NOT NULL
                 )
                 """
             )
@@ -70,15 +39,29 @@ def test_initialize_database_adds_trade_intent_columns_to_legacy_sqlite_schema(
         connection.execute(
             text(
                 """
-                CREATE TABLE reconciliationevent (
-                    id INTEGER PRIMARY KEY,
-                    event_type VARCHAR NOT NULL,
-                    strategy_name VARCHAR,
-                    instrument VARCHAR,
-                    broker_reference VARCHAR,
-                    local_position_id INTEGER,
-                    details JSON,
-                    created_at TIMESTAMP
+                INSERT INTO strategyruntimestate (
+                    id,
+                    runtime_id,
+                    strategy_name,
+                    instrument,
+                    status,
+                    started_at,
+                    control_mode,
+                    runtime_mode,
+                    created_at,
+                    updated_at
+                )
+                VALUES (
+                    1,
+                    'runtime-1',
+                    'mean_reversion',
+                    'EURUSD',
+                    'STOPPED',
+                    '2026-05-21 10:00:00',
+                    NULL,
+                    NULL,
+                    '2026-05-21 10:00:00',
+                    '2026-05-21 10:00:00'
                 )
                 """
             )
@@ -89,38 +72,13 @@ def test_initialize_database_adds_trade_intent_columns_to_legacy_sqlite_schema(
     init_db.initialize_database()
 
     with engine.begin() as connection:
-        position_columns = {
-            row[1]
+        version = connection.execute(
+            text("SELECT version_num FROM alembic_version")
+        ).scalar_one()
+        runtime_columns = {
+            row[1]: {"notnull": int(row[3]), "default": row[4]}
             for row in connection.execute(
-                text("PRAGMA table_info('position')")
-            ).fetchall()
-        }
-        trade_columns = {
-            row[1]
-            for row in connection.execute(text("PRAGMA table_info('trade')")).fetchall()
-        }
-        execution_columns = {
-            row[1]
-            for row in connection.execute(
-                text("PRAGMA table_info('execution')")
-            ).fetchall()
-        }
-        reconciliation_columns = {
-            row[1]
-            for row in connection.execute(
-                text("PRAGMA table_info('reconciliationevent')")
-            ).fetchall()
-        }
-        trade_intent_columns = {
-            row[1]
-            for row in connection.execute(
-                text("PRAGMA table_info('tradeintent')")
-            ).fetchall()
-        }
-        allocation_alert_columns = {
-            row[1]
-            for row in connection.execute(
-                text("PRAGMA table_info('allocationalert')")
+                text("PRAGMA table_info('strategyruntimestate')")
             ).fetchall()
         }
         indexes = {
@@ -130,16 +88,23 @@ def test_initialize_database_adds_trade_intent_columns_to_legacy_sqlite_schema(
             ).fetchall()
         }
 
-    assert "trade_intent_id" in position_columns
-    assert "trade_intent_id" in trade_columns
-    assert "trade_intent_id" in execution_columns
-    assert "trade_intent_id" in reconciliation_columns
-    assert "risk_truth_confidence" in position_columns
-    assert "risk_truth_confidence" in trade_columns
-    assert "risk_truth_confidence" in execution_columns
-    assert "allocation_cycle_id" in trade_intent_columns
-    assert "estimated_risk_amount" in trade_intent_columns
-    assert "risk_truth_confidence" in trade_intent_columns
-    assert "alert_key" in allocation_alert_columns
-    assert "state" in allocation_alert_columns
+    assert version == "20260521_01"
+    assert runtime_columns["control_mode"]["notnull"] == 1
+    assert runtime_columns["runtime_mode"]["notnull"] == 1
+    assert runtime_columns["control_mode"]["default"] in {"'MANUAL'", '"MANUAL"'}
+    assert runtime_columns["runtime_mode"]["default"] in {"'NORMAL'", '"NORMAL"'}
     assert "uq_trade_intent_active_instrument" in indexes
+
+    with Session(engine) as session:
+        control_mode, runtime_mode = session.exec(
+            text(
+                """
+                SELECT control_mode, runtime_mode
+                FROM strategyruntimestate
+                WHERE id = 1
+                """
+            )
+        ).one()
+
+    assert control_mode == "MANUAL"
+    assert runtime_mode == "NORMAL"

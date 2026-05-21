@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
-from sqlalchemy import Column
+from sqlalchemy import Column, Index, text
 from sqlalchemy.types import JSON
 from sqlmodel import Field, SQLModel
 
@@ -25,6 +25,15 @@ class StrategyDeploymentState(str, Enum):
 
 
 class StrategyDeployment(SQLModel, table=True):
+    __table_args__ = (
+        Index(
+            "ix_strategy_deployment_state_strategy",
+            "state",
+            "strategy_name",
+            text("updated_at DESC"),
+        ),
+    )
+
     id: Optional[int] = Field(default=None, primary_key=True)
     strategy_name: str = Field(index=True)
     governance_id: int | None = Field(default=None, index=True)

@@ -2,22 +2,25 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+import os
+import tempfile
 
-from sqlmodel import Session, SQLModel, create_engine, select
-from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, create_engine, select
 
 from app import main
+from app.db.migrations import ensure_database_schema_current
 from app.models.runtime_leadership import RuntimeLease
 from app.services.runtime_leadership_service import RuntimeLeadershipService
 
 
 def _engine():
+    fd, raw_path = tempfile.mkstemp(suffix=".sqlite")
+    os.close(fd)
     engine = create_engine(
-        "sqlite://",
+        f"sqlite:///{raw_path}",
         connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
     )
-    SQLModel.metadata.create_all(engine)
+    ensure_database_schema_current(engine)
     return engine
 
 

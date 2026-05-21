@@ -33,6 +33,30 @@ repos:
         pass_filenames: false
         stages: [pre-push]
 
+      - id: backend-migration-tests
+        name: backend migration tests
+        entry: bash -c 'cd backend && .venv/bin/python -m pytest tests/test_database_migrations.py -q'
+        language: system
+        pass_filenames: false
+        files: ^backend/(alembic/|app/db/|app/models/|tests/test_database_migrations\.py|tests/test_initialize_database\.py)
+        stages: [pre-push]
+
+      - id: backend-lockfiles
+        name: backend lockfiles
+        entry: ./scripts/check_backend_requirements.sh
+        language: system
+        pass_filenames: false
+        files: ^backend/(pyproject\.toml|requirements-dev\.in|requirements\.txt|requirements-dev\.txt)$
+        stages: [pre-push]
+
+      - id: backend-pip-audit
+        name: backend pip audit
+        entry: bash -c 'cd backend && .venv/bin/pip-audit'
+        language: system
+        pass_filenames: false
+        files: ^backend/(pyproject\.toml|requirements-dev\.in|requirements\.txt|requirements-dev\.txt)$
+        stages: [pre-push]
+
       - id: frontend-lint
         name: frontend lint
         entry: bash -c 'cd frontend && npm run lint'
@@ -47,4 +71,28 @@ repos:
         language: system
         pass_filenames: false
         files: ^frontend/
+        stages: [pre-push]
+
+      - id: frontend-lockfile
+        name: frontend lockfile
+        entry: bash -c 'cd frontend && npm run audit:lockfile'
+        language: system
+        pass_filenames: false
+        files: ^frontend/(package\.json|package-lock\.json)$
+        stages: [pre-push]
+
+      - id: frontend-unused-deps
+        name: frontend unused deps
+        entry: bash -c 'cd frontend && npm run audit:unused'
+        language: system
+        pass_filenames: false
+        files: ^frontend/
+        stages: [pre-push]
+
+      - id: frontend-npm-audit
+        name: frontend npm audit
+        entry: bash -c 'cd frontend && npm run audit:deps'
+        language: system
+        pass_filenames: false
+        files: ^frontend/(package\.json|package-lock\.json)$
         stages: [pre-push]

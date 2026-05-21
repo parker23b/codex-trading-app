@@ -32,12 +32,19 @@ jobs:
                   cache: "pip"
                   cache-dependency-path: |
                       backend/pyproject.toml
+                      backend/requirements.txt
+                      backend/requirements-dev.in
                       backend/requirements-dev.txt
+
+            - name: Install backend lock tooling
+              run: python -m pip install --upgrade pip pip-tools
+
+            - name: Verify backend lockfiles
+              run: ../scripts/check_backend_requirements.sh
 
             - name: Install backend dependencies
               run: |
-                  python -m pip install --upgrade pip
-                  pip install -e .
+                  pip install -c requirements.txt -e .
                   pip install -r requirements-dev.txt
 
             - name: Ruff lint
@@ -51,6 +58,9 @@ jobs:
             - name: Pyright
               run: pyright .
               continue-on-error: true
+
+            - name: Migration and drift tests
+              run: pytest tests/test_database_migrations.py -q
 
             - name: Pytest
               run: pytest
@@ -66,7 +76,6 @@ jobs:
 
             - name: Python dependency audit
               run: pip-audit
-              continue-on-error: true
 
     frontend-audit:
         name: frontend-audit
@@ -87,6 +96,9 @@ jobs:
                   cache: "npm"
                   cache-dependency-path: frontend/package-lock.json
 
+            - name: Verify frontend lockfile
+              run: npm run audit:lockfile
+
             - name: Install frontend dependencies
               run: npm ci
 
@@ -100,12 +112,10 @@ jobs:
 
             - name: Knip unused-code scan
               run: npm run audit:unused
-              continue-on-error: true
 
             - name: Dependency cruiser architecture scan
               run: npm run audit:arch
               continue-on-error: true
 
             - name: NPM dependency audit
-              run: npm audit --audit-level=moderate
-              continue-on-error: true
+              run: npm run audit:deps

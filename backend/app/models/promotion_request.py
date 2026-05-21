@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
+from sqlalchemy import Index, text
 from sqlmodel import Field, SQLModel
 
 
@@ -20,6 +21,13 @@ class PromotionRequestStatus(str, Enum):
 
 class PromotionRequest(SQLModel, table=True):
     __tablename__ = "promotion_request"
+    __table_args__ = (
+        Index(
+            "ix_promotion_request_status_requested_at",
+            "status",
+            text("requested_at DESC"),
+        ),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     instrument: str = Field(index=True, nullable=False)

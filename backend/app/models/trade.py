@@ -256,6 +256,10 @@ class TradeIntent(SQLModel, table=True):
 
 
 class AllocationCycle(SQLModel, table=True):
+    __table_args__ = (
+        Index("ix_allocationcycle_received_at_desc", text("received_at DESC")),
+    )
+
     id: Optional[int] = Field(default=None, primary_key=True)
     cycle_id: str = Field(index=True, unique=True)
     received_at: datetime = Field(index=True)

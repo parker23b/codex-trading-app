@@ -6,7 +6,7 @@ InvestMate is a FastAPI and Next.js trading-operations workspace for supervised 
 
 InvestMate is **not ready for live or demo broker dealing**.
 
-Use this repository for local development, UI review, strategy research, broker-read investigation, and smoke testing only. Keep `IG_TRADING_ENABLED=false`. Do not enable real broker dealing until the P0 readiness blockers in [docs/audit-status.md](docs/audit-status.md) are fixed and verified.
+Use this repository for local development, UI review, strategy research, broker-read investigation, and smoke testing only. Keep `IG_TRADING_ENABLED=false`. Do not enable real broker dealing until the open readiness blockers in [docs/audit-status.md](docs/audit-status.md) are fixed and verified.
 
 Read the details in [docs/readiness.md](docs/readiness.md).
 
@@ -38,8 +38,10 @@ Start the backend:
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -c requirements.txt -e .
+pip install -r requirements-dev.txt
 cp .env.example .env
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
@@ -121,6 +123,16 @@ source .venv/bin/activate
 pytest
 ```
 
+Backend migration commands:
+
+```bash
+cd backend
+source .venv/bin/activate
+alembic current
+alembic upgrade head
+pytest tests/test_database_migrations.py -q
+```
+
 Frontend checks:
 
 ```bash
@@ -155,7 +167,7 @@ The short version:
 - backend mutation and broker-adjacent routes do not yet have a production-grade auth boundary
 - `/testing/reset-history` is destructive and not yet production-gated
 - broker confirmation ambiguity, mutation/test-route auth gaps, and duplicate runtime-loop risks still have P0 findings
-- runtime, market-data, streaming, and strategy loops are not protected by cross-process leader locks
+- database schema evolution still needs broader non-SQLite migration rehearsal even though Alembic and SQLite drift checks now exist
 - route, frontend, full-stack, broker-fake, domain-event, migration, dependency, and observability evidence remains incomplete
 
 The source of truth is [docs/audit-status.md](docs/audit-status.md).
