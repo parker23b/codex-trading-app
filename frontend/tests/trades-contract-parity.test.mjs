@@ -48,7 +48,7 @@ test("ARCH-009 and API-004 frontend trade and position types keep provenance fie
   );
   assert.match(
     frontendSource,
-    /export type Position = \{[\s\S]*risk_truth_confidence\?: RiskTruthConfidence \| string \| null;[\s\S]*broker_sync_status\?: BrokerSyncStatus \| null;[\s\S]*close_execution_source\?: BrokerExecutionSource \| string \| null;[\s\S]*time_in_trade_seconds\?: number;/s,
+    /export type Position = \{[\s\S]*risk_truth_confidence\?: RiskTruthConfidence \| string \| null;[\s\S]*broker_sync_status\?: BrokerSyncStatus \| string \| null;[\s\S]*close_execution_source\?: BrokerExecutionSource \| string \| null;[\s\S]*time_in_trade_seconds\?: number;/s,
   );
   assert.match(
     frontendSource,

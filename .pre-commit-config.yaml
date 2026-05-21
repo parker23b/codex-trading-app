@@ -20,6 +20,14 @@ repos:
 
   - repo: local
     hooks:
+      - id: spec-coverage-matrix
+        name: spec coverage matrix
+        entry: python3 scripts/check_spec_coverage_matrix.py
+        language: system
+        pass_filenames: false
+        files: ^(docs/spec/.*\.md|docs/audit-status\.md|scripts/check_spec_coverage_matrix\.py)$
+        stages: [pre-push]
+
       - id: repo-secrets-scan
         name: repo secrets scan
         entry: python3 scripts/repo_secrets_scan.py --mode staged

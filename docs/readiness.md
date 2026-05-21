@@ -18,9 +18,8 @@ Safe local use means:
 
 The current blocking themes are:
 
-- simulated-vs-broker-confirmed provenance is still incomplete across broader frontend/browser surfaces
-- the spec coverage matrix still does not comprehensively map every P0/P1 boundary and surface requirement
-- `risk_truth_confidence` now has an authoritative backend/frontend contract, but broader enum-parity and operator-surface evidence are still incomplete
+- simulated-vs-broker-confirmed provenance is still incomplete across broader frontend/browser surfaces, even though dashboard trade truth and dashboard position sync truth now have explicit simulated/local browser coverage
+- backend/frontend enum parity is stronger for the covered vocabulary slice (`risk_truth_confidence`, `BrokerExecutionSource`, `broker_sync_status`, `ExecutionStatus`, and `TradeIntentState`), but broader operator-surface evidence is still incomplete
 - any future operator-critical raw dict/list routes still need explicit contract ownership even though the currently known frontend-consumed route boundary is now modeled
 - durable audit preservation is still incomplete for remaining broker-action HTTP authority and background-event paths outside the covered entry/close, runtime-start/control-plane-reconcile scheduler, autonomous deployment-reconcile/runtime-recovery startup-authority, and selected recovery/reconciliation slices
 - frontend operator truth now has selected browser/e2e coverage for stale, degraded, manual-review, passive-vs-mutation, simulated-vs-broker-confirmed, and mutation-failure states across dashboard/live/risk/strategies/AIMEE/control-plane/coverage/markets, but broad browser/e2e coverage is still incomplete
@@ -30,8 +29,8 @@ The canonical blocker list is in [audit-status.md](audit-status.md).
 
 ## Known Risks
 
-- Simulated/local execution and close provenance is not yet proved across broader frontend/browser operator surfaces.
-- Broader backend/frontend enum-parity proof is still incomplete even though `risk_truth_confidence` now has a central contract.
+- Simulated/local execution and close provenance is not yet proved across broader frontend/browser operator surfaces outside the covered dashboard trade and dashboard position sync slices.
+- Broader backend/frontend enum-parity proof is still incomplete even though the covered vocabulary slice now includes `risk_truth_confidence`, `BrokerExecutionSource`, `broker_sync_status`, `ExecutionStatus`, and `TradeIntentState`.
 - Future raw operator-critical routes would make contract drift easier to miss even though the currently known frontend-consumed route boundary is now modeled.
 - Remaining broker-action HTTP authority and mutation/background paths still need durable audit-preservation proof at the route/background boundary beyond the covered runtime-start/control-plane-reconcile scheduler slice, the autonomous deployment-reconcile startup slice, and the runtime-recovery startup slice.
 - Browser/e2e operator-state coverage is improved, including selected manual-review, control-plane mismatch, and market-data fallback truth, but it is still too narrow for readiness claims.
@@ -132,3 +131,51 @@ Manual actions still required:
 - do not claim the repository history is clean until a full history rewrite or equivalent cleanup has actually been completed and verified
 
 Track progress in [audit-status.md](audit-status.md).
+
+## 2026-05-21 Enum And Provenance Parity Slice
+
+This remediation covered the authoritative vocabulary slice for:
+
+- `risk_truth_confidence`
+- `BrokerExecutionSource`
+- `broker_sync_status`
+- `ExecutionStatus`
+- `TradeIntentState`
+- frontend unknown/degraded/manual-review labels for those surfaces
+
+Mismatches fixed in this slice:
+
+- backend `broker_sync_status` is now an explicit enum instead of an undocumented string field
+- frontend trade close provenance mapping is now centralized instead of duplicated across tables
+- frontend execution and allocation intent lifecycle fields now use explicit shared unions before widening to `string` for unsupported backend values
+- unsupported backend provenance/status values now fall back to explicit unknown/degraded labels instead of nominal, exact, or broker-confirmed-looking UI
+- dashboard positions now expose simulated local fill provenance explicitly rather than leaving the sync state implicit
+
+Tests added or updated in this slice:
+
+- `backend/tests/test_operator_vocabulary.py`
+- `frontend/tests/operator-vocabulary-parity.test.mjs`
+- `frontend/tests/trades-contract-parity.test.mjs`
+- `frontend/e2e/operator-truth.spec.mjs`
+- `frontend/e2e/support/scenarios.mjs`
+
+Commands run on 2026-05-21:
+
+- `backend/.venv/bin/pytest backend/tests/test_operator_vocabulary.py backend/tests/test_trade_route_contracts.py backend/tests/test_execution_routes.py backend/tests/test_strategy_service.py -q` -> `66 passed`
+- `cd frontend && npm run typecheck` -> passed
+- `cd frontend && npm run test:frontend` -> `70 passed`
+- `cd frontend && node --test --test-name-pattern "AUDIT-005|AUDIT-UI-002|UI-005|BROKER-014|AUDIT-LIFE-005|API-003|API-004|ARCH-009" tests/*.test.mjs` -> `21 passed`, `49 skipped`
+- `cd frontend && npm run test:e2e -- --grep "AUDIT-LIFE-005|AUDIT-UI-006 dashboard shows stale feed truth and keeps simulated closes distinct from broker-confirmed closes|AUDIT-UI-002 risk view keeps unavailable and provisional truth from collapsing into exact risk"` -> `3 passed`
+- `python3 scripts/check_spec_coverage_matrix.py` -> `PASS`
+
+Finding status after this slice:
+
+- `AUDIT-005`: narrowed, not fixed globally
+- `AUDIT-UI-002`: narrowed, not fixed globally
+- `AUDIT-LIFE-005`: narrowed with one additional browser-covered simulated/local provenance surface
+
+Remaining enum/provenance gaps:
+
+- broader browser coverage across control-plane, events, markets, and additional simulated/local surfaces
+- additional operator-facing vocabularies outside this slice
+- any future frontend-consumed route family that bypasses the shared vocabulary helpers and parity tests

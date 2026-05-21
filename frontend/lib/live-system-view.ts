@@ -1,4 +1,5 @@
 import { formatInstrumentLabel } from "@/lib/format";
+import { executionStatusMeta } from "@/lib/operator-vocabulary";
 import type {
   AllocationAlert,
   AllocationExposureSummary,
@@ -245,28 +246,7 @@ function executionTone(execution: Execution): LiveTone {
   if (execution.requires_manual_review) {
     return "negative";
   }
-
-  switch (execution.status) {
-    case "FAILED":
-    case "NEEDS_MANUAL_REVIEW":
-      return "negative";
-    case "SUBMISSION_PENDING":
-    case "SIGNAL_GENERATED":
-    case "RISK_APPROVED":
-    case "RISK_REJECTED":
-    case "ORDER_SUBMITTED":
-    case "ORDER_ACKNOWLEDGED":
-    case "FILL_PARTIAL":
-    case "CLOSE_REQUESTED":
-    case "CANCELLED":
-      return "warning";
-    case "FILL_FULL":
-    case "POSITION_OPENED":
-    case "CLOSE_CONFIRMED":
-      return "positive";
-    default:
-      return "inactive";
-  }
+  return executionStatusMeta(execution.status).tone;
 }
 
 function executionMessage(execution: Execution) {

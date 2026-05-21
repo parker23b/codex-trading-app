@@ -38,6 +38,7 @@ import {
   formatSignedCurrency,
   formatSignedPercent,
 } from "@/lib/format";
+import { brokerSyncStatusMeta, closeExecutionSourceMeta } from "@/lib/operator-vocabulary";
 import {
   AllocationAlert,
   AllocationCycle,
@@ -102,16 +103,6 @@ function formatTimestamp(value?: string | null) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
-}
-
-function closeSourceLabel(source?: string | null) {
-  if (source === "SIMULATED_LOCAL_CLOSE") {
-    return "Simulated local close";
-  }
-  if (source === "BROKER_CONFIRMED") {
-    return "Broker confirmed";
-  }
-  return "Close source unknown";
 }
 
 function renderMetricOrUnavailable(
@@ -898,6 +889,19 @@ export function DashboardLive({
                 header: "Unrealized",
                 render: (row) => (row.unrealized_pnl != null ? formatSignedCurrency(row.unrealized_pnl) : "n/a"),
               },
+              {
+                key: "sync",
+                header: "Broker Sync",
+                render: (row) => {
+                  const syncMeta = brokerSyncStatusMeta(row.broker_sync_status);
+                  return (
+                    <div className="cell-stack">
+                      <strong>{syncMeta.label}</strong>
+                      <span className="console-subtle">{syncMeta.detail}</span>
+                    </div>
+                  );
+                },
+              },
             ]}
           />
         ) : null}
@@ -919,7 +923,11 @@ export function DashboardLive({
               },
               { key: "side", header: "Side", render: (row) => row.direction },
               { key: "closed", header: "Closed", render: (row) => formatTimestamp(row.close_time) },
-              { key: "source", header: "Source", render: (row) => closeSourceLabel(row.close_execution_source) },
+              {
+                key: "source",
+                header: "Source",
+                render: (row) => closeExecutionSourceMeta(row.close_execution_source).label,
+              },
               { key: "pnl", header: "PnL", render: (row) => formatSignedCurrency(row.pnl) },
             ]}
           />

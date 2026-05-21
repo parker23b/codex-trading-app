@@ -9,8 +9,41 @@ export type BrokerSyncStatus =
   | "MISSING_AT_BROKER"
   | "UNKNOWN"
   | "UNAVAILABLE"
-  | BrokerExecutionSource
-  | string;
+  | "SIMULATED_LOCAL_FILL"
+  | "SIMULATED_LOCAL_CLOSE";
+
+export type ExecutionStatus =
+  | "SUBMISSION_PENDING"
+  | "SIGNAL_GENERATED"
+  | "RISK_APPROVED"
+  | "RISK_REJECTED"
+  | "ORDER_SUBMITTED"
+  | "ORDER_ACKNOWLEDGED"
+  | "FILL_PARTIAL"
+  | "FILL_FULL"
+  | "POSITION_OPENED"
+  | "CLOSE_REQUESTED"
+  | "CLOSE_CONFIRMED"
+  | "FAILED"
+  | "CANCELLED"
+  | "NEEDS_MANUAL_REVIEW";
+
+export type TradeIntentState =
+  | "PROPOSED"
+  | "REJECTED"
+  | "APPROVED"
+  | "SUBMITTED"
+  | "ACKNOWLEDGED"
+  | "PARTIALLY_FILLED"
+  | "FILLED"
+  | "POSITION_OPENED"
+  | "CLOSE_REQUESTED"
+  | "CLOSED"
+  | "FAILED"
+  | "CANCELLED"
+  | "EXTERNAL_POSITION_ADOPTED"
+  | "RECOVERED_POSITION_ATTACHED"
+  | "FORCED_RECONCILIATION_CLOSE";
 
 export type Trade = {
   id: number;
@@ -40,21 +73,7 @@ export type Execution = {
   strategy_name: string;
   instrument: string;
   phase: "ENTRY" | "CLOSE";
-  status:
-    | "SUBMISSION_PENDING"
-    | "SIGNAL_GENERATED"
-    | "RISK_APPROVED"
-    | "RISK_REJECTED"
-    | "ORDER_SUBMITTED"
-    | "ORDER_ACKNOWLEDGED"
-    | "FILL_PARTIAL"
-    | "FILL_FULL"
-    | "POSITION_OPENED"
-    | "CLOSE_REQUESTED"
-    | "CLOSE_CONFIRMED"
-    | "FAILED"
-    | "CANCELLED"
-    | "NEEDS_MANUAL_REVIEW";
+  status: ExecutionStatus | string;
   client_request_id?: string | null;
   broker_reference?: string | null;
   local_position_id?: number | null;
@@ -71,7 +90,7 @@ export type Execution = {
   intended_risk_amount?: number | null;
   submitted_risk_amount?: number | null;
   fill_derived_risk_amount?: number | null;
-  risk_truth_confidence?: string | null;
+  risk_truth_confidence?: RiskTruthConfidence | string | null;
   risk_reconciliation?: Record<string, unknown> | null;
   material_execution_drift: boolean;
   critical_execution_drift: boolean;
@@ -103,7 +122,7 @@ export type Position = {
   risk_percent?: number | null;
   entry_risk_amount?: number | null;
   risk_truth_confidence?: RiskTruthConfidence | string | null;
-  broker_sync_status?: BrokerSyncStatus | null;
+  broker_sync_status?: BrokerSyncStatus | string | null;
   close_execution_source?: BrokerExecutionSource | string | null;
   reason?: string | null;
   manual_override?: boolean;
@@ -1079,7 +1098,7 @@ export type AllocationCycle = {
 export type AllocationIntentExecution = {
   id: number;
   phase: string;
-  status: string;
+  status: ExecutionStatus | string;
   client_request_id?: string | null;
   broker_reference?: string | null;
   submitted_at?: string | null;
@@ -1143,7 +1162,7 @@ export type AllocationIntent = {
   family_name?: string | null;
   instrument: string;
   direction: "BUY" | "SELL";
-  state: string;
+  state: TradeIntentState | string;
   signal_time: string;
   decision_reason_code?: string | null;
   decision_reason?: string | null;
@@ -1177,7 +1196,7 @@ export type AllocationDriftIntentSummary = {
   strategy_name: string;
   family_name?: string | null;
   instrument: string;
-  state: string;
+  state: TradeIntentState | string;
   max_percent_drift: number;
   drift_metrics: Record<string, unknown>;
   updated_at: string;

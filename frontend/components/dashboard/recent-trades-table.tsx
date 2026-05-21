@@ -1,32 +1,11 @@
 import { StatusBadge } from "@/components/ui/status-badge";
 import { formatInstrumentLabel, formatSignedCurrency } from "@/lib/format";
+import { closeExecutionSourceMeta } from "@/lib/operator-vocabulary";
 import { Trade } from "@/lib/types";
 
 type RecentTradesTableProps = {
   trades: Trade[];
 };
-
-function closeSourceMeta(source?: string | null) {
-  if (source === "SIMULATED_LOCAL_CLOSE") {
-    return {
-      label: "Simulated local close",
-      tone: "warning" as const,
-      detail: "Local simulation; not broker-confirmed close truth.",
-    };
-  }
-  if (source === "BROKER_CONFIRMED") {
-    return {
-      label: "Broker confirmed",
-      tone: "positive" as const,
-      detail: "Close result came from broker-confirmed execution.",
-    };
-  }
-  return {
-    label: "Close source unknown",
-    tone: "warning" as const,
-    detail: "Backend did not provide close execution provenance.",
-  };
-}
 
 export function RecentTradesTable({ trades }: RecentTradesTableProps) {
   if (trades.length === 0) {
@@ -48,7 +27,9 @@ export function RecentTradesTable({ trades }: RecentTradesTableProps) {
           </tr>
         </thead>
         <tbody>
-          {trades.map((trade) => (
+          {trades.map((trade) => {
+            const closeSource = closeExecutionSourceMeta(trade.close_execution_source);
+            return (
             <tr key={trade.id}>
               <td data-label="Strategy"><StatusBadge label={trade.strategy_name} tone="neutral" /></td>
               <td data-label="Instrument">{formatInstrumentLabel(trade.instrument)}</td>
@@ -60,15 +41,16 @@ export function RecentTradesTable({ trades }: RecentTradesTableProps) {
               <td data-label="Close Source">
                 <div className="cell-stack">
                   <StatusBadge
-                    label={closeSourceMeta(trade.close_execution_source).label}
-                    tone={closeSourceMeta(trade.close_execution_source).tone}
+                    label={closeSource.label}
+                    tone={closeSource.tone}
                   />
-                  <span className="muted">{closeSourceMeta(trade.close_execution_source).detail}</span>
+                  <span className="muted">{closeSource.detail}</span>
                 </div>
               </td>
               <td data-label="Rationale" className="muted">{trade.reason ?? "No annotation"}</td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

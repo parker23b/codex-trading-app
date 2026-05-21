@@ -8,6 +8,7 @@ import type {
   ExposureHotspot,
   RiskTruthConfidence,
 } from "./types";
+import { riskTruthConfidenceMeta as sharedRiskTruthConfidenceMeta } from "./operator-vocabulary";
 
 export type RiskTone = "neutral" | "positive" | "warning" | "negative" | "inactive";
 export type RiskDataSection = "exposure" | "alerts" | "drift" | "cycles" | "intents" | "selectedCycle";
@@ -137,57 +138,7 @@ export function truthConfidenceMeta(value?: RiskTruthConfidence | null): {
   tone: RiskTone;
   detail: string;
 } {
-  switch (value) {
-    case "EXACT_FILL_DERIVED":
-      return {
-        label: "Exact",
-        tone: "positive",
-        detail: "Fill-derived risk was recomputed from actual execution data.",
-      };
-    case "BROKER_CONFIRMED_AVERAGE_FILL_ESTIMATED":
-      return {
-        label: "Broker Confirmed",
-        tone: "neutral",
-        detail: "Risk uses broker-confirmed average fill and size, but exact recomputation is still estimate-based.",
-      };
-    case "PARTIAL_FILL_PROVISIONAL":
-      return {
-        label: "Provisional",
-        tone: "warning",
-        detail: "Risk reflects a partial fill and may change as the order completes or is reconciled.",
-      };
-    case "SUBMITTED_EXECUTABLE_ESTIMATE":
-      return {
-        label: "Submitted Estimate",
-        tone: "warning",
-        detail: "Risk is based on broker-valid submitted size, not final fill truth.",
-      };
-    case "ALLOCATION_INTENT_ONLY":
-      return {
-        label: "Allocated Only",
-        tone: "inactive",
-        detail: "Risk still reflects allocator intent rather than broker-confirmed execution.",
-      };
-    case "INCOMPLETE_DEGRADED":
-      return {
-        label: "Degraded",
-        tone: "negative",
-        detail: "Fill truth is incomplete or inconsistent; post-trade risk remains degraded.",
-      };
-    case "SIMULATED_LOCAL_FILL":
-      return {
-        label: "Simulated",
-        tone: "warning",
-        detail: "Risk comes from a local simulated fill and is not broker-confirmed truth.",
-      };
-    case "UNKNOWN":
-    default:
-      return {
-        label: "Unknown",
-        tone: "negative",
-        detail: "Risk truth confidence is explicitly unknown or unavailable.",
-      };
-  }
+  return sharedRiskTruthConfidenceMeta(value);
 }
 
 export function alertSeverityTone(severity: AllocationAlert["severity"]): RiskTone {

@@ -43,6 +43,16 @@ class ExecutionPhase(str, Enum):
     CLOSE = "CLOSE"
 
 
+class BrokerSyncStatus(str, Enum):
+    CONFIRMED = "CONFIRMED"
+    PENDING = "PENDING"
+    MISSING_AT_BROKER = "MISSING_AT_BROKER"
+    UNKNOWN = "UNKNOWN"
+    UNAVAILABLE = "UNAVAILABLE"
+    SIMULATED_LOCAL_FILL = "SIMULATED_LOCAL_FILL"
+    SIMULATED_LOCAL_CLOSE = "SIMULATED_LOCAL_CLOSE"
+
+
 class ExecutionStatus(str, Enum):
     """
     Execution-attempt lifecycle states.
@@ -87,6 +97,11 @@ class TradeIntentState(str, Enum):
     EXTERNAL_POSITION_ADOPTED = "EXTERNAL_POSITION_ADOPTED"
     RECOVERED_POSITION_ATTACHED = "RECOVERED_POSITION_ATTACHED"
     FORCED_RECONCILIATION_CLOSE = "FORCED_RECONCILIATION_CLOSE"
+
+
+BROKER_SYNC_STATUS_VALUES = tuple(status.value for status in BrokerSyncStatus)
+EXECUTION_STATUS_VALUES = tuple(status.value for status in ExecutionStatus)
+TRADE_INTENT_STATE_VALUES = tuple(state.value for state in TradeIntentState)
 
 
 ACTIVE_INSTRUMENT_OWNERSHIP_STATES = (

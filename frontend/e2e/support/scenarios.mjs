@@ -725,6 +725,15 @@ export function buildScenarioRoutes(name) {
             pnl: -20,
           }),
         ]),
+        "GET /trades/positions": ok([
+          basePosition({
+            id: 22,
+            broker_reference: null,
+            broker_sync_status: "SIMULATED_LOCAL_FILL",
+            risk_truth_confidence: "SIMULATED_LOCAL_FILL",
+            reason: "Local simulated fill; broker confirmation is unavailable.",
+          }),
+        ]),
       });
     case "live-outage":
       return mergeRoutes({

@@ -39,6 +39,19 @@ test("AUDIT-UI-006 dashboard shows stale feed truth and keeps simulated closes d
   await expect(page.getByText("Broker confirmed")).toBeVisible();
 });
 
+test("AUDIT-LIFE-005 dashboard positions keep simulated local fill provenance distinct from broker-synced truth", async ({ page, request }) => {
+  await setScenario(request, "dashboard-stale-truth");
+
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Positions" }).click();
+  await expect(page.getByText("Simulated local fill")).toBeVisible();
+  await expect(
+    page.getByText("Open-risk provenance comes from local simulated fill behavior, not broker truth."),
+  ).toBeVisible();
+  await expect(page.getByText("Broker synced")).toHaveCount(0);
+});
+
 test("AUDIT-UI-006 live view keeps all-source outage degraded instead of nominal", async ({ page, request }) => {
   await setScenario(request, "live-outage");
 

@@ -4,6 +4,7 @@ import { useMemo } from "react";
 
 import { StatusBadge } from "@/components/ui/status-badge";
 import { formatInstrumentLabel, formatPercent, formatPrice, formatRelativeDuration, formatSignedCurrency } from "@/lib/format";
+import { brokerSyncStatusMeta } from "@/lib/operator-vocabulary";
 import { Position } from "@/lib/types";
 
 type OpenPositionsTableProps = {
@@ -33,7 +34,9 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
           </tr>
         </thead>
         <tbody>
-          {activeRows.map((position) => (
+          {activeRows.map((position) => {
+            const syncMeta = brokerSyncStatusMeta(position.broker_sync_status);
+            return (
             <tr key={position.id}>
               <td data-label="Instrument">
                 <div className="cell-stack">
@@ -47,7 +50,13 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
                   {position.reason ? <span className="muted">{position.reason}</span> : null}
                 </div>
               </td>
-              <td data-label="Broker Ref"><span className="muted">{position.broker_reference ?? "pending"}</span></td>
+              <td data-label="Broker Ref">
+                <div className="cell-stack">
+                  <span className="muted">{position.broker_reference ?? "pending"}</span>
+                  <StatusBadge label={syncMeta.label} tone={syncMeta.tone} />
+                  <span className="muted">{syncMeta.detail}</span>
+                </div>
+              </td>
               <td data-label="Duration">{formatRelativeDuration(position.open_time)}</td>
               <td data-label="PnL" className={(position.unrealized_pnl ?? 0) >= 0 ? "value-positive live-pulse" : "value-negative live-pulse"}>
                 <div className="cell-stack">
@@ -74,7 +83,8 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
                 <span className="muted">Read-only in dashboard</span>
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

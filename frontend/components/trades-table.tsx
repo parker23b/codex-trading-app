@@ -1,4 +1,5 @@
 import { StatusBadge } from "@/components/ui/status-badge";
+import { closeExecutionSourceMeta } from "@/lib/operator-vocabulary";
 import { Trade } from "@/lib/types";
 
 type TradesTableProps = {
@@ -11,28 +12,6 @@ function formatNumber(value: number) {
 
 function formatSignedNumber(value: number) {
   return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
-}
-
-function closeSourceMeta(source?: string | null) {
-  if (source === "SIMULATED_LOCAL_CLOSE") {
-    return {
-      label: "Simulated local close",
-      tone: "warning" as const,
-      detail: "Local simulation; not broker-confirmed close truth.",
-    };
-  }
-  if (source === "BROKER_CONFIRMED") {
-    return {
-      label: "Broker confirmed",
-      tone: "positive" as const,
-      detail: "Close result came from broker-confirmed execution.",
-    };
-  }
-  return {
-    label: "Close source unknown",
-    tone: "warning" as const,
-    detail: "Backend did not provide close execution provenance.",
-  };
 }
 
 export function TradesTable({ trades }: TradesTableProps) {
@@ -55,7 +34,9 @@ export function TradesTable({ trades }: TradesTableProps) {
           </tr>
         </thead>
         <tbody>
-          {trades.map((trade) => (
+          {trades.map((trade) => {
+            const closeSource = closeExecutionSourceMeta(trade.close_execution_source);
+            return (
             <tr key={trade.id}>
               <td data-label="Strategy">{trade.strategy_name}</td>
               <td data-label="Instrument">{trade.instrument}</td>
@@ -67,15 +48,16 @@ export function TradesTable({ trades }: TradesTableProps) {
               <td data-label="Close Source">
                 <div className="cell-stack">
                   <StatusBadge
-                    label={closeSourceMeta(trade.close_execution_source).label}
-                    tone={closeSourceMeta(trade.close_execution_source).tone}
+                    label={closeSource.label}
+                    tone={closeSource.tone}
                   />
-                  <span className="muted">{closeSourceMeta(trade.close_execution_source).detail}</span>
+                  <span className="muted">{closeSource.detail}</span>
                 </div>
               </td>
               <td data-label="PnL" className={trade.pnl >= 0 ? "value-positive" : "value-negative"}>{formatSignedNumber(trade.pnl)}</td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

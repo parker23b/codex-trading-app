@@ -13,6 +13,7 @@ import {
   resolveAllocationAlert,
 } from "@/lib/api";
 import { formatCurrency, formatDateTime, formatInstrumentLabel, formatPercent, formatPrice, formatRelativeDuration } from "@/lib/format";
+import { tradeIntentStateMeta } from "@/lib/operator-vocabulary";
 import {
   alertSeverityTone,
   buildRiskLoadQuality,
@@ -551,7 +552,11 @@ export function RiskAllocationLive({
                           </div>
                         ),
                       },
-                      { key: "state", header: "State", render: (row) => row.state.replaceAll("_", " ") },
+                      {
+                        key: "state",
+                        header: "State",
+                        render: (row) => tradeIntentStateMeta(row.state).label,
+                      },
                       { key: "risk", header: "Allocated Risk", render: (row) => row.allocated_risk_percent != null ? formatPercent(row.allocated_risk_percent) : "n/a" },
                       { key: "reason", header: "Reason", render: (row) => String(row.decision_reason ?? row.decision_reason_code ?? "none") },
                     ]}
