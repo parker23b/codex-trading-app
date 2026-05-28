@@ -18,23 +18,23 @@ Safe local use means:
 
 The current blocking themes are:
 
-- simulated-vs-broker-confirmed provenance is still incomplete across broader frontend/browser surfaces, even though dashboard trade truth and dashboard position sync truth now have explicit simulated/local browser coverage
-- backend/frontend enum parity is stronger for the covered vocabulary slice (`risk_truth_confidence`, `BrokerExecutionSource`, `broker_sync_status`, `ExecutionStatus`, and `TradeIntentState`), but broader operator-surface evidence is still incomplete
+- simulated-vs-broker-confirmed provenance is still incomplete across broader frontend/browser surfaces, even though dashboard trade truth, dashboard position sync truth, and events-surface simulated-vs-broker-confirmed close wording now have explicit browser coverage
+- backend/frontend enum parity is stronger for the covered vocabulary slice (`risk_truth_confidence`, `BrokerExecutionSource`, `broker_sync_status`, `ExecutionStatus`, and `TradeIntentState`), but broader operator-surface evidence is still incomplete even after the added events/live/control-plane/strategies/coverage browser slice
 - any future operator-critical raw dict/list routes still need explicit contract ownership even though the currently known frontend-consumed route boundary is now modeled
 - current backend durable-audit coverage is now inventory-backed for the present mutation, broker-action, and safety-critical background path set; remaining best-effort events are intentional informational paths, and future broker-action/route risk is now handled by guard tests instead of remaining a present-tense backend blocker
-- frontend operator truth now has selected browser/e2e coverage for stale, degraded, manual-review, passive-vs-mutation, simulated-vs-broker-confirmed, and mutation-failure states across dashboard/live/risk/strategies/AIMEE/control-plane/coverage/markets, but broad browser/e2e coverage is still incomplete
+- frontend operator truth now has selected browser/e2e coverage for stale, degraded, manual-review, passive-vs-mutation, simulated-vs-broker-confirmed, mutation-failure, events attention, test-only reset gating, and telemetry degradation states across events/dashboard/live/risk/strategies/AIMEE/control-plane/coverage/markets, but broad browser/e2e coverage is still incomplete
 - covered backend logging/API-error/domain-event redaction is now in place, covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position payloads now sanitize free-text and detail fields before commit, repo-level secret/history scan guardrails now block common local secret/SQLite/dump/test-artifact commits, dependency lock/audit tooling is now repeatable for Python and npm, and versioned Alembic migrations plus SQLite drift checks now exist. Health and telemetry now expose explicit audit-write, polling-fallback, stale-stream, stream-degraded, and runtime-degraded state, but broader secrets hygiene, supply-chain provenance, non-SQLite migration evidence, functional raw-identifier columns, historical cleanup, and durable multi-process observability remain below readiness grade
 
 The canonical blocker list is in [audit-status.md](audit-status.md).
 
 ## Known Risks
 
-- Simulated/local execution and close provenance is not yet proved across broader frontend/browser operator surfaces outside the covered dashboard trade and dashboard position sync slices.
+- Simulated/local execution and close provenance is not yet proved across broader frontend/browser operator surfaces outside the covered dashboard trade, dashboard position sync, and narrow events wording slices.
 - Broader backend/frontend enum-parity proof is still incomplete even though the covered vocabulary slice now includes `risk_truth_confidence`, `BrokerExecutionSource`, `broker_sync_status`, `ExecutionStatus`, and `TradeIntentState`.
 - Future raw operator-critical routes would make contract drift easier to miss even though the currently known frontend-consumed route boundary is now modeled.
 - The remaining backend audit risk is no longer “unknown current mutation/background paths”; it is future-path discipline plus platform observability aggregation.
 - Candidate-only strategy events are intentionally best-effort informational, not lifecycle audit proof, even when they remain useful for observability.
-- Browser/e2e operator-state coverage is improved, including selected manual-review, control-plane mismatch, and market-data fallback truth, but it is still too narrow for readiness claims.
+- Browser/e2e operator-state coverage is improved, including selected manual-review, control-plane mismatch, events attention/test-only truth, telemetry degradation, and market-data fallback/stale truth, but it is still too narrow for readiness claims.
 - Database evolution now uses Alembic plus migration/drift tests, but existing unversioned non-SQLite databases still require explicit manual upgrade and SQLite expression-index drift still depends on targeted checks.
 - Python and npm dependency locking plus vulnerability gates are now repeatable, but the repo still lacks stronger supply-chain controls such as hash-verified Python installs, SBOM/provenance generation, and non-Python/Node dependency scanning.
 - Covered logs, mirrored domain events, IG adapter failures, and operator-facing API errors now redact tokens, account identifiers, broker references, raw adapter payloads, and tracebacks, and covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position free-text and detail fields now redact the same patterns before commit. Required audit-write failures now also surface in health/telemetry as degraded state, but remaining readiness gaps still include raw identifier columns required for lifecycle authority, broader secrets hygiene, and durable multi-process observability. Intentional best-effort informational events are not counted as durable lifecycle audit proof.
@@ -48,6 +48,7 @@ Before live or demo broker dealing, the app needs at least:
 - complete modeled/documented contracts for any future operator-critical raw response families
 - multi-process/platform observability that aggregates audit-write, polling-fallback, stale-stream, and runtime degradation across workers rather than only within the current process
 - browser/e2e evidence for degraded, stale, simulated, unknown, manual-review, and mutation-failure operator states
+- browser/e2e evidence for broader events, mutation, provenance, and freshness permutations beyond the current selected slices
 - migration, dependency, redaction, identifier-minimization, and secrets controls that are strong enough for broker-connected operation
 - stronger supply-chain provenance than the current lock-and-audit baseline, including Python hash verification or an equivalent integrity mechanism plus broader dependency scanning
 - regression tests for every fixed P0/P1 behaviour that still lacks route, frontend, or full-stack evidence
@@ -216,3 +217,40 @@ Remaining enum/provenance gaps:
 - broader browser coverage across control-plane, events, markets, and additional simulated/local surfaces
 - additional operator-facing vocabularies outside this slice
 - any future frontend-consumed route family that bypasses the shared vocabulary helpers and parity tests
+
+## 2026-05-21 Browser Operator Truth Expansion
+
+This slice expands browser-level operator truth coverage without claiming full frontend readiness.
+
+- Scenarios added:
+  - events attention state for audit-write degradation
+  - hidden-by-default test-only destructive reset, plus explicit enable path with visible destructive/test-only copy
+  - live telemetry degradation truth for audit-write, polling fallback, stale stream, stream degradation, runtime degradation, and per-process telemetry limitation
+  - control-plane governance mutation pending/error truth with backend `detail` preservation
+  - strategies execution-feed blocked-entry/no-order-attempt truth
+  - coverage stale-stream truth distinct from polling fallback and healthy streaming
+- Surfaces covered:
+  - `events`
+  - `live`
+  - `control-plane`
+  - `strategies`
+  - `coverage`
+- Fixtures used:
+  - explicit Playwright scenario fixtures in `frontend/e2e/support/scenarios.mjs`
+  - event fixtures with severity, correlation, lifecycle references, audit degradation payloads, and simulated-vs-broker-confirmed wording
+  - telemetry fixtures with explicit degradation booleans, counts, reason codes, and per-process limitation copy
+  - delayed mutation responses for pending-plus-error control-plane flows
+  - stale vs polling-fallback feed-state fixtures with no healthy default fallback objects
+- Finding status after this slice:
+  - `AUDIT-UI-006`: narrowed, still open
+  - `AUDIT-UI-004`: narrowed, still open
+  - `AUDIT-UI-002`: narrowed, still open
+  - `AUDIT-LIFE-005`: narrowed, still open
+  - `AUDIT-005`: narrowed, still open
+  - `AUDIT-OBS-001`: narrowed for operator visibility, still open as a multi-process/platform gap
+- Remaining frontend/browser gaps:
+  - broader events route-contract and event-detail breadth
+  - strategy start/stop, shortlist/watchlist, and other mutation success/retry/refresh permutations
+  - additional simulated/local provenance surfaces beyond the covered dashboard and events slices
+  - broader freshness/unknown/manual-review permutations across dashboard, risk, and live summaries
+  - complete browser breadth for all operator-critical vocabularies and enum families

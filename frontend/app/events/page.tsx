@@ -36,6 +36,7 @@ const EVENT_TYPE_OPTIONS = [
 const CATEGORY_OPTIONS = ["strategy", "risk", "execution", "reconciliation", "operator", "health"] as const;
 const SEVERITY_OPTIONS = ["info", "warning", "error"] as const;
 const TESTING_CONTROLS_ENABLED = process.env.NEXT_PUBLIC_TESTING_CONTROLS_ENABLED === "true";
+const TESTING_CONTROLS_QUERY = "testing_controls";
 
 type EventsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -97,6 +98,26 @@ function payloadPreview(payload: Record<string, unknown>) {
   return text.length > 180 ? `${text.slice(0, 180)}...` : text;
 }
 
+function hasAuditWriteDegradation(event: Awaited<ReturnType<typeof getDomainEvents>>[number]) {
+  const payloadText = JSON.stringify(event.payload_json).toLowerCase();
+  return (
+    event.event_type === "health.audit_write_degraded"
+    || event.title.toLowerCase().includes("audit")
+    || (event.message ?? "").toLowerCase().includes("audit write")
+    || payloadText.includes("audit_write_degraded")
+  );
+}
+
+function lifecycleReferences(event: Awaited<ReturnType<typeof getDomainEvents>>[number]) {
+  return [
+    event.correlation_id ? `Correlation · ${event.correlation_id}` : null,
+    event.runtime_id ? `Runtime · ${event.runtime_id}` : null,
+    event.position_id != null ? `Position · ${event.position_id}` : null,
+    event.trade_id != null ? `Trade · ${event.trade_id}` : null,
+    event.execution_id != null ? `Execution · ${event.execution_id}` : null,
+  ].filter(Boolean) as string[];
+}
+
 export default async function EventsPage({ searchParams }: EventsPageProps) {
   const resolvedParams = (await searchParams) ?? {};
   const tab = readParam(resolvedParams.tab) === "errors" ? "errors" : "all";
@@ -110,6 +131,9 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
   const selectedId = readParam(resolvedParams.selected);
   const limitValue = readParam(resolvedParams.limit);
   const limit = Number.parseInt(limitValue || "150", 10);
+  const testingControlsExplicitlyEnabled =
+    TESTING_CONTROLS_ENABLED
+    && ["1", "true", "enabled", "show"].includes(readParam(resolvedParams[TESTING_CONTROLS_QUERY]).toLowerCase());
 
   const events = await getDomainEvents({
     limit: Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 500) : 150,
@@ -123,6 +147,8 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
   });
 
   const selectedEvent = selectedId ? (events.find((event) => String(event.id) === selectedId) ?? null) : null;
+  const attentionEvents = events.filter((event) => event.severity === "warning" || event.severity === "error");
+  const auditWriteDegradedEvent = events.find(hasAuditWriteDegradation) ?? null;
 
   return (
     <main className="console-page console-page--dense">
@@ -135,12 +161,49 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
             Errors
           </Link>
         </div>
-        {TESTING_CONTROLS_ENABLED ? (
+        {testingControlsExplicitlyEnabled ? (
           <div className="toolbar-group">
             <ResetHistoryButton />
           </div>
         ) : null}
       </StickyToolbar>
+
+      <Panel
+        title="Operator Attention"
+        priority="primary"
+        tone={auditWriteDegradedEvent ? "warning" : attentionEvents.length ? "negative" : "neutral"}
+        compact
+      >
+        <div className="detail-stack">
+          <div className="summary-bar">
+            <div className="summary-bar__item">
+              <span>Attention events</span>
+              <strong>{attentionEvents.length}</strong>
+              <em>{attentionEvents.length ? "warning/error rows loaded" : "no current warning/error rows"}</em>
+            </div>
+            <div className="summary-bar__item">
+              <span>Audit trail</span>
+              <strong>{auditWriteDegradedEvent ? "Degraded" : "No active audit degradation event"}</strong>
+              <em>{auditWriteDegradedEvent?.correlation_id ?? "event context only"}</em>
+            </div>
+            <div className="summary-bar__item">
+              <span>Testing reset</span>
+              <strong>{testingControlsExplicitlyEnabled ? "Explicitly enabled" : "Hidden by default"}</strong>
+              <em>requires config plus explicit enable</em>
+            </div>
+          </div>
+
+          {auditWriteDegradedEvent ? (
+            <div className="console-alert console-alert--warning">
+              Audit trail degraded. {auditWriteDegradedEvent.message ?? auditWriteDegradedEvent.title}
+            </div>
+          ) : null}
+
+          <div className="status-note status-note--inline">
+            Warning/error events stay in attention state. Hidden testing controls do not appear unless they are explicitly enabled for dev/test use.
+          </div>
+        </div>
+      </Panel>
 
       <Panel title="Filters" priority="passive" tone="inactive" compact>
         <form className="console-form-grid" method="get">
@@ -316,6 +379,15 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
                 <span className="console-kicker">Summary</span>
                 <p>{selectedEvent.title}</p>
                 <p>{selectedEvent.message ?? "No message provided."}</p>
+              </div>
+
+              <div className="detail-block">
+                <span className="console-kicker">Lifecycle References</span>
+                {lifecycleReferences(selectedEvent).length ? (
+                  lifecycleReferences(selectedEvent).map((reference) => <p key={reference}>{reference}</p>)
+                ) : (
+                  <p>No lifecycle references were recorded for this event.</p>
+                )}
               </div>
 
               <div className="detail-block">

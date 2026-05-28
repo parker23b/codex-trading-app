@@ -30,7 +30,7 @@ export default defineConfig({
       timeout: 120_000,
       env: {
         NEXT_PUBLIC_API_BASE_URL: mockApiURL,
-        NEXT_PUBLIC_TESTING_CONTROLS_ENABLED: "false",
+        NEXT_PUBLIC_TESTING_CONTROLS_ENABLED: "true",
       },
     },
   ],

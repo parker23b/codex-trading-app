@@ -39,6 +39,31 @@ test("AUDIT-UI-006 dashboard shows stale feed truth and keeps simulated closes d
   await expect(page.getByText("Broker confirmed")).toBeVisible();
 });
 
+test("AUDIT-UI-006 events view marks audit-write degradation as attention and keeps destructive reset hidden by default", async ({ page, request }) => {
+  await setScenario(request, "events-audit-degraded");
+
+  await page.goto("/events?selected=71");
+
+  await expect(page.getByText("Operator Attention")).toBeVisible();
+  await expect(page.getByText("Audit trail degraded. Required audit writes are failing", { exact: false })).toBeVisible();
+  await expect(page.getByText("Simulated local close kept distinct from broker-confirmed truth")).toBeVisible();
+  await expect(page.getByText("Broker confirmed close")).toBeVisible();
+  await expect(page.getByText("Correlation · audit-71")).toBeVisible();
+  await expect(page.getByText("Runtime · runtime-breakout-1")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Clear Test History (Test Only)" })).toHaveCount(0);
+});
+
+test("UI-009 events reset control stays hidden until explicitly enabled and remains visibly test-only and destructive", async ({ page, request }) => {
+  await setScenario(request, "events-audit-degraded");
+
+  await page.goto("/events?testing_controls=enabled");
+
+  await expect(page.getByRole("button", { name: "Clear Test History (Test Only)" })).toBeVisible();
+  await expect(page.getByText("Test-only destructive reset.")).toBeVisible();
+  await expect(page.getByText("Clears persisted trades, executions, reviews, events, closed positions, and stopped runtimes.")).toBeVisible();
+  await expect(page.getByText("Explicitly enabled")).toBeVisible();
+});
+
 test("AUDIT-LIFE-005 dashboard positions keep simulated local fill provenance distinct from broker-synced truth", async ({ page, request }) => {
   await setScenario(request, "dashboard-stale-truth");
 
@@ -61,6 +86,20 @@ test("AUDIT-UI-006 live view keeps all-source outage degraded instead of nominal
   await expect(page.getByText("Some live sources are degraded", { exact: false })).toBeVisible();
   await expect(page.getByText("Source coverage degraded", { exact: false })).toBeVisible();
   await expect(page.getByText("Unusual activity cannot be fully evaluated", { exact: false })).toBeVisible();
+  await expect(page.getByText("Nominal live posture")).toHaveCount(0);
+});
+
+test("AUDIT-OBS-001 live view renders audit-write, polling fallback, stale stream, stream, and runtime degradations as attention", async ({ page, request }) => {
+  await setScenario(request, "live-telemetry-degradations");
+
+  await page.goto("/live");
+
+  await expect(page.getByRole("button", { name: /Audit trail persistence degraded/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Polling fallback is active/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Market-data stream stale/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Runtime health degraded/i })).toBeVisible();
+  await expect(page.getByText("Telemetry degraded: audit trail persistence degraded, polling fallback active, market-data stream stale, stream path degraded, runtime price freshness stale.")).toBeVisible();
+  await expect(page.getByText("Telemetry is per-process and not aggregated across multiple workers.")).toBeVisible();
   await expect(page.getByText("Nominal live posture")).toHaveCount(0);
 });
 
@@ -217,4 +256,40 @@ test("AUDIT-UI-004 control-plane mutation refresh failure preserves backend deta
   await expect(page.getByRole("button", { name: "Pausing..." })).toBeVisible();
   await expect(page.getByText("control-plane refresh failed after operator control mutation")).toBeVisible();
   await expect(page.getByText("Autonomy paused.")).toHaveCount(0);
+});
+
+test("AUDIT-UI-004 control-plane governance mutation failure preserves backend detail and avoids clean success copy", async ({ page, request }) => {
+  await setScenario(request, "control-plane-governance-mutation-failure");
+
+  await page.goto("/control-plane");
+  await page.getByRole("button", { name: "Disallow" }).click();
+
+  await expect(page.getByRole("button", { name: "Updating..." }).first()).toBeVisible();
+  await expect(page.getByText("governance mutation audit persistence failed for Breakout")).toBeVisible();
+  await expect(page.getByText("Breakout auto deploy disallowed.")).toHaveCount(0);
+});
+
+test("FLOW-ENTRY-001 strategies execution feed keeps blocked entry reason and no-order-attempt truth visible", async ({ page, request }) => {
+  await setScenario(request, "strategies-entry-blocked-truth");
+
+  await page.goto("/strategies");
+  await page.getByRole("button", { name: "Execution Feed" }).click();
+
+  await expect(page.getByText("RISK REJECTED")).toBeVisible();
+  await expect(page.getByText("SUBMISSION PENDING")).toBeVisible();
+  await expect(page.getByRole("cell", { name: "n/a" }).first()).toBeVisible();
+  await expect(page.getByText("stale_market_data blocked a new order attempt.")).toBeVisible();
+  await expect(page.getByText("Position opened")).toHaveCount(0);
+});
+
+test("FLOW-MARKET-DATA-001 coverage view keeps stale stream distinct from polling fallback and fresh streaming truth", async ({ page, request }) => {
+  await setScenario(request, "coverage-stale-stream");
+
+  await page.goto("/coverage");
+
+  await expect(page.getByLabel("Stale market data")).toBeVisible();
+  await expect(page.getByText("The latest live tick is stale and should not be treated as fresh stream truth.")).toBeVisible();
+  await expect(page.getByText("92.0s")).toBeVisible();
+  await expect(page.getByText("Polling fallback")).toHaveCount(0);
+  await expect(page.getByText("Streaming", { exact: true })).toHaveCount(0);
 });

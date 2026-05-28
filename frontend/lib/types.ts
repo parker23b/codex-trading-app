@@ -602,6 +602,8 @@ export type OperationalTelemetry = {
   last_price_age_ms?: number | null;
   last_reconciliation?: string | null;
   last_reconciliation_age_ms?: number | null;
+  last_audit_write_failure?: string | null;
+  last_audit_write_failure_age_ms?: number | null;
   stream_connected: boolean;
   stream_last_tick_at?: string | null;
   stream_last_tick_age_ms?: number | null;
@@ -617,6 +619,13 @@ export type OperationalTelemetry = {
   exit_block_reason?: string | null;
   open_risk_management_state?: string;
   open_risk_management_reason?: string | null;
+  audit_write_degraded?: boolean;
+  polling_fallback_active?: boolean;
+  polling_fallback_active_instrument_count?: number;
+  stale_stream_instrument_count?: number;
+  stream_degraded?: boolean;
+  runtime_degraded?: boolean;
+  degradation_reasons?: string[];
   broker_latency_ms?: number | null;
   runtime_count: number;
   active_runtime_count: number;
@@ -625,6 +634,7 @@ export type OperationalTelemetry = {
   reconciliation_mismatches: number;
   order_failures_last_5m: number;
   rejected_orders_last_5m: number;
+  audit_write_failures_last_5m?: number;
   strategies_paused_by_health: number;
 };
 

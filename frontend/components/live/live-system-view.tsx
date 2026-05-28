@@ -413,7 +413,11 @@ export function LiveSystemView({ initialData, initialErrors }: LiveSystemViewPro
       {model.dataWarnings.length ? (
         <section className="live-data-warning" role="status" aria-live="polite">
           <strong>Some live sources are degraded.</strong>
-          <span>{model.dataWarnings[0]}</span>
+          <div className="live-inspector__section">
+            {model.dataWarnings.map((warning) => (
+              <span key={warning}>{warning}</span>
+            ))}
+          </div>
         </section>
       ) : null}
 

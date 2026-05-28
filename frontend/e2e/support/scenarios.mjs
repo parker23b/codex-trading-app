@@ -28,6 +28,8 @@ function baseTelemetry(overrides = {}) {
     last_price_age_ms: 1200,
     last_reconciliation: TIMESTAMP,
     last_reconciliation_age_ms: 5400,
+    last_audit_write_failure: null,
+    last_audit_write_failure_age_ms: null,
     stream_connected: true,
     stream_last_tick_at: TIMESTAMP,
     stream_last_tick_age_ms: 1200,
@@ -43,6 +45,13 @@ function baseTelemetry(overrides = {}) {
     exit_block_reason: null,
     open_risk_management_state: "MANAGED",
     open_risk_management_reason: "Open risk is managed.",
+    audit_write_degraded: false,
+    polling_fallback_active: false,
+    polling_fallback_active_instrument_count: 0,
+    stale_stream_instrument_count: 0,
+    stream_degraded: false,
+    runtime_degraded: false,
+    degradation_reasons: [],
     broker_latency_ms: 48,
     runtime_count: 1,
     active_runtime_count: 1,
@@ -51,6 +60,7 @@ function baseTelemetry(overrides = {}) {
     reconciliation_mismatches: 0,
     order_failures_last_5m: 0,
     rejected_orders_last_5m: 0,
+    audit_write_failures_last_5m: 0,
     strategies_paused_by_health: 0,
     ...overrides,
   };
@@ -1156,6 +1166,231 @@ export function buildScenarioRoutes(name) {
           }),
           400,
         ),
+      });
+    case "events-audit-degraded":
+      return mergeRoutes({
+        "GET /events": ok([
+          baseEvent({
+            id: 71,
+            event_type: "health.audit_write_degraded",
+            severity: "error",
+            title: "Audit trail degraded",
+            message: "Required audit writes are failing; operator evidence is degraded until persistence recovers.",
+            source: "audit",
+            correlation_id: "audit-71",
+            runtime_id: "runtime-breakout-1",
+            payload_json: {
+              degradation_reasons: ["audit_write_degraded"],
+              audit_write_failures_last_5m: 3,
+            },
+          }),
+          baseEvent({
+            id: 72,
+            event_type: "execution.position_closed",
+            category: "execution",
+            severity: "warning",
+            title: "Simulated local close kept distinct from broker-confirmed truth",
+            message: "Local simulation recorded a close while broker confirmation remained unavailable.",
+            strategy_name: "Breakout",
+            instrument: "CS.D.EURUSD.MINI.IP",
+            correlation_id: "close-sim-72",
+            execution_id: 72,
+            trade_id: 12,
+            payload_json: {
+              close_execution_source: "SIMULATED_LOCAL_CLOSE",
+            },
+          }),
+          baseEvent({
+            id: 73,
+            event_type: "execution.position_closed",
+            category: "execution",
+            severity: "info",
+            title: "Broker confirmed close",
+            message: "Broker confirmation completed for the closing trade.",
+            strategy_name: "Breakout",
+            instrument: "CS.D.GBPUSD.MINI.IP",
+            correlation_id: "close-broker-73",
+            execution_id: 73,
+            trade_id: 13,
+            payload_json: {
+              close_execution_source: "BROKER_CONFIRMED",
+            },
+          }),
+        ]),
+      });
+    case "live-telemetry-degradations":
+      return mergeRoutes({
+        "GET /system/telemetry": ok(
+          baseTelemetry({
+            status: "degraded",
+            last_audit_write_failure: "2026-05-17T09:58:30.000Z",
+            last_audit_write_failure_age_ms: 90000,
+            stream_connected: true,
+            stream_last_tick_at: "2026-05-17T09:58:00.000Z",
+            stream_last_tick_age_ms: 120000,
+            feed_source_state: "STALE",
+            feed_health_state: "DEGRADED",
+            entry_eligible: false,
+            entry_block_reason: "polling_fallback",
+            audit_write_degraded: true,
+            polling_fallback_active: true,
+            polling_fallback_active_instrument_count: 2,
+            stale_stream_instrument_count: 1,
+            stream_degraded: true,
+            runtime_degraded: true,
+            degradation_reasons: [
+              "audit_write_degraded",
+              "polling_fallback_active",
+              "stream_stale",
+              "stream_degraded",
+              "runtime_price_stale",
+            ],
+            stale_runtime_count: 1,
+            stale_price_runtime_count: 1,
+            audit_write_failures_last_5m: 3,
+          }),
+        ),
+        "GET /health/stream": ok(
+          baseStreamHealth({
+            connected: true,
+            last_tick_at: "2026-05-17T09:58:00.000Z",
+            last_status: "Stale",
+          }),
+        ),
+      });
+    case "control-plane-governance-mutation-failure":
+      return mergeRoutes({
+        "PUT /control-plane/governance/Breakout": delayed(
+          response(503, {
+            detail: "governance mutation audit persistence failed for Breakout",
+          }),
+          400,
+        ),
+      });
+    case "strategies-entry-blocked-truth":
+      return mergeRoutes({
+        "GET /strategies": ok([
+          baseStrategy({
+            active_runtimes: [],
+            open_positions: [],
+          }),
+        ]),
+        "GET /executions": ok([
+          baseExecution({
+            id: 81,
+            status: "RISK_REJECTED",
+            broker_reference: null,
+            reason: "stale_market_data blocked a new order attempt.",
+            error_message: "stale_market_data blocked a new order attempt.",
+            details: {
+              direction: "BUY",
+            },
+          }),
+          baseExecution({
+            id: 82,
+            status: "SUBMISSION_PENDING",
+            broker_reference: null,
+            reason: "Entry request is still pending broker submission.",
+            details: {
+              direction: "BUY",
+            },
+          }),
+        ]),
+      });
+    case "coverage-stale-stream":
+      return mergeRoutes({
+        "GET /coverage/summary": ok(
+          baseCoverageSummary({
+            streaming: {
+              active_instruments: [
+                {
+                  instrument: "CS.D.EURUSD.MINI.IP",
+                  tier: "TIER1",
+                  status: "ACTIVE",
+                  asset_class: "FOREX",
+                  pinned: false,
+                  reason: "strategy_watchlist",
+                  reason_detail: null,
+                  protective: false,
+                  priority_score: 1,
+                  requested_frequency: "1s",
+                  promotion_expires_at: null,
+                  last_streamed_at: TIMESTAMP,
+                  last_refreshed_at: TIMESTAMP,
+                  streamed: true,
+                },
+              ],
+              execution_readiness: [
+                {
+                  instrument: "CS.D.EURUSD.MINI.IP",
+                  is_ok: false,
+                  market_open: true,
+                  tradable: true,
+                  quote_fresh: false,
+                  spread_ok: true,
+                  session_valid: true,
+                  dealing_allowed: true,
+                  last_price_age_ms: 92000,
+                  spread: null,
+                  reason: "stale_market_data",
+                },
+              ],
+              desired_instruments: ["CS.D.EURUSD.MINI.IP"],
+              pinned_instruments: [],
+              capped_instruments: [],
+              asset_class_usage: {},
+            },
+          }),
+        ),
+        "GET /system/telemetry": ok(
+          baseTelemetry({
+            status: "degraded",
+            stream_connected: true,
+            stream_last_tick_at: "2026-05-17T09:58:00.000Z",
+            stream_last_tick_age_ms: 92000,
+            feed_source_state: "STALE",
+            feed_health_state: "DEGRADED",
+            entry_eligible: false,
+            entry_block_reason: "stale_market_data",
+            stale_stream_instrument_count: 1,
+            stream_degraded: true,
+            degradation_reasons: ["stream_stale", "stream_degraded"],
+          }),
+        ),
+        "GET /market-data/feed-state": ok({
+          generated_at: TIMESTAMP,
+          instruments: [
+            {
+              instrument: "CS.D.EURUSD.MINI.IP",
+              stream_status: "STALE",
+              stream_connected: true,
+              stream_enabled: true,
+              streaming_now: true,
+              desired: true,
+              capped: false,
+              last_tick_at: "2026-05-17T09:58:00.000Z",
+              last_tick_age_ms: 92000,
+              spread: null,
+              price_source: "STREAM",
+              stream_reason: {
+                code: "stale_market_data",
+                label: "Stale",
+                operator_action: "The latest live tick is stale and should not be treated as fresh stream truth.",
+              },
+              market_status: null,
+              market_error: null,
+              entry_eligibility: "BLOCKED",
+              entry_eligibility_reason: {
+                code: "stale_market_data",
+                label: "Stale market data",
+                operator_action: "Entry is blocked until fresh live ticks return.",
+              },
+              strategies_may_evaluate: false,
+              active_strategy_runtime_count: 1,
+              watchlist_entry: null,
+            },
+          ],
+        }),
       });
     default:
       return mergeRoutes({});

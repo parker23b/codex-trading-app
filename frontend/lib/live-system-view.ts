@@ -242,6 +242,29 @@ function summarizeReason(value?: string | null) {
   return toTitleCase(value);
 }
 
+function degradationReasonLabel(reason: string) {
+  switch (reason) {
+    case "audit_write_degraded":
+      return "audit trail persistence degraded";
+    case "broker_disconnected":
+      return "broker connectivity degraded";
+    case "polling_fallback_active":
+      return "polling fallback active";
+    case "stream_stale":
+      return "market-data stream stale";
+    case "stream_degraded":
+      return "stream path degraded";
+    case "runtime_heartbeat_stale":
+      return "runtime heartbeat stale";
+    case "runtime_price_stale":
+      return "runtime price freshness stale";
+    case "runtime_paused_or_restricted":
+      return "runtime operating under restriction";
+    default:
+      return summarizeReason(reason) ?? reason;
+  }
+}
+
 function executionTone(execution: Execution): LiveTone {
   if (execution.requires_manual_review) {
     return "negative";
@@ -676,6 +699,89 @@ function buildAnomalies(resources: LiveDataResources) {
   }
 
   if (!resources.errors.telemetry) {
+    if (resources.telemetry.audit_write_degraded) {
+      items.push({
+        id: "anomaly:telemetry:audit-write",
+        title: "Audit trail persistence degraded",
+        explanation:
+          resources.telemetry.last_audit_write_failure_age_ms != null
+            ? `Recent required audit writes failed ${formatAgeMs(resources.telemetry.last_audit_write_failure_age_ms)} ago.`
+            : `${resources.telemetry.audit_write_failures_last_5m ?? 0} audit write failure${resources.telemetry.audit_write_failures_last_5m === 1 ? "" : "s"} were recorded in the last 5 minutes.`,
+        whyItMatters: "Operator evidence is weaker when required audit writes are failing, even if runtime behaviour is still continuing.",
+        affects: ["Audit evidence", "Operator confidence"],
+        tone: "negative",
+        severityRank: 4,
+        timestamp: resources.telemetry.last_audit_write_failure ?? resources.telemetry.last_heartbeat,
+        source: "Operational telemetry",
+        entityType: "system",
+        entityId: "system",
+      });
+    }
+
+    if (resources.telemetry.polling_fallback_active) {
+      items.push({
+        id: "anomaly:telemetry:polling-fallback",
+        title: "Polling fallback is active",
+        explanation: `${resources.telemetry.polling_fallback_active_instrument_count ?? 0} instrument${resources.telemetry.polling_fallback_active_instrument_count === 1 ? "" : "s"} are relying on fallback polling rather than healthy streaming.`,
+        whyItMatters: "Fallback polling can preserve observation, but it is not the same thing as live streaming truth for execution readiness.",
+        affects: ["Market-data freshness", "Entry readiness"],
+        tone: "warning",
+        severityRank: 3,
+        timestamp: resources.telemetry.last_heartbeat,
+        source: "Operational telemetry",
+        entityType: "system",
+        entityId: "system",
+      });
+    }
+
+    if ((resources.telemetry.stale_stream_instrument_count ?? 0) > 0) {
+      items.push({
+        id: "anomaly:telemetry:stale-stream",
+        title: "Market-data stream stale",
+        explanation: `${resources.telemetry.stale_stream_instrument_count} instrument${resources.telemetry.stale_stream_instrument_count === 1 ? "" : "s"} currently have stale live stream freshness.`,
+        whyItMatters: "Observation can look connected while price freshness is already unsafe for interpretation or entry.",
+        affects: ["Price freshness", "Coverage confidence"],
+        tone: "warning",
+        severityRank: 3,
+        timestamp: resources.telemetry.last_heartbeat,
+        source: "Operational telemetry",
+        entityType: "system",
+        entityId: "system",
+      });
+    }
+
+    if (resources.telemetry.stream_degraded && !resources.telemetry.polling_fallback_active && (resources.telemetry.stale_stream_instrument_count ?? 0) === 0) {
+      items.push({
+        id: "anomaly:telemetry:stream-degraded",
+        title: "Stream path degraded",
+        explanation: "Streaming health is degraded even though no single fresh/connected success state should be inferred from the current telemetry.",
+        whyItMatters: "Operators should not mistake partial stream connectivity for healthy live market-data truth.",
+        affects: ["Stream health"],
+        tone: "warning",
+        severityRank: 3,
+        timestamp: resources.telemetry.last_heartbeat,
+        source: "Operational telemetry",
+        entityType: "system",
+        entityId: "system",
+      });
+    }
+
+    if (resources.telemetry.runtime_degraded) {
+      items.push({
+        id: "anomaly:telemetry:runtime-degraded",
+        title: "Runtime health degraded",
+        explanation: `${resources.telemetry.stale_runtime_count} stale runtime${resources.telemetry.stale_runtime_count === 1 ? "" : "s"} and ${resources.telemetry.stale_price_runtime_count} stale-price runtime${resources.telemetry.stale_price_runtime_count === 1 ? "" : "s"} need attention.`,
+        whyItMatters: "Autonomy can remain technically enabled while runtime heartbeat or price freshness is no longer trustworthy.",
+        affects: ["Runtime posture", "Open-risk supervision"],
+        tone: "warning",
+        severityRank: 3,
+        timestamp: resources.telemetry.last_heartbeat,
+        source: "Operational telemetry",
+        entityType: "system",
+        entityId: "system",
+      });
+    }
+
     if (resources.telemetry.reconciliation_mismatches > 0) {
       items.push({
         id: "anomaly:telemetry:reconciliation",
@@ -895,10 +1001,18 @@ function buildTrustRail(resources: LiveDataResources, anomalies: LiveAnomalyItem
   let confidence = "UNKNOWN";
   let confidenceTone: LiveTone = "inactive";
   const missingSourceCount = Object.values(resources.errors).filter(Boolean).length;
-  if (missingSourceCount === 0 && liveFreshness === "LIVE" && executionIntegrity === "OK") {
+  const telemetryDegraded =
+    !resources.errors.telemetry &&
+    Boolean(
+      resources.telemetry.audit_write_degraded
+      || resources.telemetry.polling_fallback_active
+      || resources.telemetry.stream_degraded
+      || resources.telemetry.runtime_degraded,
+    );
+  if (missingSourceCount === 0 && liveFreshness === "LIVE" && executionIntegrity === "OK" && !telemetryDegraded) {
     confidence = "HIGH";
     confidenceTone = "positive";
-  } else if (missingSourceCount <= 3 && liveFreshness !== "STALE") {
+  } else if (missingSourceCount <= 3 && liveFreshness !== "STALE" && !telemetryDegraded) {
     confidence = "MEDIUM";
     confidenceTone = "warning";
   } else if (missingSourceCount < Object.keys(resources.errors).length) {
@@ -915,7 +1029,7 @@ function buildTrustRail(resources: LiveDataResources, anomalies: LiveAnomalyItem
     } else if (anomalies.some((item) => item.severityRank >= 4)) {
       systemState = "AT RISK";
       systemTone = "negative";
-    } else if (anomalies.some((item) => item.severityRank === 3) || liveFreshness === "DELAYED") {
+    } else if (anomalies.some((item) => item.severityRank === 3) || liveFreshness === "DELAYED" || telemetryDegraded) {
       systemState = "DEGRADED";
       systemTone = "warning";
     } else {
@@ -988,9 +1102,8 @@ function buildTrustRail(resources: LiveDataResources, anomalies: LiveAnomalyItem
       label: "Execution Integrity",
       value: executionIntegrity,
       tone: executionToneValue,
-      meta:
-        resources.errors.telemetry ?? (executionIntegrity === "OK" ? "No active drift or failing order-path signals" : "Derived from reconciliation and execution-path telemetry"),
-      source: "Backend telemetry",
+      meta: resources.errors.telemetry ?? (executionIntegrity === "OK" ? "No active drift or failing order-path signals" : "Derived from reconciliation and execution-path telemetry"),
+      source: "Backend telemetry (per-process)",
     },
     {
       id: "broker",
@@ -998,7 +1111,7 @@ function buildTrustRail(resources: LiveDataResources, anomalies: LiveAnomalyItem
       value: brokerValue,
       tone: brokerValue === "CONNECTED" ? "positive" : brokerValue === "DISCONNECTED" ? "warning" : "inactive",
       meta: resources.errors.brokerAuth ?? resources.brokerAuth.detail,
-      source: "Telemetry-derived broker state",
+      source: "Telemetry-derived broker state (per-process)",
     },
     {
       id: "stream",
@@ -1183,7 +1296,15 @@ function buildInspectionModel(
       { label: "Strategies engaged", value: String(strategies.filter((item) => item.mode !== "idle").length) },
       { label: "Unusual signals", value: String(anomalies.length) },
     ],
-    related: resources.errors.positions || resources.errors.coverage || resources.errors.telemetry ? ["Some source feeds are degraded"] : ["Source coverage intact"],
+    related:
+      resources.errors.positions || resources.errors.coverage || resources.errors.telemetry
+        ? ["Some source feeds are degraded"]
+        : resources.telemetry.degradation_reasons?.length
+          ? [
+              `Telemetry degraded: ${resources.telemetry.degradation_reasons.map((reason) => degradationReasonLabel(reason)).join(", ")}`,
+              "Per-process telemetry only; multi-worker aggregation is unavailable.",
+            ]
+          : ["Source coverage intact"],
     recentNotes: activity.slice(0, 4).map((item) => item.title),
     identifiers: ["system"],
     links: [
@@ -1212,6 +1333,10 @@ export function buildLiveSystemViewModel(resources: LiveDataResources): LiveSyst
   const dataWarnings = Object.entries(resources.errors)
     .filter(([, value]) => Boolean(value))
     .map(([key, value]) => `${toTitleCase(key)} unavailable: ${value}`);
+  if (!resources.errors.telemetry && (resources.telemetry.degradation_reasons?.length ?? 0) > 0) {
+    dataWarnings.push(`Telemetry degraded: ${resources.telemetry.degradation_reasons?.map((reason) => degradationReasonLabel(reason)).join(", ")}.`);
+    dataWarnings.push("Telemetry is per-process and not aggregated across multiple workers.");
+  }
 
   const defaultSelection: LiveSelection =
     anomalies[0]
