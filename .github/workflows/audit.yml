@@ -53,10 +53,17 @@ jobs:
             - name: Verify backend lockfiles
               run: ../scripts/check_backend_requirements.sh
 
-            - name: Install backend dependencies
-              run: |
-                  pip install -c requirements.txt -e .
-                  pip install -r requirements-dev.txt
+            - name: Install backend dependencies with integrity verification
+              run: ../scripts/verify_backend_dependency_integrity.sh
+
+            - name: Generate backend SBOM
+              run: ../scripts/generate_sbom.sh backend
+
+            - name: Upload backend SBOM
+              uses: actions/upload-artifact@v4
+              with:
+                  name: backend-sbom
+                  path: artifacts/sbom/backend.cyclonedx.json
 
             - name: Ruff lint
               run: ruff check .
@@ -86,7 +93,7 @@ jobs:
               continue-on-error: true
 
             - name: Python dependency audit
-              run: pip-audit
+              run: pip-audit -r requirements-hashed.txt --require-hashes
 
     frontend-audit:
         name: frontend-audit
@@ -107,11 +114,20 @@ jobs:
                   cache: "npm"
                   cache-dependency-path: frontend/package-lock.json
 
-            - name: Verify frontend lockfile
-              run: npm run audit:lockfile
-
             - name: Install frontend dependencies
               run: npm ci
+
+            - name: Frontend dependency checks
+              run: ../scripts/check_frontend_dependencies.sh
+
+            - name: Generate frontend SBOM
+              run: ../scripts/generate_sbom.sh frontend
+
+            - name: Upload frontend SBOM
+              uses: actions/upload-artifact@v4
+              with:
+                  name: frontend-sbom
+                  path: artifacts/sbom/frontend.cyclonedx.json
 
             - name: ESLint
               run: npm run lint
@@ -121,12 +137,6 @@ jobs:
               run: npm run typecheck
               continue-on-error: true
 
-            - name: Knip unused-code scan
-              run: npm run audit:unused
-
             - name: Dependency cruiser architecture scan
               run: npm run audit:arch
               continue-on-error: true
-
-            - name: NPM dependency audit
-              run: npm run audit:deps

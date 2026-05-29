@@ -25,17 +25,48 @@ fi
 cd "$BACKEND_DIR"
 mkdir -p "$PIP_TOOLS_CACHE_DIR"
 
-"$PYTHON_BIN" -m piptools compile \
-  --resolver=backtracking \
-  --strip-extras \
-  --no-header \
-  --cache-dir "$PIP_TOOLS_CACHE_DIR" \
-  pyproject.toml \
-  --output-file requirements.txt
+compile_requirements() {
+  local output_file="$1"
+  shift
 
-"$PYTHON_BIN" -m piptools compile \
-  --resolver=backtracking \
-  --no-header \
-  --cache-dir "$PIP_TOOLS_CACHE_DIR" \
-  requirements-dev.in \
-  --output-file requirements-dev.txt
+  "$PYTHON_BIN" -m piptools compile \
+    --resolver=backtracking \
+    --strip-extras \
+    --no-header \
+    --cache-dir "$PIP_TOOLS_CACHE_DIR" \
+    "$@" \
+    pyproject.toml \
+    --output-file "$output_file"
+}
+
+compile_dev_requirements() {
+  local output_file="$1"
+  shift
+
+  "$PYTHON_BIN" -m piptools compile \
+    --resolver=backtracking \
+    --no-header \
+    --cache-dir "$PIP_TOOLS_CACHE_DIR" \
+    "$@" \
+    requirements-dev.in \
+    --output-file "$output_file"
+}
+
+compile_hashed_lockfile() {
+  local input_file="$1"
+  local output_file="$2"
+
+  "$PYTHON_BIN" -m piptools compile \
+    --resolver=backtracking \
+    --no-header \
+    --generate-hashes \
+    --reuse-hashes \
+    --cache-dir "$PIP_TOOLS_CACHE_DIR" \
+    "$input_file" \
+    --output-file "$output_file"
+}
+
+compile_requirements requirements.txt
+compile_dev_requirements requirements-dev.txt
+compile_hashed_lockfile requirements.txt requirements-hashed.txt
+compile_hashed_lockfile requirements-dev.txt requirements-dev-hashed.txt

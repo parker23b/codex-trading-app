@@ -1,5 +1,6 @@
 -c requirements.txt
 bandit[toml]
+cyclonedx-bom
 httpx
 pip-audit
 pip-tools

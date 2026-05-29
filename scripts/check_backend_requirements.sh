@@ -27,22 +27,56 @@ fi
 cd "$BACKEND_DIR"
 mkdir -p "$PIP_TOOLS_CACHE_DIR"
 
-"$PYTHON_BIN" -m piptools compile \
-  --quiet \
-  --resolver=backtracking \
-  --strip-extras \
-  --no-header \
-  --cache-dir "$PIP_TOOLS_CACHE_DIR" \
-  pyproject.toml \
-  --output-file "$TMP_DIR/requirements.txt"
+compile_requirements() {
+  local output_file="$1"
+  shift
 
-"$PYTHON_BIN" -m piptools compile \
-  --quiet \
-  --resolver=backtracking \
-  --no-header \
-  --cache-dir "$PIP_TOOLS_CACHE_DIR" \
-  requirements-dev.in \
-  --output-file "$TMP_DIR/requirements-dev.txt"
+  "$PYTHON_BIN" -m piptools compile \
+    --quiet \
+    --resolver=backtracking \
+    --strip-extras \
+    --no-header \
+    --cache-dir "$PIP_TOOLS_CACHE_DIR" \
+    "$@" \
+    pyproject.toml \
+    --output-file "$output_file"
+}
+
+compile_dev_requirements() {
+  local output_file="$1"
+  shift
+
+  "$PYTHON_BIN" -m piptools compile \
+    --quiet \
+    --resolver=backtracking \
+    --no-header \
+    --cache-dir "$PIP_TOOLS_CACHE_DIR" \
+    "$@" \
+    requirements-dev.in \
+    --output-file "$output_file"
+}
+
+compile_hashed_lockfile() {
+  local input_file="$1"
+  local output_file="$2"
+
+  "$PYTHON_BIN" -m piptools compile \
+    --quiet \
+    --resolver=backtracking \
+    --no-header \
+    --generate-hashes \
+    --reuse-hashes \
+    --cache-dir "$PIP_TOOLS_CACHE_DIR" \
+    "$input_file" \
+    --output-file "$output_file"
+}
+
+compile_requirements "$TMP_DIR/requirements.txt"
+compile_dev_requirements "$TMP_DIR/requirements-dev.txt"
+compile_hashed_lockfile requirements.txt "$TMP_DIR/requirements-hashed.txt"
+compile_hashed_lockfile requirements-dev.txt "$TMP_DIR/requirements-dev-hashed.txt"
 
 diff -u requirements.txt "$TMP_DIR/requirements.txt"
+diff -u requirements-hashed.txt "$TMP_DIR/requirements-hashed.txt"
 diff -u requirements-dev.txt "$TMP_DIR/requirements-dev.txt"
+diff -u requirements-dev-hashed.txt "$TMP_DIR/requirements-dev-hashed.txt"

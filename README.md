@@ -63,6 +63,21 @@ Without IG credentials, the app can still start. Broker-read routes such as `/br
 
 Full setup notes are in [docs/operator-guide.md](docs/operator-guide.md).
 
+Optional stricter backend dependency verification:
+
+```bash
+./scripts/check_backend_requirements.sh
+./scripts/verify_backend_dependency_integrity.sh
+./scripts/generate_sbom.sh backend
+```
+
+Optional frontend dependency verification:
+
+```bash
+./scripts/check_frontend_dependencies.sh
+./scripts/generate_sbom.sh frontend
+```
+
 ## Main App Surfaces
 
 - `/` - overview dashboard

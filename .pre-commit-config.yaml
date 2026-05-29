@@ -54,15 +54,15 @@ repos:
         entry: ./scripts/check_backend_requirements.sh
         language: system
         pass_filenames: false
-        files: ^backend/(pyproject\.toml|requirements-dev\.in|requirements\.txt|requirements-dev\.txt)$
+        files: ^backend/(pyproject\.toml|requirements-dev\.in|requirements(\-dev)?(\-hashed)?\.txt)$
         stages: [pre-push]
 
       - id: backend-pip-audit
         name: backend pip audit
-        entry: bash -c 'cd backend && .venv/bin/pip-audit'
+        entry: bash -c 'cd backend && .venv/bin/pip-audit -r requirements-hashed.txt --require-hashes'
         language: system
         pass_filenames: false
-        files: ^backend/(pyproject\.toml|requirements-dev\.in|requirements\.txt|requirements-dev\.txt)$
+        files: ^backend/(pyproject\.toml|requirements-dev\.in|requirements(\-dev)?(\-hashed)?\.txt)$
         stages: [pre-push]
 
       - id: frontend-lint

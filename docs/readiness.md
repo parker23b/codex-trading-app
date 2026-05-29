@@ -36,7 +36,7 @@ The canonical blocker list is in [audit-status.md](audit-status.md).
 - Candidate-only strategy events are intentionally best-effort informational, not lifecycle audit proof, even when they remain useful for observability.
 - Browser/e2e operator-state coverage is improved, including selected manual-review, control-plane mismatch, events attention/test-only truth, telemetry degradation, and market-data fallback/stale truth, but it is still too narrow for readiness claims.
 - Database evolution now uses Alembic plus migration/drift tests, but existing unversioned non-SQLite databases still require explicit manual upgrade and SQLite expression-index drift still depends on targeted checks.
-- Python and npm dependency locking plus vulnerability gates are now repeatable, but the repo still lacks stronger supply-chain controls such as hash-verified Python installs, SBOM/provenance generation, and non-Python/Node dependency scanning.
+- Python and npm dependency locking plus vulnerability gates are now repeatable, third-party Python dependencies can now be hash-verified, and backend/frontend SBOM generation now exists, but the editable local backend package remains outside hash enforcement and the repo still lacks broader non-Python/Node dependency scanning and stronger provenance attestation.
 - Covered logs, mirrored domain events, IG adapter failures, and operator-facing API errors now redact tokens, account identifiers, broker references, raw adapter payloads, and tracebacks, and covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position free-text and detail fields now redact the same patterns before commit. Required audit-write failures now also surface in health/telemetry as degraded state, but remaining readiness gaps still include raw identifier columns required for lifecycle authority, broader secrets hygiene, and durable multi-process observability. Intentional best-effort informational events are not counted as durable lifecycle audit proof.
 - Repo-local guardrails now make it harder to commit `.env*` secrets, SQLite DBs, broker dumps, captured session tokens, logs, and Playwright/test artifacts, but historical repository cleanup and credential rotation still require manual action outside this repository.
 - Secrets hygiene, historical repository scanning follow-through, and multi-process observability still need platform hardening.
@@ -50,7 +50,7 @@ Before live or demo broker dealing, the app needs at least:
 - browser/e2e evidence for degraded, stale, simulated, unknown, manual-review, and mutation-failure operator states
 - browser/e2e evidence for broader events, mutation, provenance, and freshness permutations beyond the current selected slices
 - migration, dependency, redaction, identifier-minimization, and secrets controls that are strong enough for broker-connected operation
-- stronger supply-chain provenance than the current lock-and-audit baseline, including Python hash verification or an equivalent integrity mechanism plus broader dependency scanning
+- stronger supply-chain provenance than the current hash-and-SBOM baseline, including editable-package attestation and broader dependency scanning
 - regression tests for every fixed P0/P1 behaviour that still lacks route, frontend, or full-stack evidence
 
 ## 2026-05-21 Backend Audit Closure Slice
@@ -95,33 +95,46 @@ The repository now has repeatable dependency commands:
 
 - `scripts/compile_backend_requirements.sh`
 - `./scripts/check_backend_requirements.sh`
-- `backend/.venv/bin/pip-audit`
-- `cd frontend && npm run audit:lockfile`
-- `cd frontend && npm run audit:deps`
-- `cd frontend && npm run audit:unused`
+- `./scripts/verify_backend_dependency_integrity.sh`
+- `./scripts/generate_sbom.sh backend`
+- `./scripts/generate_sbom.sh frontend`
+- `backend/.venv/bin/pip-audit -r backend/requirements-hashed.txt --require-hashes`
+- `./scripts/check_frontend_dependencies.sh`
 
-Current posture as of 2026-05-21:
+Current posture as of 2026-05-29:
 
 - backend runtime/transitive dependencies are pinned in `backend/requirements.txt`
 - backend dev/test tooling is separated through `backend/requirements-dev.in` and pinned in `backend/requirements-dev.txt`
-- CI now verifies backend lock freshness before install and fails on `pip-audit`
+- backend also has hash-bearing third-party lockfiles in `backend/requirements-hashed.txt` and `backend/requirements-dev-hashed.txt`
+- CI now verifies backend lock freshness before install, installs third-party Python packages through `--require-hashes`, uploads backend/frontend SBOM artifacts, and fails on the hashed-lock `pip-audit` command
 - CI and pre-push now fail on frontend lockfile inconsistency, `npm audit`, and `knip`
-- the current Python audit result is `No known vulnerabilities found` apart from the expected local-package skip for `trading-platform-backend`
+- the current Python audit result is `No known vulnerabilities found`
 - the current npm audit result is `found 0 vulnerabilities`
-- the current frontend unused-dependency check passes; `tailwindcss` is intentionally retained as a CSS-side dependency and documented in `frontend/knip.json`
+- the current frontend dependency wrapper passes; `knip` still emits one non-failing config hint for `@types/node` ignore housekeeping
+- generated SBOMs go to ignored `artifacts/sbom/` files and are uploaded from CI rather than committed
+- hash verification intentionally covers only third-party Python dependencies; the editable local backend package is installed separately with `pip install --no-deps -e .`
 
 Resolved dependency findings in this slice:
 
 - Python `aiohttp` updated from `3.13.3` to `3.13.5` through the `lightstreamer-client-lib` dependency chain
-- Python `idna` updated from `3.11` to `3.15`
+- Python `idna` updated from `3.11` to `3.17`
+- Python `starlette` updated from `1.0.0` to `1.2.0`, clearing `PYSEC-2026-161`
+- Python `fastapi` updated from `0.136.1` to `0.136.3`
+- Python `uvicorn` updated from `0.47.0` to `0.48.0`
+- Python `httptools` updated from `0.7.1` to `0.8.0`
+- Python `sqlalchemy` updated from `2.0.49` to `2.0.50`
+- Python `click` updated from `8.4.0` to `8.4.1`
 - Python `urllib3` updated from `2.6.3` to `2.7.0`
 - dev-only Python `pytest` updated from `9.0.2` to `9.0.3`
+- dev-only Python `coverage` updated from `7.14.0` to `7.14.1`
+- dev-only Python `ruff` updated from `0.15.14` to `0.15.15`
 - frontend `next` updated in the lockfile from `15.5.15` to `15.5.18`
 
 Remaining dependency/supply-chain gaps:
 
-- Python installs are pinned but not hash-verified
-- there is no SBOM/provenance export or attestation workflow yet
+- editable local backend installs cannot be hash-verified under pip and remain intentionally outside the third-party hash boundary
+- virtualenv bootstrap tooling (`pip`/`setuptools`) is still outside the repo-managed hash boundary
+- there is SBOM export now, but no stronger provenance attestation/signing workflow yet
 - host/container/system-package dependencies are not audited here
 - this does not change the separate database migration/readiness gap
 
