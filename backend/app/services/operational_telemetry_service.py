@@ -7,6 +7,7 @@ from sqlmodel import Session
 from app.core.config import get_settings
 from app.services.health_service import get_health_service
 from app.services.ig_streaming_service import get_ig_streaming_service
+from app.services.observability_state_service import ObservabilityStateService
 from app.services.operational_state_service import OperationalStateService
 from app.services.runtime_state_service import RuntimeStateService
 
@@ -55,34 +56,22 @@ class OperationalTelemetryService:
                 > price_stale_after_seconds
             ]
         )
-        polling_fallback_active = (
-            operational_state.feed_source_state.value == "POLLING_FALLBACK"
-            or details.polling_fallback_active_instrument_count > 0
+        local_stream_degraded = operational_state.feed_health_state.value != "HEALTHY"
+        observability = ObservabilityStateService(self.session).build_summary(
+            now=now,
+            local_details=details,
+            stale_runtime_count=stale_runtime_count,
+            stale_price_runtime_count=stale_price_runtime_count,
+            local_stream_degraded=local_stream_degraded,
+            local_polling_fallback_active=(
+                operational_state.feed_source_state.value == "POLLING_FALLBACK"
+            ),
         )
-        stream_degraded = operational_state.feed_health_state.value != "HEALTHY"
-        runtime_degraded = (
-            stale_runtime_count > 0
-            or stale_price_runtime_count > 0
-            or details.strategies_paused_by_health > 0
-        )
-        audit_write_degraded = details.audit_write_failures_last_5m > 0
-        degradation_reasons: list[str] = []
-        if audit_write_degraded:
-            degradation_reasons.append("audit_write_degraded")
-        if not details.broker_connected:
-            degradation_reasons.append("broker_disconnected")
-        if polling_fallback_active:
-            degradation_reasons.append("polling_fallback_active")
-        if details.stale_stream_instrument_count > 0:
-            degradation_reasons.append("stream_stale")
-        elif stream_degraded:
-            degradation_reasons.append("stream_degraded")
-        if stale_runtime_count > 0:
-            degradation_reasons.append("runtime_heartbeat_stale")
-        if stale_price_runtime_count > 0:
-            degradation_reasons.append("runtime_price_stale")
-        if details.strategies_paused_by_health > 0:
-            degradation_reasons.append("runtime_paused_or_restricted")
+        audit_write_degraded = bool(observability["audit_write_degraded"])
+        polling_fallback_active = bool(observability["polling_fallback_active"])
+        stream_degraded = bool(observability["stream_degraded"])
+        runtime_degraded = bool(observability["runtime_degraded"])
+        last_audit_write_failure = observability["last_audit_write_failure"]
         return {
             "status": str(health_report["status"]),
             "last_heartbeat": details.last_heartbeat,
@@ -93,9 +82,9 @@ class OperationalTelemetryService:
             "last_reconciliation_age_ms": self._age_ms(
                 details.last_reconciliation, now
             ),
-            "last_audit_write_failure": details.last_audit_write_failure,
+            "last_audit_write_failure": last_audit_write_failure,
             "last_audit_write_failure_age_ms": self._age_ms(
-                details.last_audit_write_failure, now
+                last_audit_write_failure, now
             ),
             "stream_connected": operational_state.feed_source_state.value == "LIVE",
             "stream_last_tick_at": stream_health.last_tick_at,
@@ -115,11 +104,15 @@ class OperationalTelemetryService:
             "open_risk_management_reason": operational_state.open_risk_management_reason,
             "audit_write_degraded": audit_write_degraded,
             "polling_fallback_active": polling_fallback_active,
-            "polling_fallback_active_instrument_count": details.polling_fallback_active_instrument_count,
-            "stale_stream_instrument_count": details.stale_stream_instrument_count,
+            "polling_fallback_active_instrument_count": int(
+                observability["polling_fallback_active_instrument_count"]
+            ),
+            "stale_stream_instrument_count": int(
+                observability["stale_stream_instrument_count"]
+            ),
             "stream_degraded": stream_degraded,
             "runtime_degraded": runtime_degraded,
-            "degradation_reasons": degradation_reasons,
+            "degradation_reasons": list(observability["degradation_reasons"]),
             "broker_latency_ms": details.broker_latency_ms,
             "runtime_count": len(runtimes),
             "active_runtime_count": len(active_runtimes),
@@ -128,8 +121,11 @@ class OperationalTelemetryService:
             "reconciliation_mismatches": details.reconciliation_mismatches,
             "order_failures_last_5m": details.order_failures_last_5m,
             "rejected_orders_last_5m": details.rejected_orders_last_5m,
-            "audit_write_failures_last_5m": details.audit_write_failures_last_5m,
+            "audit_write_failures_last_5m": int(
+                observability["audit_write_failures_last_5m"]
+            ),
             "strategies_paused_by_health": details.strategies_paused_by_health,
+            "observability": observability,
         }
 
     @staticmethod

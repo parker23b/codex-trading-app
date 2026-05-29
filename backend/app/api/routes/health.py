@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel
@@ -59,10 +60,52 @@ class OperationalDegradationResponse(BaseModel):
     degradation_reasons: list[str]
 
 
+class ProcessIdentityResponse(BaseModel):
+    worker_id: str
+    hostname: str
+    process_id: int
+    instance_id: str
+
+
+class RuntimeLeaderResponse(BaseModel):
+    owner_id: str | None
+    heartbeat_at: datetime | None
+    expires_at: datetime | None
+    stale: bool
+
+
+class ObservabilityObservationResponse(BaseModel):
+    state_key: str
+    scope_type: str
+    scope_id: str
+    worker_id: str
+    hostname: str
+    process_id: int
+    source: str
+    status: str
+    observed_at: datetime
+    expires_at: datetime | None
+    stale: bool
+    payload: dict[str, Any]
+
+
+class ObservabilitySummaryResponse(BaseModel):
+    mode: str
+    aggregation_available: bool
+    local_details_scope: str
+    degradation_scope: str
+    current_process: ProcessIdentityResponse
+    runtime_leader: RuntimeLeaderResponse
+    last_aggregate_update_at: datetime | None
+    active_observation_count: int
+    stale_observation_count: int
+
+
 class SystemHealthResponse(BaseModel):
     status: str
     details: SystemHealth
     degradations: OperationalDegradationResponse
+    observability: ObservabilitySummaryResponse
 
 
 @router.get("/system/health", response_model=SystemHealthResponse)
@@ -87,7 +130,27 @@ def system_health_check(
             runtime_degraded=bool(telemetry["runtime_degraded"]),
             degradation_reasons=list(telemetry["degradation_reasons"]),
         ),
+        observability=ObservabilitySummaryResponse(
+            **{
+                key: telemetry["observability"][key]
+                for key in {
+                    "mode",
+                    "aggregation_available",
+                    "local_details_scope",
+                    "degradation_scope",
+                    "current_process",
+                    "runtime_leader",
+                    "last_aggregate_update_at",
+                    "active_observation_count",
+                    "stale_observation_count",
+                }
+            }
+        ),
     )
+
+
+class OperationalTelemetryObservabilityResponse(ObservabilitySummaryResponse):
+    observations: list[ObservabilityObservationResponse]
 
 
 class OperationalTelemetryResponse(BaseModel):
@@ -132,6 +195,7 @@ class OperationalTelemetryResponse(BaseModel):
     rejected_orders_last_5m: int
     audit_write_failures_last_5m: int
     strategies_paused_by_health: int
+    observability: OperationalTelemetryObservabilityResponse
 
 
 @router.get("/system/telemetry", response_model=OperationalTelemetryResponse)

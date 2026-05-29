@@ -190,6 +190,8 @@ def test_system_health_response_surfaces_audit_market_data_and_runtime_degradati
     assert payload.degradations.polling_fallback_active is True
     assert payload.degradations.stream_degraded is True
     assert payload.degradations.runtime_degraded is True
+    assert payload.observability.mode == "AGGREGATED"
+    assert payload.observability.aggregation_available is True
     assert "audit_write_degraded" in payload.degradations.degradation_reasons
     assert "polling_fallback_active" in payload.degradations.degradation_reasons
     assert "stream_stale" in payload.degradations.degradation_reasons

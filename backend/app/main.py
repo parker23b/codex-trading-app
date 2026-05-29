@@ -3,10 +3,7 @@ import contextlib
 from contextlib import asynccontextmanager
 from datetime import timedelta
 import logging
-import os
-import socket
 from time import perf_counter
-from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +14,7 @@ from app.api.auth import require_operator_identity, requires_operator_auth
 from app.api.router import build_api_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
+from app.core.process_identity import get_process_identity
 from app.db.init_db import initialize_database
 from app.db.session import engine
 from app.services.domain_event_service import domain_event_service
@@ -137,7 +135,7 @@ async def _runtime_leader_heartbeat_loop(
 
 
 def _make_runtime_leader_owner_id() -> str:
-    return f"{socket.gethostname()}:{os.getpid()}:{uuid4()}"
+    return get_process_identity().worker_id
 
 
 @asynccontextmanager

@@ -16,6 +16,14 @@ from app.models.strategy_governance import (
     StrategyFamilyGovernance,
 )
 from app.models.trade import Position
+from app.services.observability_state_service import (
+    OBSERVABILITY_STATE_AUDIT_WRITE,
+    OBSERVABILITY_STATE_POLLING_FALLBACK,
+    OBSERVABILITY_STATE_RUNTIME_PAUSED,
+    OBSERVABILITY_STATE_STREAM_CONNECTION,
+    OBSERVABILITY_STATE_STREAM_STALE,
+    ObservabilityStateService,
+)
 from app.services.operator_control_service import OperatorControlService
 from app.services.trade_service import TradeService
 
@@ -75,15 +83,22 @@ class HealthService:
     def record_price_update(
         self, when: datetime | None = None, *, stream_connected: bool | None = None
     ) -> None:
+        normalized_when = self._normalize_time(when)
         with self._lock:
-            self._last_price_update = self._normalize_time(when)
+            self._last_price_update = normalized_when
             if stream_connected is not None:
                 self._stream_connected = stream_connected
+        if stream_connected is not None:
+            self._record_stream_connection_observability(
+                connected=stream_connected,
+                observed_at=normalized_when,
+            )
         self._emit_status_transition_if_needed()
 
     def set_stream_connected(self, connected: bool) -> None:
         with self._lock:
             self._stream_connected = connected
+        self._record_stream_connection_observability(connected=connected)
         self._emit_status_transition_if_needed()
 
     def update_broker_state(
@@ -124,6 +139,19 @@ class HealthService:
     def set_paused_strategies(self, count: int) -> None:
         with self._lock:
             self._strategies_paused_by_health = max(count, 0)
+            paused_count = self._strategies_paused_by_health
+        ttl = ObservabilityStateService.default_ttl(
+            self.settings.system_health_heartbeat_interval_seconds * 3
+        )
+        observed_at = datetime.now(UTC)
+        ObservabilityStateService.record_state(
+            state_key=OBSERVABILITY_STATE_RUNTIME_PAUSED,
+            source="health_service.set_paused_strategies",
+            active=paused_count > 0,
+            observed_at=observed_at,
+            expires_at=observed_at + ttl,
+            payload={"paused_count": paused_count},
+        )
         self._emit_status_transition_if_needed()
 
     def record_audit_write_failure(self, when: datetime | None = None) -> None:
@@ -132,6 +160,15 @@ class HealthService:
             self._last_audit_write_failure = timestamp
             self._audit_write_failures.append(timestamp)
             self._trim_windows(timestamp)
+            failure_count = len(self._audit_write_failures)
+        ObservabilityStateService.record_state(
+            state_key=OBSERVABILITY_STATE_AUDIT_WRITE,
+            source="health_service.record_audit_write_failure",
+            active=True,
+            observed_at=timestamp,
+            expires_at=timestamp + self.WINDOW,
+            payload={"failure_count_window": failure_count},
+        )
         self._emit_status_transition_if_needed()
 
     def set_polling_fallback_active(self, instrument: str, active: bool) -> None:
@@ -141,6 +178,23 @@ class HealthService:
                 self._polling_fallback_active_instruments.add(normalized)
             else:
                 self._polling_fallback_active_instruments.discard(normalized)
+        ttl = ObservabilityStateService.default_ttl(
+            max(
+                self.settings.market_data_poll_interval_seconds * 3,
+                self.settings.ig_streaming_stale_after_seconds,
+            )
+        )
+        observed_at = datetime.now(UTC)
+        ObservabilityStateService.record_state(
+            state_key=OBSERVABILITY_STATE_POLLING_FALLBACK,
+            source="health_service.set_polling_fallback_active",
+            active=active,
+            observed_at=observed_at,
+            expires_at=observed_at + ttl,
+            scope_type=ObservabilityStateService.INSTRUMENT_SCOPE,
+            scope_id=normalized,
+            payload={"instrument": normalized},
+        )
         self._emit_status_transition_if_needed()
 
     def set_stream_stale(self, instrument: str, stale: bool) -> None:
@@ -150,6 +204,23 @@ class HealthService:
                 self._stale_stream_instruments.add(normalized)
             else:
                 self._stale_stream_instruments.discard(normalized)
+        ttl = ObservabilityStateService.default_ttl(
+            max(
+                self.settings.market_data_poll_interval_seconds * 3,
+                self.settings.ig_streaming_stale_after_seconds,
+            )
+        )
+        observed_at = datetime.now(UTC)
+        ObservabilityStateService.record_state(
+            state_key=OBSERVABILITY_STATE_STREAM_STALE,
+            source="health_service.set_stream_stale",
+            active=stale,
+            observed_at=observed_at,
+            expires_at=observed_at + ttl,
+            scope_type=ObservabilityStateService.INSTRUMENT_SCOPE,
+            scope_id=normalized,
+            payload={"instrument": normalized},
+        )
         self._emit_status_transition_if_needed()
 
     def get_system_health(self) -> SystemHealth:
@@ -273,6 +344,26 @@ class HealthService:
         if when is None:
             return datetime.now(UTC)
         return when.astimezone(UTC)
+
+    def _record_stream_connection_observability(
+        self, *, connected: bool, observed_at: datetime | None = None
+    ) -> None:
+        timestamp = self._normalize_time(observed_at)
+        ttl = ObservabilityStateService.default_ttl(
+            max(
+                self.settings.market_data_poll_interval_seconds * 3,
+                self.settings.ig_streaming_stale_after_seconds,
+                self.settings.system_health_heartbeat_interval_seconds * 3,
+            )
+        )
+        ObservabilityStateService.record_state(
+            state_key=OBSERVABILITY_STATE_STREAM_CONNECTION,
+            source="health_service.set_stream_connected",
+            active=not connected,
+            observed_at=timestamp,
+            expires_at=timestamp + ttl,
+            payload={"connected": connected},
+        )
 
 
 _health_service: HealthService | None = None

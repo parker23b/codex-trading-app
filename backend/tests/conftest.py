@@ -149,6 +149,15 @@ def app_factory(session: Session):
     return _build_app
 
 
+@pytest.fixture(autouse=True)
+def patch_observability_engine(
+    monkeypatch: pytest.MonkeyPatch, session: Session
+) -> None:
+    monkeypatch.setattr(
+        "app.services.observability_state_service.engine", session.get_bind()
+    )
+
+
 @pytest.fixture
 def client_factory(app_factory):
     @contextmanager

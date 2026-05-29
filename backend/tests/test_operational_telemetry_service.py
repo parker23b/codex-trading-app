@@ -74,6 +74,8 @@ def test_operational_telemetry_service_summarizes_runtime_stream_and_broker_heal
     assert summary["last_audit_write_failure"] == now - timedelta(seconds=3)
     assert summary["last_audit_write_failure_age_ms"] is not None
     assert summary["strategies_paused_by_health"] == 1
+    assert summary["observability"]["mode"] == "AGGREGATED"
+    assert summary["observability"]["aggregation_available"] is True
     assert "audit_write_degraded" in summary["degradation_reasons"]
     assert "runtime_paused_or_restricted" in summary["degradation_reasons"]
 
@@ -109,5 +111,6 @@ def test_operational_telemetry_reports_fallback_without_marking_stream_connected
     assert summary["entry_eligible"] is False
     assert summary["entry_block_reason"] == "polling_fallback_active"
     assert summary["exit_eligible"] is True
+    assert summary["observability"]["mode"] == "AGGREGATED"
     assert "polling_fallback_active" in summary["degradation_reasons"]
     assert "stream_degraded" in summary["degradation_reasons"]

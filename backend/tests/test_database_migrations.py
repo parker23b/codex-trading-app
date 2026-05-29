@@ -23,6 +23,9 @@ EXPRESSION_INDEX_NAMES = {
     "ix_domain_events_instrument_created_at",
     "ix_domain_events_severity_created_at",
     "ix_domain_events_strategy_created_at",
+    "ix_observabilitystate_key_updated_desc",
+    "ix_observabilitystate_scope_updated_desc",
+    "ix_observabilitystate_worker_updated_desc",
     "ix_promotion_request_status_requested_at",
     "ix_runtimelease_owner_expires",
     "ix_strategy_deployment_state_strategy",
@@ -59,7 +62,8 @@ def test_migrations_apply_to_empty_sqlite_database(tmp_path):
     assert "tradeintent" in table_names
     assert "strategyruntimestate" in table_names
     assert "runtimelease" in table_names
-    assert version == "20260521_01"
+    assert "observabilitystate" in table_names
+    assert version == "20260529_01"
 
 
 def test_migrated_schema_matches_current_sqlmodel_metadata(tmp_path):

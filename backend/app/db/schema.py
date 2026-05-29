@@ -4,6 +4,7 @@ from sqlmodel import SQLModel
 
 from app.models.allocation_alert import AllocationAlert
 from app.models.domain_event import DomainEvent
+from app.models.observability import ObservabilityState
 from app.models.operator_control import OperatorControlState
 from app.models.promotion_request import PromotionRequest
 from app.models.review import GeneratedReviewRecord
@@ -27,6 +28,7 @@ MODEL_TYPES = (
     DomainEvent,
     Execution,
     GeneratedReviewRecord,
+    ObservabilityState,
     OperatorControlState,
     OperatorShortlistEntry,
     Position,

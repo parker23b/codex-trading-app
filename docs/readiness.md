@@ -23,7 +23,7 @@ The current blocking themes are:
 - any future operator-critical raw dict/list routes still need explicit contract ownership even though the currently known frontend-consumed route boundary is now modeled
 - current backend durable-audit coverage is now inventory-backed for the present mutation, broker-action, and safety-critical background path set; remaining best-effort events are intentional informational paths, and future broker-action/route risk is now handled by guard tests instead of remaining a present-tense backend blocker
 - frontend operator truth now has selected browser/e2e coverage for stale, degraded, manual-review, passive-vs-mutation, simulated-vs-broker-confirmed, mutation-failure, events attention, test-only reset gating, and telemetry degradation states across events/dashboard/live/risk/strategies/AIMEE/control-plane/coverage/markets, but broad browser/e2e coverage is still incomplete
-- covered backend logging/API-error/domain-event redaction is now in place, covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position payloads now sanitize free-text and detail fields before commit, repo-level secret/history scan guardrails now block common local secret/SQLite/dump/test-artifact commits, dependency lock/audit tooling is now repeatable for Python and npm, and versioned Alembic migrations plus SQLite drift checks now exist. Health and telemetry now expose explicit audit-write, polling-fallback, stale-stream, stream-degraded, and runtime-degraded state, but broader secrets hygiene, supply-chain provenance, non-SQLite migration evidence, functional raw-identifier columns, historical cleanup, and durable multi-process observability remain below readiness grade
+- covered backend logging/API-error/domain-event redaction is now in place, covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position payloads now sanitize free-text and detail fields before commit, repo-level secret/history scan guardrails now block common local secret/SQLite/dump/test-artifact commits, dependency lock/audit tooling is now repeatable for Python and npm, and versioned Alembic migrations plus SQLite drift checks now exist. Health and telemetry now aggregate the targeted operator degradation states across workers with explicit staleness and worker identity, while keeping non-target diagnostics clearly labelled as current-process only. Broader secrets hygiene, supply-chain provenance, non-SQLite migration evidence, functional raw-identifier columns, and historical cleanup remain below readiness grade
 
 The canonical blocker list is in [audit-status.md](audit-status.md).
 
@@ -32,12 +32,12 @@ The canonical blocker list is in [audit-status.md](audit-status.md).
 - Simulated/local execution and close provenance is not yet proved across broader frontend/browser operator surfaces outside the covered dashboard trade, dashboard position sync, and narrow events wording slices.
 - Broader backend/frontend enum-parity proof is still incomplete even though the covered vocabulary slice now includes `risk_truth_confidence`, `BrokerExecutionSource`, `broker_sync_status`, `ExecutionStatus`, and `TradeIntentState`.
 - Future raw operator-critical routes would make contract drift easier to miss even though the currently known frontend-consumed route boundary is now modeled.
-- The remaining backend audit risk is no longer “unknown current mutation/background paths”; it is future-path discipline plus platform observability aggregation.
+- The remaining backend audit risk is no longer “unknown current mutation/background paths”; it is future-path discipline plus broader operator/frontend breadth.
 - Candidate-only strategy events are intentionally best-effort informational, not lifecycle audit proof, even when they remain useful for observability.
 - Browser/e2e operator-state coverage is improved, including selected manual-review, control-plane mismatch, events attention/test-only truth, telemetry degradation, and market-data fallback/stale truth, but it is still too narrow for readiness claims.
 - Database evolution now uses Alembic plus migration/drift tests, but existing unversioned non-SQLite databases still require explicit manual upgrade and SQLite expression-index drift still depends on targeted checks.
 - Python and npm dependency locking plus vulnerability gates are now repeatable, third-party Python dependencies can now be hash-verified, and backend/frontend SBOM generation now exists, but the editable local backend package remains outside hash enforcement and the repo still lacks broader non-Python/Node dependency scanning and stronger provenance attestation.
-- Covered logs, mirrored domain events, IG adapter failures, and operator-facing API errors now redact tokens, account identifiers, broker references, raw adapter payloads, and tracebacks, and covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position free-text and detail fields now redact the same patterns before commit. Required audit-write failures now also surface in health/telemetry as degraded state, but remaining readiness gaps still include raw identifier columns required for lifecycle authority, broader secrets hygiene, and durable multi-process observability. Intentional best-effort informational events are not counted as durable lifecycle audit proof.
+- Covered logs, mirrored domain events, IG adapter failures, and operator-facing API errors now redact tokens, account identifiers, broker references, raw adapter payloads, and tracebacks, and covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position free-text and detail fields now redact the same patterns before commit. Required audit-write failures now also surface in health/telemetry as degraded state, and targeted degradation states now aggregate across workers with stale-expiry handling, but remaining readiness gaps still include raw identifier columns required for lifecycle authority, broader secrets hygiene, and broader operator/frontend evidence. Intentional best-effort informational events are not counted as durable lifecycle audit proof.
 - Repo-local guardrails now make it harder to commit `.env*` secrets, SQLite DBs, broker dumps, captured session tokens, logs, and Playwright/test artifacts, but historical repository cleanup and credential rotation still require manual action outside this repository.
 - Secrets hygiene, historical repository scanning follow-through, and multi-process observability still need platform hardening.
 
@@ -46,7 +46,6 @@ The canonical blocker list is in [audit-status.md](audit-status.md).
 Before live or demo broker dealing, the app needs at least:
 
 - complete modeled/documented contracts for any future operator-critical raw response families
-- multi-process/platform observability that aggregates audit-write, polling-fallback, stale-stream, and runtime degradation across workers rather than only within the current process
 - browser/e2e evidence for degraded, stale, simulated, unknown, manual-review, and mutation-failure operator states
 - browser/e2e evidence for broader events, mutation, provenance, and freshness permutations beyond the current selected slices
 - migration, dependency, redaction, identifier-minimization, and secrets controls that are strong enough for broker-connected operation
@@ -74,7 +73,6 @@ This remediation closes the current backend durable-audit inventory without pret
   - hypothetical future background event families
   - intentional candidate-only/best-effort informational events
 - What remains open:
-  - multi-process/platform observability aggregation
   - broader frontend/operator visibility breadth
 - New operator-visible observability state remains:
   - `/system/health` includes a `degradations` block for audit-write, polling-fallback, stream, and runtime degradation
@@ -87,7 +85,42 @@ This remediation closes the current backend durable-audit inventory without pret
   - `python3 scripts/check_spec_coverage_matrix.py` -> `PASS`
   - `git diff --check` -> `PASS`
 
-This does not make the repository demo-safe or live-safe. It fixes `AUDIT-API-008` and `AUDIT-TEST-002` for the current backend path set, and it narrows `AUDIT-OBS-001` to a platform observability gap rather than a current backend durable-audit coverage gap.
+This does not make the repository demo-safe or live-safe. It fixes `AUDIT-API-008` and `AUDIT-TEST-002` for the current backend path set, and it previously narrowed `AUDIT-OBS-001` to a platform observability gap rather than a current backend durable-audit coverage gap.
+
+## 2026-05-29 Aggregated Observability Slice
+
+This remediation adds a durable observability state model for supervised operation without pretending every telemetry field is now platform-global.
+
+- Aggregated states now covered:
+  - audit-write degradation
+  - polling fallback
+  - stale stream instruments
+  - stream degradation
+  - runtime degradation
+  - runtime leadership / active worker identity
+- Storage and aggregation design:
+  - new `observabilitystate` table keyed by state kind, scope, and worker identity
+  - each worker upserts its own current observation with `worker_id`, `hostname`, `process_id`, `source`, `observed_at`, `expires_at`, and JSON payload
+  - `/system/health` keeps `details` as current-process diagnostics, while `degradations` now come from the aggregated observability view
+  - `/system/telemetry` now exposes the aggregation mode, leader identity, local-vs-aggregated scope labels, and the current observation set
+- Stale and expiry behavior:
+  - audit-write degradation expires on the existing 5-minute health window
+  - polling fallback, stream stale, stream connection, and runtime-paused observations expire on bounded TTLs derived from the existing heartbeat/polling/staleness settings
+  - expired rows remain visible as stale observations and are not counted as current degraded truth
+  - if aggregation cannot be loaded, the routes fall back to a clearly labelled `LOCAL_ONLY_FALLBACK` view instead of silently presenting local-only data as platform truth
+- Tests added:
+  - `backend/tests/test_observability_state_service.py`
+  - `backend/tests/test_health_routes.py`
+  - targeted updates in `backend/tests/test_health_service.py`, `backend/tests/test_operational_telemetry_service.py`, `backend/tests/test_database_migrations.py`, and `backend/tests/test_initialize_database.py`
+- Commands run and results:
+  - `backend/.venv/bin/pytest backend/tests/test_observability_state_service.py backend/tests/test_health_routes.py backend/tests/test_health_service.py backend/tests/test_operational_telemetry_service.py backend/tests/test_runtime_leadership_service.py backend/tests/test_market_data_service.py -q` -> `30 passed`
+  - `backend/.venv/bin/pytest backend/tests/test_initialize_database.py backend/tests/test_database_migrations.py -q` -> `4 passed`
+  - `backend/.venv/bin/pytest backend/tests -q` -> `449 passed`
+  - `python3 scripts/check_spec_coverage_matrix.py` -> `PASS`
+  - `git diff --check` -> `PASS`
+- Finding status after this slice:
+  - `AUDIT-OBS-001`: fixed for the targeted backend/platform degradation aggregation scope
+  - remaining limitations are explicit local-process diagnostics outside the targeted state set plus broader frontend/operator readiness gaps, not hidden single-process degradation truth
 
 ## Dependency Hygiene Status
 
@@ -238,7 +271,7 @@ This slice expands browser-level operator truth coverage without claiming full f
 - Scenarios added:
   - events attention state for audit-write degradation
   - hidden-by-default test-only destructive reset, plus explicit enable path with visible destructive/test-only copy
-  - live telemetry degradation truth for audit-write, polling fallback, stale stream, stream degradation, runtime degradation, and per-process telemetry limitation
+  - live telemetry degradation truth for audit-write, polling fallback, stale stream, stream degradation, runtime degradation, and explicit local-vs-aggregated telemetry scope
   - control-plane governance mutation pending/error truth with backend `detail` preservation
   - strategies execution-feed blocked-entry/no-order-attempt truth
   - coverage stale-stream truth distinct from polling fallback and healthy streaming
@@ -260,7 +293,7 @@ This slice expands browser-level operator truth coverage without claiming full f
   - `AUDIT-UI-002`: narrowed, still open
   - `AUDIT-LIFE-005`: narrowed, still open
   - `AUDIT-005`: narrowed, still open
-  - `AUDIT-OBS-001`: narrowed for operator visibility, still open as a multi-process/platform gap
+  - `AUDIT-OBS-001`: fixed for the targeted backend aggregation slice; broader operator/frontend readiness work remains elsewhere
 - Remaining frontend/browser gaps:
   - broader events route-contract and event-detail breadth
   - strategy start/stop, shortlist/watchlist, and other mutation success/retry/refresh permutations

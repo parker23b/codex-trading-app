@@ -75,6 +75,12 @@ def test_initialize_database_upgrades_legacy_sqlite_and_stamps_revision(
         version = connection.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
+        table_names = {
+            row[0]
+            for row in connection.execute(
+                text("SELECT name FROM sqlite_master WHERE type = 'table'")
+            ).fetchall()
+        }
         runtime_columns = {
             row[1]: {"notnull": int(row[3]), "default": row[4]}
             for row in connection.execute(
@@ -88,7 +94,8 @@ def test_initialize_database_upgrades_legacy_sqlite_and_stamps_revision(
             ).fetchall()
         }
 
-    assert version == "20260521_01"
+    assert version == "20260529_01"
+    assert "observabilitystate" in table_names
     assert runtime_columns["control_mode"]["notnull"] == 1
     assert runtime_columns["runtime_mode"]["notnull"] == 1
     assert runtime_columns["control_mode"]["default"] in {"'MANUAL'", '"MANUAL"'}
