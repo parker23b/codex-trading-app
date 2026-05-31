@@ -20,7 +20,7 @@ The current blocking themes are:
 
 - simulated-vs-broker-confirmed provenance is still incomplete across broader frontend/browser surfaces, even though dashboard trade truth, dashboard position sync truth, and events-surface simulated-vs-broker-confirmed close wording now have explicit browser coverage
 - backend/frontend enum parity is stronger for the covered vocabulary slice (`risk_truth_confidence`, `BrokerExecutionSource`, `broker_sync_status`, `ExecutionStatus`, and `TradeIntentState`), but broader operator-surface evidence is still incomplete even after the added events/live/control-plane/strategies/coverage browser slice
-- any future operator-critical raw dict/list routes still need explicit contract ownership even though the currently known frontend-consumed route boundary is now modeled
+- route-inventory and frontend-contract drift are now machine-guarded for the current route set, so this is no longer a present-tense blocker category; remaining route risk is broader broker-action/operator-evidence breadth rather than hypothetical future undocumented or raw routes
 - current backend durable-audit coverage is now inventory-backed for the present mutation, broker-action, and safety-critical background path set; remaining best-effort events are intentional informational paths, and future broker-action/route risk is now handled by guard tests instead of remaining a present-tense backend blocker
 - frontend operator truth now has selected browser/e2e coverage for stale, degraded, manual-review, passive-vs-mutation, simulated-vs-broker-confirmed, mutation-failure, events attention, test-only reset gating, and telemetry degradation states across events/dashboard/live/risk/strategies/AIMEE/control-plane/coverage/markets, but broad browser/e2e coverage is still incomplete
 - covered backend logging/API-error/domain-event redaction is now in place, covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position payloads now sanitize free-text and detail fields before commit, repo-level secret/history scan guardrails now block common local secret/SQLite/dump/test-artifact commits, dependency lock/audit tooling is now repeatable for Python and npm, and versioned Alembic migrations now have both SQLite drift checks and a CI-wired Postgres rehearsal path. Health and telemetry now aggregate the targeted operator degradation states across workers with explicit staleness and worker identity, while keeping non-target diagnostics clearly labelled as current-process only. Broader secrets hygiene, unversioned legacy non-SQLite migration handling, functional raw-identifier columns, and historical cleanup remain below readiness grade
@@ -31,7 +31,7 @@ The canonical blocker list is in [audit-status.md](audit-status.md).
 
 - Simulated/local execution and close provenance is not yet proved across broader frontend/browser operator surfaces outside the covered dashboard trade, dashboard position sync, and narrow events wording slices.
 - Broader backend/frontend enum-parity proof is still incomplete even though the covered vocabulary slice now includes `risk_truth_confidence`, `BrokerExecutionSource`, `broker_sync_status`, `ExecutionStatus`, and `TradeIntentState`.
-- Future raw operator-critical routes would make contract drift easier to miss even though the currently known frontend-consumed route boundary is now modeled.
+- Future route-inventory and contract drift is now guarded mechanically, but broader broker-action and operator-evidence breadth still needs review when new routes appear.
 - The remaining backend audit risk is no longer “unknown current mutation/background paths”; it is future-path discipline plus broader operator/frontend breadth.
 - Candidate-only strategy events are intentionally best-effort informational, not lifecycle audit proof, even when they remain useful for observability.
 - Browser/e2e operator-state coverage is improved, including selected manual-review, control-plane mismatch, events attention/test-only truth, telemetry degradation, and market-data fallback/stale truth, but it is still too narrow for readiness claims.
@@ -45,7 +45,7 @@ The canonical blocker list is in [audit-status.md](audit-status.md).
 
 Before live or demo broker dealing, the app needs at least:
 
-- complete modeled/documented contracts for any future operator-critical raw response families
+- keep the checked-in route manifest and route-contract drift guard current as any new operator-critical routes are added
 - browser/e2e evidence for degraded, stale, simulated, unknown, manual-review, and mutation-failure operator states
 - browser/e2e evidence for broader events, mutation, provenance, and freshness permutations beyond the current selected slices
 - migration, dependency, redaction, identifier-minimization, and secrets controls that are strong enough for broker-connected operation
@@ -198,6 +198,7 @@ Current posture as of 2026-06-01:
   - one versioned transition from `20260521_01` to `20260529_01`
   - refusal of existing unversioned non-SQLite databases without auto-stamp
 - CI now runs both the fast SQLite migration suite and a Postgres service-container rehearsal; pre-push stays SQLite-only so ordinary local loops do not require Docker or a running Postgres server
+- the CI Postgres rehearsal now runs through `scripts/run_postgres_rehearsal.py`, which fails the job if the rehearsal suite skips unexpectedly even though `POSTGRES_REHEARSAL_ADMIN_URL` should be present
 
 Remaining database risks:
 

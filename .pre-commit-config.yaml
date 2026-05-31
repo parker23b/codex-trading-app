@@ -41,6 +41,14 @@ repos:
         pass_filenames: false
         stages: [pre-push]
 
+      - id: backend-route-inventory
+        name: backend route inventory
+        entry: bash -c 'cd backend && .venv/bin/python ../scripts/check_backend_route_inventory.py'
+        language: system
+        pass_filenames: false
+        files: ^(backend/app/api/|backend/tests/test_route_inventory_guard\.py|frontend/lib/api\.ts|docs/backend-api-routes\.md|scripts/check_backend_route_inventory\.py)$
+        stages: [pre-push]
+
       - id: backend-migration-tests
         name: backend migration tests
         entry: bash -c 'cd backend && .venv/bin/python -m pytest tests/test_database_migrations.py -q'

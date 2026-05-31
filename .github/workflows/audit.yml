@@ -91,13 +91,16 @@ jobs:
               run: pyright .
               continue-on-error: true
 
+            - name: Backend route inventory
+              run: .venv/bin/python ../scripts/check_backend_route_inventory.py
+
             - name: Migration and drift tests
               run: pytest tests/test_database_migrations.py -q
 
             - name: Postgres migration rehearsal
               env:
                   POSTGRES_REHEARSAL_ADMIN_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/postgres
-              run: pytest tests/test_postgres_migration_rehearsal.py -m postgres_rehearsal -q
+              run: .venv/bin/python ../scripts/run_postgres_rehearsal.py
 
             - name: Pytest
               run: pytest

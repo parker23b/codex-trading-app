@@ -1,109 +1,98 @@
 # Backend API route reference
 
-This document describes the FastAPI routes currently registered by `backend/app/api/router.py`.
-Routes under `/testing/*` are conditional and are only registered when `TESTING_ROUTES_ENABLED=true`.
-It is an implementation reference, not a requirements spec. Requirements live in `docs/spec/`,
-and audit findings live in `docs/audit-status.md`.
+This document is rendered from the checked-in route manifest in `backend/app/api/route_inventory.py` by `python3 scripts/check_backend_route_inventory.py --write-docs`.
 
-Generated from the registered route table on 2026-05-05 and supplemented with service-call
-audit notes from the backend API audit.
+## Current inventory
 
-## Classification legend
+- Registered route count: `60` total (`59` always-on, `1` conditional test-only).
+- Frontend-consumed route families: `43`.
+- Query-triggered active-read variants: `6`.
+- Reviewed raw-response exceptions: `3`.
 
-| Classification | Meaning |
-| --- | --- |
-| `PASSIVE_READ` | Read-only route with no expected local writes, refreshes, broker calls, runtime changes, or event creation. |
-| `ACTIVE_READ_REFRESH` | GET/read-shaped route that can refresh, seed, sync, persist, or otherwise update local state while returning a read model. |
-| `BROKER_READ` | Route that can call broker read APIs or broker-derived market/account data paths. |
-| `MUTATION` | Route that intentionally mutates local state, runtime state, governance, watchlists, alerts, reviews, or deployments. |
-| `BROKER_MUTATION` | Route that can submit broker-changing actions. No direct registered API route was classified this way in the audit. |
-| `TEST_ONLY_MUTATION` | Route intended for test/dev reset behavior. Must be environment-gated before production use. |
-| `NEEDS_AUDIT` | Route requiring more service tracing before classification can be trusted. |
+## Classification counts
 
-## Known audit notes
-
-| Finding ID | Applies to | Summary |
-| --- | --- | --- |
-| `AUDIT-003` | `/allocation/alerts`, `/allocation/alerts/unresolved-critical` | Default alert reads can refresh and persist alert rows. |
-| `AUDIT-API-001` | `/control-plane/summary`, `/control-plane/operator-state`, `/control-plane/strategies/{strategy_name}`, `/strategies` | Passive-looking GET routes can seed operator/governance defaults. |
-| `AUDIT-API-002` | `/coverage/summary`, `/strategy-watchlist`, `/market-data/feed-state` | Verified fixed for the read/write boundary: these GET routes now use passive snapshots (`sync=false`) where intended and have no-write regression evidence. |
-| `AUDIT-API-003` | `/reviews/operator-summary`, `/reviews/daily`, `/reviews/strategies/{strategy_name}`, `/reviews/runtime-health`, `/reviews/trades/{trade_id}/postmortem` | Review GET routes persist `GeneratedReviewRecord` rows by default. |
-| `AUDIT-API-004` | `/testing/reset-history` | Verified fixed: test reset route is registered only when `TESTING_ROUTES_ENABLED=true`; frontend control/API helper require `NEXT_PUBLIC_TESTING_CONTROLS_ENABLED=true`. |
-| `AUDIT-API-005` | `/dashboard` | Dashboard performs a live broker account read despite passive-style wording. |
-| `AUDIT-API-006` | Multiple frontend-used routes | Fixed for the known frontend-consumed route boundary: allocation/risk, AIMEE/review, markets/watchlist/feed-state/live-chart, dashboard/control-plane/strategy-summary, trades/positions, and `/charts/risk-allocation` are now modelled. Remaining raw chart routes are not confirmed frontend consumers. |
-| `AUDIT-API-007` | `/aimee/snapshot` | AIMEE passive snapshot indirectly performs a broker account read. |
-| `AUDIT-API-008` | Control-plane and strategy mutations | Safety-relevant mutation audit events are persisted best-effort and can fail silently. |
+- `PASSIVE_READ`: `39`
+- `ACTIVE_READ_REFRESH`: `0`
+- `BROKER_READ`: `6`
+- `MUTATION`: `14`
+- `TEST_ONLY_MUTATION`: `1`
 
 ## Route reference
 
-| Method | Path | Handler | Classification | Response contract | Frontend consumer | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| GET | `/health` | `app.api.routes.health.health_check` | `PASSIVE_READ` | `dict[str, str]` | None found | Static health response. |
-| GET | `/health/stream` | `app.api.routes.health.stream_health_check` | `PASSIVE_READ` | `StreamHealthResponse` | `getStreamHealth` | Reads streaming health state. |
-| GET | `/system/health` | `app.api.routes.health.system_health_check` | `PASSIVE_READ` | `SystemHealthResponse` | None found | Reads system health report. |
-| GET | `/system/telemetry` | `app.api.routes.health.operational_telemetry` | `PASSIVE_READ` | `OperationalTelemetryResponse` | `getOperationalTelemetry`, `getBrokerAuthStatus` | Reads telemetry, runtime, and health state. |
-| GET | `/system/limits` | `app.api.routes.system.get_system_operating_limits` | `PASSIVE_READ` | `SystemOperatingLimitsResponse` | `getSystemOperatingLimits` | Reads settings and strategy registry limits. |
-| GET | `/broker/positions` | `app.api.routes.broker.list_broker_positions` | `BROKER_READ` | `list[BrokerPositionResponse]` | None found | Calls broker position read path and updates in-memory broker health. |
-| GET | `/control-plane/summary` | `app.api.routes.control_plane.get_control_plane_summary` | `PASSIVE_READ` | `ControlPlaneSummaryResponse` | `getControlPlaneSummary` | Passive control-plane summary. Default seeding was removed and passive-read behavior is regression-tested. See `AUDIT-API-001`. |
-| GET | `/control-plane/operator-state` | `app.api.routes.control_plane.get_operator_control_state` | `PASSIVE_READ` | `OperatorControlResponse` | `getOperatorControlState` | Passive operator-state read. Default seeding was removed and passive-read behavior is regression-tested. See `AUDIT-API-001`. |
-| PUT | `/control-plane/operator-state` | `app.api.routes.control_plane.update_operator_control_state` | `MUTATION` | `OperatorControlResponse` | `updateOperatorControlState` | Updates autonomy override and records audit event best-effort. See `AUDIT-API-008`. |
-| GET | `/control-plane/strategies/{strategy_name}` | `app.api.routes.control_plane.get_control_plane_strategy_detail` | `PASSIVE_READ` | `ControlPlaneFamilyResponse` | `getControlPlaneFamily` | Passive control-plane family read with explicit governance, deployment, runtime, alignment, and open-risk uncertainty fields. See `AUDIT-API-001`, `AUDIT-API-006`. |
-| POST | `/control-plane/reconcile` | `app.api.routes.control_plane.reconcile_control_plane` | `MUTATION` | `ControlPlaneReconcileResponse` | None found | Reconciles deployment/runtime alignment and records audit events best-effort. Mutation response is now explicitly modelled. See `AUDIT-API-008`, `AUDIT-API-006`. |
-| PUT | `/control-plane/governance/{strategy_name}` | `app.api.routes.control_plane.update_strategy_governance` | `MUTATION` | `GovernanceMutationResponse` | `updateStrategyGovernance` | Updates governance and records audit event best-effort. Mutation response is now explicitly modelled. See `AUDIT-API-006`, `AUDIT-API-008`. |
-| GET | `/coverage/summary` | `app.api.routes.coverage.get_coverage_summary` | `ACTIVE_READ_REFRESH` | `CoverageSummaryResponse` | `getCoverageSummary` | Can sync watchlist state and perform broker market reads. See `AUDIT-API-002`. |
-| GET | `/dashboard` | `app.api.routes.dashboard.get_dashboard` | `PASSIVE_READ` | `DashboardSnapshotResponse` | `getDashboardSnapshot` | Persisted-only dashboard snapshot. Passive-read tests prove it does not call the broker account summary path and keeps missing broker/open-risk truth unavailable. See `AUDIT-API-005`, `AUDIT-API-006`. |
-| GET | `/events` | `app.api.routes.events.list_events` | `PASSIVE_READ` | `list[DomainEventResponse]` | `getDomainEvents` | Reads domain-event history. |
-| GET | `/events/{event_id}` | `app.api.routes.events.get_event` | `PASSIVE_READ` | `DomainEventResponse` | None found | Reads one domain event. |
-| GET | `/allocation/cycles` | `app.api.routes.allocation.list_allocation_cycles` | `PASSIVE_READ` | `list[AllocationCycleResponse]` | `getAllocationCycles` | Allocation read model. Nested contract is now modelled. |
-| GET | `/allocation/cycles/{cycle_id}` | `app.api.routes.allocation.get_allocation_cycle` | `PASSIVE_READ` | `AllocationCycleResponse` | `getAllocationCycle` | Allocation read model. Nested contract is now modelled. |
-| GET | `/allocation/intents` | `app.api.routes.allocation.list_allocation_intents` | `PASSIVE_READ` | `list[AllocationIntentResponse]` | `getAllocationIntents` | Allocation read model. Nested execution/position/trade provenance is now modelled. |
-| GET | `/allocation/intents/{trade_intent_id}` | `app.api.routes.allocation.get_allocation_intent` | `PASSIVE_READ` | `AllocationIntentResponse` | `getAllocationIntent` | Allocation read model. Nested execution/position/trade provenance is now modelled. |
-| GET | `/allocation/drift` | `app.api.routes.allocation.get_allocation_drift_summary` | `PASSIVE_READ` | `AllocationDriftSummaryResponse` | `getAllocationDriftSummary` | Computed allocation drift read model. Contract is now modelled. |
-| GET | `/allocation/alerts` | `app.api.routes.allocation.list_allocation_alerts` | `PASSIVE_READ` by default; `ACTIVE_READ_REFRESH` when `refresh=true` | `list[AllocationAlertResponse]` | `getAllocationAlerts` | Default `refresh=false` is passive. `refresh=true` can persist alert rows. See `AUDIT-003`. |
-| POST | `/allocation/alerts/{alert_id}/acknowledge` | `app.api.routes.allocation.acknowledge_allocation_alert` | `MUTATION` | `AllocationAlertMutationResponse` | `acknowledgeAllocationAlert` | Acknowledges alert state. Mutation response is now modelled. |
-| POST | `/allocation/alerts/{alert_id}/resolve` | `app.api.routes.allocation.resolve_allocation_alert` | `MUTATION` | `AllocationAlertMutationResponse` | `resolveAllocationAlert` | Resolves alert state. Mutation response is now modelled. |
-| GET | `/allocation/alerts/unresolved-critical` | `app.api.routes.allocation.list_unresolved_critical_allocation_alerts` | `PASSIVE_READ` | `list[AllocationAlertResponse]` | `getUnresolvedCriticalAllocationAlerts` | Reads persisted unresolved critical alerts without refresh. Contract now matches the full alert schema used by the frontend. See `AUDIT-003`. |
-| GET | `/allocation/exposure` | `app.api.routes.allocation.get_allocation_exposure_summary` | `PASSIVE_READ` | `AllocationExposureSummaryResponse` | `getAllocationExposureSummary` | Computed exposure read model. Contract is now modelled. |
-| GET | `/market-status/{instrument}` | `app.api.routes.market_status.get_market_status` | `BROKER_READ` | `MarketStatusResponse` | None found | Calls broker market-details read path and updates in-memory broker health. |
-| GET | `/markets/overview` | `app.api.routes.markets.get_market_overview` | `BROKER_READ` | `MarketCategoryOverviewResponse` | `getMarketOverview` | Calls broker market-details read path. Backend-owned schema now models market status/count fields used by Markets. |
-| GET | `/markets/catalogue` | `app.api.routes.markets.get_market_catalogue` | `PASSIVE_READ` | `MarketCatalogueResponse` | `getMarketCatalogue` | Reads catalogue/runtime projection without watchlist sync. |
-| GET | `/watchlist/shortlist` | `app.api.routes.markets.get_shortlist` | `PASSIVE_READ` | `ShortlistResponse` | None found | Reads shortlist projection with shortlist timestamps and separate streaming/watchlist flags. |
-| POST | `/watchlist/shortlist/{instrument_id}` | `app.api.routes.markets.add_shortlist_item` | `MUTATION` | `ShortlistMutationResponse` | `addShortlistInstrument` | Adds or updates shortlist entry with explicit typed mutation response. |
-| DELETE | `/watchlist/shortlist/{instrument_id}` | `app.api.routes.markets.remove_shortlist_item` | `MUTATION` | `ShortlistMutationResponse` | `removeShortlistInstrument` | Removes shortlist entry with explicit typed mutation response. |
-| POST | `/strategy-watchlist/bulk` | `app.api.routes.markets.add_strategy_watchlist_items` | `MUTATION` | `StrategyWatchlistBulkResponse` | `addStrategyWatchlistInstruments` | Adds strategy-watchlist entries and preserves structured added/skipped reasons. |
-| GET | `/strategy-watchlist` | `app.api.routes.markets.get_strategy_watchlist` | `PASSIVE_READ` | `StrategyWatchlistResponse` | `getStrategyWatchlist` | Uses passive `sync=false` watchlist snapshot; route-tested no-write. See `AUDIT-API-002`. |
-| DELETE | `/strategy-watchlist/{instrument_id}` | `app.api.routes.markets.remove_strategy_watchlist_item` | `MUTATION` | `StrategyWatchlistMutationResponse` | `removeStrategyWatchlistInstrument` | Removes or cools down strategy-watchlist entry with explicit typed mutation response. |
-| GET | `/market-data/feed-state` | `app.api.routes.markets.get_feed_state` | `BROKER_READ` | `FeedStateResponse` | `getFeedState` | Passive no-write snapshot route, but still broker-read because per-instrument market readiness may refresh broker market status. |
-| GET | `/market-data/feed-state/{instrument_id}` | `app.api.routes.markets.get_instrument_feed_state` | `BROKER_READ` | `FeedStateInstrumentResponse` | `getInstrumentFeedState` | Exposes stream/freshness/provenance fields, unavailable market-status detail, and evaluation-vs-streaming distinction. |
-| GET | `/live/instruments/{instrument_id}/chart` | `app.api.routes.markets.get_live_instrument_chart` | `BROKER_READ` | `LiveChartResponse` | `getLiveInstrumentChart` | Can call broker historical-candle and market-status reads; explicit schema keeps chart-source vs feed-state provenance visible. |
-| GET | `/charts/equity` | `app.api.routes.charts.get_equity_chart` | `PASSIVE_READ` | `list[dict[str, float | str]]` | None found | Computes persisted equity projection. |
-| GET | `/charts/drawdown` | `app.api.routes.charts.get_drawdown_chart` | `PASSIVE_READ` | `list[dict[str, float | str]]` | None found | Computes persisted drawdown projection. |
-| GET | `/charts/risk-allocation` | `app.api.routes.charts.get_risk_allocation_chart` | `PASSIVE_READ` | `RiskAllocationChartResponse` | Typed client boundary only (`getRiskAllocationChart`); no active page/component caller found | Builds an allocation-risk chart projection from allocation exposure plus live/reserved truth metadata. Preserves generated/source/reason/confidence metadata and returns `UNAVAILABLE` with null metrics, not healthy zeros, when only unknown/degraded truth is available. |
-| GET | `/positions` | `app.api.routes.positions.list_positions` | `PASSIVE_READ` | `list[OpenPositionResponse]` | None found | Reads persisted open positions with explicit broker-sync, close-source, risk-confidence, and time-in-trade fields. |
-| GET | `/executions` | `app.api.routes.executions.list_executions` | `PASSIVE_READ` | `list[ExecutionResponse]` | `getExecutions` | Reads persisted executions. |
-| GET | `/trades` | `app.api.routes.trades.list_trades` | `PASSIVE_READ` | `list[TradeResponse]` | `getTrades` | Reads persisted trades with explicit close-source and risk-confidence provenance used by dashboard/live trade tables. |
-| GET | `/trades/positions` | `app.api.routes.trades.list_positions_compat` | `PASSIVE_READ` | `list[OpenPositionResponse]` | `getOpenPositions` | Compatibility persisted-position read now shares the backend-owned open-position schema with `/positions`, avoiding raw dict drift. |
-| GET | `/strategies` | `app.api.routes.strategies.list_strategies` | `PASSIVE_READ` | `list[StrategySummaryResponse]` | `getStrategies` | Passive strategy summary projection with explicit governance, deployment, runtime, authorization, and persisted-runtime fields. See `AUDIT-API-001`, `AUDIT-API-006`. |
-| POST | `/strategy/start` | `app.api.routes.strategies.start_strategy` | `MUTATION` | `StrategyMutationStatusResponse` | `startStrategy` | Starts runtime and syncs persisted runtime state. Mutation response is now explicitly modelled. Audit event is best-effort. See `AUDIT-API-006`, `AUDIT-API-008`. |
-| POST | `/strategy/stop` | `app.api.routes.strategies.stop_strategy` | `MUTATION` | `StrategyMutationStatusResponse` | `stopStrategy` | Stops runtime and syncs persisted runtime state. Mutation response is now explicitly modelled. Audit event is best-effort. See `AUDIT-API-006`, `AUDIT-API-008`. |
-| POST | `/strategies/{name}/start` | `app.api.routes.strategies.start_strategy_by_name` | `MUTATION` | `StrategyMutationStatusResponse` | None found | Compatibility strategy-start route. |
-| POST | `/strategies/{name}/stop` | `app.api.routes.strategies.stop_strategy_by_name` | `MUTATION` | `StrategyMutationStatusResponse` | None found | Compatibility strategy-stop route. |
-| GET | `/aimee/snapshot` | `app.api.routes.aimee.get_snapshot` | `BROKER_READ` | `AimeeSnapshotResponse` | `getAimeeSnapshot` | Passive AIMEE snapshot is now backend-modelled and route-tested for no-write behavior. It no longer performs the old indirect dashboard broker-account read. See `AUDIT-API-007`, `AUDIT-API-006`. |
-| GET | `/reviews/operator-summary` | `app.api.routes.ai_reviewer.get_operator_summary` | `ACTIVE_READ_REFRESH` when `persist=true`; otherwise passive preview | `OperatorSummaryReview` | `getOperatorSummaryReview` | Default preview is non-persisting; explicit `persist=true` persists a review record and durable audit event. See `AUDIT-API-003`, `AUDIT-API-008`. |
-| GET | `/reviews/daily` | `app.api.routes.ai_reviewer.get_daily_review` | `ACTIVE_READ_REFRESH` when `persist=true`; otherwise passive preview | `DailyReviewResponse` | None found | Default preview is non-persisting; explicit `persist=true` persists a review record and durable audit event. See `AUDIT-API-003`, `AUDIT-API-008`. |
-| GET | `/reviews/strategies/{strategy_name}` | `app.api.routes.ai_reviewer.get_strategy_review` | `ACTIVE_READ_REFRESH` when `persist=true`; otherwise passive preview | `StrategyReviewResponse` | None found | Default preview is non-persisting; explicit `persist=true` persists a review record and durable audit event. See `AUDIT-API-003`, `AUDIT-API-008`. |
-| GET | `/reviews/runtime-health` | `app.api.routes.ai_reviewer.get_runtime_health_review` | `ACTIVE_READ_REFRESH` when `persist=true`; otherwise passive preview | `RuntimeHealthReviewResponse` | None found | Default preview is non-persisting; explicit `persist=true` persists a review record and durable audit event. See `AUDIT-API-003`, `AUDIT-API-008`. |
-| GET | `/reviews/trades/{trade_id}/postmortem` | `app.api.routes.ai_reviewer.get_trade_postmortem` | `ACTIVE_READ_REFRESH` when `persist=true`; otherwise passive preview | `TradePostMortemReviewResponse` | None found | Default preview is non-persisting; explicit `persist=true` persists a review record and durable audit event. See `AUDIT-API-003`, `AUDIT-API-008`. |
-| POST | `/reviews/questions` | `app.api.routes.ai_reviewer.answer_operational_question` | `MUTATION` | `OperationalQuestionReviewResponse` | `askOperationalQuestion` | Persists explicit advisory artifact. |
-| GET | `/reviews/history` | `app.api.routes.ai_reviewer.list_review_history` | `PASSIVE_READ` | `list[ReviewRecordSummary]` | `getReviewHistory` | Reads persisted review history. |
-| GET | `/reviews/history/{review_id}` | `app.api.routes.ai_reviewer.get_review_record` | `PASSIVE_READ` | `PersistedReviewRecord` | None found | Reads one persisted review record. |
-| POST | `/testing/reset-history` | `app.api.routes.testing.reset_history` | `TEST_ONLY_MUTATION` | `ResetHistoryResponse` | `resetTestHistory` when `NEXT_PUBLIC_TESTING_CONTROLS_ENABLED=true` | Conditional route: registered only when `TESTING_ROUTES_ENABLED=true`. Deletes trading, reconciliation, domain-event, runtime, and review history when enabled. See `AUDIT-API-004`. |
+| Method | Path | Handler | Classification | Scope | Frontend consumers | Response contract | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| DELETE | `/strategy-watchlist/{instrument_id}` | `app.api.routes.markets.remove_strategy_watchlist_item` | `MUTATION` | `operator` | `removeStrategyWatchlistInstrument` | Explicit model: StrategyWatchlistMutationResponse | Strategy-watchlist remove mutation. |
+| DELETE | `/watchlist/shortlist/{instrument_id}` | `app.api.routes.markets.remove_shortlist_item` | `MUTATION` | `operator` | `removeShortlistInstrument` | Explicit model: ShortlistMutationResponse | Shortlist remove mutation. |
+| GET | `/aimee/snapshot` | `app.api.routes.aimee.get_snapshot` | `PASSIVE_READ` | `operator` | `getAimeeSnapshot` | Explicit model: AimeeSnapshotResponse | Passive AIMEE snapshot. |
+| GET | `/allocation/alerts` | `app.api.routes.allocation.list_allocation_alerts` | `PASSIVE_READ with ACTIVE_READ_REFRESH variant(s)` | `operator` | `getAllocationAlerts` | Explicit model: list[AllocationAlertResponse] | Default alert reads are passive when refresh=false. Active-read variants: `?refresh=true` -> Explicit alert refresh persists recalculated alerts. |
+| GET | `/allocation/alerts/unresolved-critical` | `app.api.routes.allocation.list_unresolved_critical_allocation_alerts` | `PASSIVE_READ` | `operator` | `getUnresolvedCriticalAllocationAlerts` | Explicit model: list[AllocationAlertResponse] | Reads persisted unresolved critical alerts without refresh. |
+| GET | `/allocation/cycles` | `app.api.routes.allocation.list_allocation_cycles` | `PASSIVE_READ` | `operator` | `getAllocationCycles` | Explicit model: list[AllocationCycleResponse] | Allocation-cycle read. |
+| GET | `/allocation/cycles/{cycle_id}` | `app.api.routes.allocation.get_allocation_cycle` | `PASSIVE_READ` | `operator` | `getAllocationCycle` | Explicit model: AllocationCycleResponse | Allocation-cycle detail read. |
+| GET | `/allocation/drift` | `app.api.routes.allocation.get_allocation_drift_summary` | `PASSIVE_READ` | `operator` | `getAllocationDriftSummary` | Explicit model: AllocationDriftSummaryResponse | Computed allocation-drift projection. |
+| GET | `/allocation/exposure` | `app.api.routes.allocation.get_allocation_exposure_summary` | `PASSIVE_READ` | `operator` | `getAllocationExposureSummary` | Explicit model: AllocationExposureSummaryResponse | Computed allocation-exposure projection. |
+| GET | `/allocation/intents` | `app.api.routes.allocation.list_allocation_intents` | `PASSIVE_READ` | `operator` | `getAllocationIntents` | Explicit model: list[AllocationIntentResponse] | Allocation-intent read. |
+| GET | `/allocation/intents/{trade_intent_id}` | `app.api.routes.allocation.get_allocation_intent` | `PASSIVE_READ` | `operator` | `getAllocationIntent` | Explicit model: AllocationIntentResponse | Allocation-intent detail read. |
+| GET | `/broker/positions` | `app.api.routes.broker.list_broker_positions` | `BROKER_READ` | `operator` | None | Explicit model: list[BrokerPositionResponse] | Broker position read path. |
+| GET | `/charts/drawdown` | `app.api.routes.charts.get_drawdown_chart` | `PASSIVE_READ` | `operator` | None | Reviewed raw exception | Persisted drawdown chart projection. |
+| GET | `/charts/equity` | `app.api.routes.charts.get_equity_chart` | `PASSIVE_READ` | `operator` | None | Reviewed raw exception | Persisted equity chart projection. |
+| GET | `/charts/risk-allocation` | `app.api.routes.charts.get_risk_allocation_chart` | `PASSIVE_READ` | `operator` | `getRiskAllocationChart` | Explicit model: RiskAllocationChartResponse | Risk-allocation chart contract is backend-owned. |
+| GET | `/control-plane/operator-state` | `app.api.routes.control_plane.get_operator_control_state` | `PASSIVE_READ` | `operator` | `getOperatorControlState` | Explicit model: OperatorControlResponse | Operator override read. |
+| GET | `/control-plane/strategies/{strategy_name}` | `app.api.routes.control_plane.get_control_plane_strategy_detail` | `PASSIVE_READ` | `operator` | `getControlPlaneFamily` | Explicit model: ControlPlaneFamilyResponse | Control-plane family detail projection. |
+| GET | `/control-plane/summary` | `app.api.routes.control_plane.get_control_plane_summary` | `PASSIVE_READ` | `operator` | `getControlPlaneSummary` | Explicit model: ControlPlaneSummaryResponse | Control-plane summary projection. |
+| GET | `/coverage/summary` | `app.api.routes.coverage.get_coverage_summary` | `PASSIVE_READ` | `operator` | `getCoverageSummary` | Explicit model: CoverageSummaryResponse | Coverage projection using passive watchlist snapshots. |
+| GET | `/dashboard` | `app.api.routes.dashboard.get_dashboard` | `PASSIVE_READ` | `operator` | `getDashboardSnapshot` | Explicit model: DashboardSnapshotResponse | Persisted dashboard snapshot without broker account read. |
+| GET | `/events` | `app.api.routes.events.list_events` | `PASSIVE_READ` | `operator` | `getDomainEvents` | Explicit model: list[DomainEventResponse] | Domain-event history projection. |
+| GET | `/events/{event_id}` | `app.api.routes.events.get_event` | `PASSIVE_READ` | `operator` | None | Explicit model: DomainEventResponse | Single domain-event read. |
+| GET | `/executions` | `app.api.routes.executions.list_executions` | `PASSIVE_READ` | `operator` | `getExecutions` | Explicit model: list[ExecutionResponse] | Execution-history read. |
+| GET | `/health` | `app.api.routes.health.health_check` | `PASSIVE_READ` | `internal/diagnostic` | None | Reviewed raw exception | Static health response. |
+| GET | `/health/stream` | `app.api.routes.health.stream_health_check` | `PASSIVE_READ` | `internal/diagnostic` | `getStreamHealth` | Explicit model: StreamHealthResponse | Streaming health projection. |
+| GET | `/live/instruments/{instrument_id}/chart` | `app.api.routes.markets.get_live_instrument_chart` | `BROKER_READ` | `operator` | `getLiveInstrumentChart` | Explicit model: LiveChartResponse | Live chart projection with broker candle reads. |
+| GET | `/market-data/feed-state` | `app.api.routes.markets.get_feed_state` | `BROKER_READ` | `operator` | `getFeedState` | Explicit model: FeedStateResponse | Feed-state snapshot with broker-backed readiness metadata. |
+| GET | `/market-data/feed-state/{instrument_id}` | `app.api.routes.markets.get_instrument_feed_state` | `BROKER_READ` | `operator` | `getInstrumentFeedState` | Explicit model: FeedStateInstrumentResponse | Per-instrument feed-state snapshot. |
+| GET | `/market-status/{instrument}` | `app.api.routes.market_status.get_market_status` | `BROKER_READ` | `operator` | None | Explicit model: MarketStatusResponse | Broker/market status read. |
+| GET | `/markets/catalogue` | `app.api.routes.markets.get_market_catalogue` | `PASSIVE_READ` | `operator` | `getMarketCatalogue` | Explicit model: MarketCatalogueResponse | Markets catalogue projection. |
+| GET | `/markets/overview` | `app.api.routes.markets.get_market_overview` | `BROKER_READ` | `operator` | `getMarketOverview` | Explicit model: MarketCategoryOverviewResponse | Broker-backed markets overview. |
+| GET | `/positions` | `app.api.routes.positions.list_positions` | `PASSIVE_READ` | `operator` | None | Explicit model: list[OpenPositionResponse] | Compatibility open-position read. |
+| GET | `/reviews/daily` | `app.api.routes.ai_reviewer.get_daily_review` | `PASSIVE_READ with ACTIVE_READ_REFRESH variant(s)` | `operator` | None | Explicit model: DailyReviewResponse | Default daily review is a passive preview. Active-read variants: `?persist=true` -> Explicit daily-review archival persists a GeneratedReviewRecord. |
+| GET | `/reviews/history` | `app.api.routes.ai_reviewer.list_review_history` | `PASSIVE_READ` | `operator` | `getReviewHistory` | Explicit model: list[ReviewRecordSummary] | Persisted review-history read. |
+| GET | `/reviews/history/{review_id}` | `app.api.routes.ai_reviewer.get_review_record` | `PASSIVE_READ` | `operator` | None | Explicit model: PersistedReviewRecord | Persisted review-record read. |
+| GET | `/reviews/operator-summary` | `app.api.routes.ai_reviewer.get_operator_summary` | `PASSIVE_READ with ACTIVE_READ_REFRESH variant(s)` | `operator` | `getOperatorSummaryReview` | Explicit model: OperatorSummaryReview | Default operator-summary review is a passive preview. Active-read variants: `?persist=true` -> Explicit review archival persists a GeneratedReviewRecord. |
+| GET | `/reviews/runtime-health` | `app.api.routes.ai_reviewer.get_runtime_health_review` | `PASSIVE_READ with ACTIVE_READ_REFRESH variant(s)` | `operator` | None | Explicit model: RuntimeHealthReviewResponse | Default runtime-health review is a passive preview. Active-read variants: `?persist=true` -> Explicit runtime-health review archival persists a GeneratedReviewRecord. |
+| GET | `/reviews/strategies/{strategy_name}` | `app.api.routes.ai_reviewer.get_strategy_review` | `PASSIVE_READ with ACTIVE_READ_REFRESH variant(s)` | `operator` | None | Explicit model: StrategyReviewResponse | Default strategy review is a passive preview. Active-read variants: `?persist=true` -> Explicit strategy-review archival persists a GeneratedReviewRecord. |
+| GET | `/reviews/trades/{trade_id}/postmortem` | `app.api.routes.ai_reviewer.get_trade_postmortem` | `PASSIVE_READ with ACTIVE_READ_REFRESH variant(s)` | `operator` | None | Explicit model: TradePostMortemReviewResponse | Default trade postmortem is a passive preview. Active-read variants: `?persist=true` -> Explicit trade-postmortem archival persists a GeneratedReviewRecord. |
+| GET | `/strategies` | `app.api.routes.strategies.list_strategies` | `PASSIVE_READ` | `operator` | `getStrategies` | Explicit model: list[StrategySummaryResponse] | Strategy-summary projection. |
+| GET | `/strategy-watchlist` | `app.api.routes.markets.get_strategy_watchlist` | `PASSIVE_READ` | `operator` | `getStrategyWatchlist` | Explicit model: StrategyWatchlistResponse | Strategy-watchlist projection with sync=false. |
+| GET | `/system/health` | `app.api.routes.health.system_health_check` | `PASSIVE_READ` | `internal/diagnostic` | None | Explicit model: SystemHealthResponse | Aggregated health projection. |
+| GET | `/system/limits` | `app.api.routes.system.get_system_operating_limits` | `PASSIVE_READ` | `operator` | `getSystemOperatingLimits` | Explicit model: SystemOperatingLimitsResponse | Settings and operating-limits projection. |
+| GET | `/system/telemetry` | `app.api.routes.health.operational_telemetry` | `PASSIVE_READ` | `internal/diagnostic` | `getOperationalTelemetry`, `getBrokerAuthStatus` | Explicit model: OperationalTelemetryResponse | Aggregated telemetry projection. |
+| GET | `/trades` | `app.api.routes.trades.list_trades` | `PASSIVE_READ` | `operator` | `getTrades` | Explicit model: list[TradeResponse] | Trade-history read. |
+| GET | `/trades/positions` | `app.api.routes.trades.list_positions_compat` | `PASSIVE_READ` | `operator` | `getOpenPositions` | Explicit model: list[OpenPositionResponse] | Frontend-consumed compatibility positions read. |
+| GET | `/watchlist/shortlist` | `app.api.routes.markets.get_shortlist` | `PASSIVE_READ` | `operator` | None | Explicit model: ShortlistResponse | Shortlist projection. |
+| POST | `/allocation/alerts/{alert_id}/acknowledge` | `app.api.routes.allocation.acknowledge_allocation_alert` | `MUTATION` | `operator` | `acknowledgeAllocationAlert` | Explicit model: AllocationAlertMutationResponse | Acknowledges an allocation alert. |
+| POST | `/allocation/alerts/{alert_id}/resolve` | `app.api.routes.allocation.resolve_allocation_alert` | `MUTATION` | `operator` | `resolveAllocationAlert` | Explicit model: AllocationAlertMutationResponse | Resolves an allocation alert. |
+| POST | `/control-plane/reconcile` | `app.api.routes.control_plane.reconcile_control_plane` | `MUTATION` | `operator` | None | Explicit model: ControlPlaneReconcileResponse | Deployment/runtime reconciliation mutation. |
+| POST | `/reviews/questions` | `app.api.routes.ai_reviewer.answer_operational_question` | `MUTATION` | `operator` | `askOperationalQuestion` | Explicit model: OperationalQuestionReviewResponse | Explicit advisory-question persistence route. |
+| POST | `/strategies/{name}/start` | `app.api.routes.strategies.start_strategy_by_name` | `MUTATION` | `operator` | None | Explicit model: StrategyMutationStatusResponse | Compatibility strategy start mutation. |
+| POST | `/strategies/{name}/stop` | `app.api.routes.strategies.stop_strategy_by_name` | `MUTATION` | `operator` | None | Explicit model: StrategyMutationStatusResponse | Compatibility strategy stop mutation. |
+| POST | `/strategy-watchlist/bulk` | `app.api.routes.markets.add_strategy_watchlist_items` | `MUTATION` | `operator` | `addStrategyWatchlistInstruments` | Explicit model: StrategyWatchlistBulkResponse | Bulk strategy-watchlist mutation. |
+| POST | `/strategy/start` | `app.api.routes.strategies.start_strategy` | `MUTATION` | `operator` | `startStrategy` | Explicit model: StrategyMutationStatusResponse | Strategy start mutation. |
+| POST | `/strategy/stop` | `app.api.routes.strategies.stop_strategy` | `MUTATION` | `operator` | `stopStrategy` | Explicit model: StrategyMutationStatusResponse | Strategy stop mutation. |
+| POST | `/testing/reset-history` | `app.api.routes.testing.reset_history` | `TEST_ONLY_MUTATION` | `test-only` | `resetTestHistory` | Explicit model: ResetHistoryResponse | Conditional destructive test reset route. Registered only when `TESTING_ROUTES_ENABLED=true`. |
+| POST | `/watchlist/shortlist/{instrument_id}` | `app.api.routes.markets.add_shortlist_item` | `MUTATION` | `operator` | `addShortlistInstrument` | Explicit model: ShortlistMutationResponse | Shortlist add mutation. |
+| PUT | `/control-plane/governance/{strategy_name}` | `app.api.routes.control_plane.update_strategy_governance` | `MUTATION` | `operator` | `updateStrategyGovernance` | Explicit model: GovernanceMutationResponse | Governance mutation. |
+| PUT | `/control-plane/operator-state` | `app.api.routes.control_plane.update_operator_control_state` | `MUTATION` | `operator` | `updateOperatorControlState` | Explicit model: OperatorControlResponse | Operator override mutation. |
 
-## Recommended route documentation tests
+## Reviewed raw-response exceptions
 
-- Assert the registered route inventory matches this document and `docs/spec/04-backend-api-contract.md`.
-- Add no-write tests for routes documented as `PASSIVE_READ`.
-- Add explicit side-effect tests for `ACTIVE_READ_REFRESH` routes.
-- Add broker-call provenance tests for `BROKER_READ` routes.
-- Keep response-schema contract tests current for any future frontend-consumed operator reads. Existing remaining raw chart routes such as `/charts/equity` and `/charts/drawdown` are not currently confirmed frontend consumers.
-- Maintain production-gating tests for `TEST_ONLY_MUTATION` routes.
+- `GET /health`: Static service heartbeat used for local diagnostics only; not a current frontend-consumed operator contract.
+- `GET /charts/equity`: Persisted chart projection not currently consumed by frontend/lib/api.ts; keep raw until an operator surface depends on it.
+- `GET /charts/drawdown`: Persisted chart projection not currently consumed by frontend/lib/api.ts; keep raw until an operator surface depends on it.
+
+## Guardrails
+
+- Registered FastAPI routes are checked against the checked-in manifest.
+- A new route fails the check if it is undocumented, unclassified, or wired to a different handler than the manifest expects.
+- Mutation routes and query-triggered active-read routes fail the check if they bypass `requires_operator_auth()`.
+- Test-only routes fail the check if they register outside the explicit testing gate.
+- Raw responses are allowed only through a reviewed exception entry with rationale.
+- Frontend-consumed route families are expected to keep explicit backend response models; the reviewed raw-exception path is reserved for deliberate cases only.
