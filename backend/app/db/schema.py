@@ -43,7 +43,23 @@ MODEL_TYPES = (
     WatchlistEntry,
 )
 
+BASELINE_MODEL_TYPES = tuple(
+    model_type for model_type in MODEL_TYPES if model_type is not ObservabilityState
+)
+
 
 def load_sqlmodel_metadata():
     _ = MODEL_TYPES
     return SQLModel.metadata
+
+
+def baseline_schema_tables():
+    metadata = load_sqlmodel_metadata()
+    return [
+        metadata.tables[model_type.__tablename__] for model_type in BASELINE_MODEL_TYPES
+    ]
+
+
+def observability_schema_tables():
+    metadata = load_sqlmodel_metadata()
+    return [metadata.tables[ObservabilityState.__tablename__]]

@@ -26,3 +26,6 @@ testpaths = ["tests"]
 addopts = "-ra"
 faulthandler_timeout = 60
 faulthandler_exit_on_timeout = true
+markers = [
+  "postgres_rehearsal: exercises Alembic migrations against a temporary PostgreSQL database",
+]

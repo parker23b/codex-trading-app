@@ -23,7 +23,7 @@ The current blocking themes are:
 - any future operator-critical raw dict/list routes still need explicit contract ownership even though the currently known frontend-consumed route boundary is now modeled
 - current backend durable-audit coverage is now inventory-backed for the present mutation, broker-action, and safety-critical background path set; remaining best-effort events are intentional informational paths, and future broker-action/route risk is now handled by guard tests instead of remaining a present-tense backend blocker
 - frontend operator truth now has selected browser/e2e coverage for stale, degraded, manual-review, passive-vs-mutation, simulated-vs-broker-confirmed, mutation-failure, events attention, test-only reset gating, and telemetry degradation states across events/dashboard/live/risk/strategies/AIMEE/control-plane/coverage/markets, but broad browser/e2e coverage is still incomplete
-- covered backend logging/API-error/domain-event redaction is now in place, covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position payloads now sanitize free-text and detail fields before commit, repo-level secret/history scan guardrails now block common local secret/SQLite/dump/test-artifact commits, dependency lock/audit tooling is now repeatable for Python and npm, and versioned Alembic migrations plus SQLite drift checks now exist. Health and telemetry now aggregate the targeted operator degradation states across workers with explicit staleness and worker identity, while keeping non-target diagnostics clearly labelled as current-process only. Broader secrets hygiene, supply-chain provenance, non-SQLite migration evidence, functional raw-identifier columns, and historical cleanup remain below readiness grade
+- covered backend logging/API-error/domain-event redaction is now in place, covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position payloads now sanitize free-text and detail fields before commit, repo-level secret/history scan guardrails now block common local secret/SQLite/dump/test-artifact commits, dependency lock/audit tooling is now repeatable for Python and npm, and versioned Alembic migrations now have both SQLite drift checks and a CI-wired Postgres rehearsal path. Health and telemetry now aggregate the targeted operator degradation states across workers with explicit staleness and worker identity, while keeping non-target diagnostics clearly labelled as current-process only. Broader secrets hygiene, unversioned legacy non-SQLite migration handling, functional raw-identifier columns, and historical cleanup remain below readiness grade
 
 The canonical blocker list is in [audit-status.md](audit-status.md).
 
@@ -35,7 +35,7 @@ The canonical blocker list is in [audit-status.md](audit-status.md).
 - The remaining backend audit risk is no longer “unknown current mutation/background paths”; it is future-path discipline plus broader operator/frontend breadth.
 - Candidate-only strategy events are intentionally best-effort informational, not lifecycle audit proof, even when they remain useful for observability.
 - Browser/e2e operator-state coverage is improved, including selected manual-review, control-plane mismatch, events attention/test-only truth, telemetry degradation, and market-data fallback/stale truth, but it is still too narrow for readiness claims.
-- Database evolution now uses Alembic plus migration/drift tests, but existing unversioned non-SQLite databases still require explicit manual upgrade and SQLite expression-index drift still depends on targeted checks.
+- Database evolution now uses Alembic plus SQLite drift checks and a Postgres migration rehearsal, but existing unversioned non-SQLite databases still require explicit manual upgrade and some dialect-specific indexes still depend on targeted assertions rather than generic autogenerate comparison.
 - Python and npm dependency locking plus vulnerability gates are now repeatable, third-party Python dependencies can now be hash-verified, and backend/frontend SBOM generation now exists, but the editable local backend package remains outside hash enforcement and the repo still lacks broader non-Python/Node dependency scanning and stronger provenance attestation.
 - Covered logs, mirrored domain events, IG adapter failures, and operator-facing API errors now redact tokens, account identifiers, broker references, raw adapter payloads, and tracebacks, and covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position free-text and detail fields now redact the same patterns before commit. Required audit-write failures now also surface in health/telemetry as degraded state, and targeted degradation states now aggregate across workers with stale-expiry handling, but remaining readiness gaps still include raw identifier columns required for lifecycle authority, broader secrets hygiene, and broader operator/frontend evidence. Intentional best-effort informational events are not counted as durable lifecycle audit proof.
 - Repo-local guardrails now make it harder to commit `.env*` secrets, SQLite DBs, broker dumps, captured session tokens, logs, and Playwright/test artifacts, but historical repository cleanup and credential rotation still require manual action outside this repository.
@@ -178,21 +178,40 @@ The repository now has repeatable schema commands:
 - `cd backend && .venv/bin/alembic current`
 - `cd backend && .venv/bin/alembic upgrade head`
 - `cd backend && .venv/bin/python -m pytest tests/test_database_migrations.py tests/test_initialize_database.py -q`
+- `cd backend && POSTGRES_REHEARSAL_ADMIN_URL=postgresql+psycopg://postgres:postgres@127.0.0.1:5432/postgres .venv/bin/python -m pytest tests/test_postgres_migration_rehearsal.py -m postgres_rehearsal -q`
 
-Current posture as of 2026-05-21:
+Current posture as of 2026-06-01:
 
 - startup no longer treats `create_all()` as the migration system; `backend/app/db/init_db.py` now runs versioned Alembic upgrades through `backend/app/db/migrations.py`
-- `backend/alembic/versions/20260521_01_initial_schema.py` captures the current intended SQLModel schema, including the active `TradeIntent` partial unique index
+- `backend/alembic/versions/20260521_01_initial_schema.py` and `backend/alembic/versions/20260529_01_observability_state.py` now create schema from model-owned metadata instead of SQLite-oriented raw DDL, so the versioned migration path is portable enough to rehearse on Postgres rather than only infer from SQLite
 - backend test DB fixtures now start from a migrated SQLite template instead of raw `SQLModel.metadata.create_all()`
 - the old SQLite patch helpers were not kept as the normal runtime path; they were moved behind an explicit legacy SQLite compatibility upgrade for pre-migration local databases only
 - migration tests now prove empty SQLite upgrade, schema-vs-metadata drift checks, critical index presence, and `StrategyRuntimeState.control_mode` / `runtime_mode` nullability-default normalization
-- CI and pre-push now run the migration/drift test file explicitly before the broader backend suite
+- Postgres rehearsal tests now prove:
+  - empty Postgres upgrade to `head`
+  - metadata-aligned schema after migration, with targeted assertions for partial/expression/descending indexes
+  - active `TradeIntent` uniqueness protection
+  - runtime control/runtime-mode nullability and defaults
+  - `runtimelease`
+  - `observabilitystate`
+  - lifecycle and audit tables including `execution`, `position`, `trade`, `reconciliationevent`, `domain_events`, and `allocationalert`
+  - one versioned transition from `20260521_01` to `20260529_01`
+  - refusal of existing unversioned non-SQLite databases without auto-stamp
+- CI now runs both the fast SQLite migration suite and a Postgres service-container rehearsal; pre-push stays SQLite-only so ordinary local loops do not require Docker or a running Postgres server
 
 Remaining database risks:
 
-- existing unversioned non-SQLite databases are intentionally not auto-stamped or auto-rewritten
-- SQLite expression/descending index comparison still needs explicit assertions because Alembic autogenerate cannot round-trip those structures cleanly
-- this PR does not add a Postgres CI database or production migration rehearsal
+- existing unversioned non-SQLite databases are intentionally not auto-stamped or auto-rewritten; the required path is to create a fresh versioned database with Alembic and move data by manual export/import or a reviewed one-off migration
+- generic Alembic autogenerate comparison still does not fully prove partial/expression/descending indexes across dialects, so those structures remain covered by targeted assertions rather than by a pure metadata diff
+- this improves schema portability evidence materially, but it does not claim full production-grade database portability, historical data migration tooling, or live/demo readiness
+
+Commands run for this slice on 2026-06-01:
+
+- `cd backend && .venv/bin/python -m pytest tests/test_database_migrations.py tests/test_initialize_database.py -q` -> `4 passed`
+- `cd backend && .venv/bin/python -m pytest tests/test_postgres_migration_rehearsal.py -q` -> `5 skipped` locally because `POSTGRES_REHEARSAL_ADMIN_URL` was not set and no supported local Postgres server was available in this environment
+- `cd backend && .venv/bin/python -m pytest tests -q` -> `449 passed, 5 skipped`
+- `python3 scripts/check_spec_coverage_matrix.py` -> `PASS`
+- `git diff --check` -> passed
 
 ## Secrets Hygiene Status
 

@@ -146,6 +146,8 @@ source .venv/bin/activate
 alembic current
 alembic upgrade head
 pytest tests/test_database_migrations.py -q
+POSTGRES_REHEARSAL_ADMIN_URL=postgresql+psycopg://postgres:postgres@127.0.0.1:5432/postgres \
+  pytest tests/test_postgres_migration_rehearsal.py -m postgres_rehearsal -q
 ```
 
 Frontend checks:
@@ -182,7 +184,7 @@ The short version:
 - backend mutation and broker-adjacent routes do not yet have a production-grade auth boundary
 - `/testing/reset-history` is destructive and not yet production-gated
 - broker confirmation ambiguity, mutation/test-route auth gaps, and duplicate runtime-loop risks still have P0 findings
-- database schema evolution still needs broader non-SQLite migration rehearsal even though Alembic and SQLite drift checks now exist
+- database migrations now have SQLite drift checks plus a Postgres rehearsal path, but unversioned non-SQLite legacy databases still require manual export/import or a reviewed one-off migration and targeted index assertions remain necessary for some dialect-specific structures
 - route, frontend, full-stack, broker-fake, domain-event, migration, dependency, and observability evidence remains incomplete
 
 The source of truth is [docs/audit-status.md](docs/audit-status.md).

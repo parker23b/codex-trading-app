@@ -375,7 +375,7 @@ def test_audit_obs_001_trade_intent_audit_failure_marks_intent(session, monkeypa
 def test_audit_test_002_decision_flow_links_allocation_and_intent_audit_events(
     session, broker, fixed_now, monkeypatch
 ):
-    now = datetime.now(UTC)
+    now = fixed_now
     _enable_live_entry_context(monkeypatch, now)
     runtime_manager.last_price_updated_at[INSTRUMENT] = now
     result = TradeDecisionService(session).decide_signal_candidates(

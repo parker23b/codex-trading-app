@@ -109,6 +109,7 @@ Backend env file: `backend/.env`.
 Most important backend variables:
 
 - `DATABASE_URL` - SQLModel connection string. Relative SQLite paths are normalized against `backend/`.
+  Supported posture today: clean SQLite development remains the default, versioned Postgres creation/rehearsal is supported for migration proof, and existing unversioned non-SQLite databases are intentionally refused at startup until they are migrated manually.
 - `BROKER_PROVIDER` - current allowed value is `IG`.
 - `BROKER_MODE` - `DEMO` or `LIVE`.
 - `IG_TRADING_ENABLED` - safety switch for broker dealing. Keep this `false`.
@@ -142,6 +143,8 @@ source .venv/bin/activate
 alembic current
 alembic upgrade head
 pytest tests/test_database_migrations.py tests/test_initialize_database.py -q
+POSTGRES_REHEARSAL_ADMIN_URL=postgresql+psycopg://postgres:postgres@127.0.0.1:5432/postgres \
+  pytest tests/test_postgres_migration_rehearsal.py -m postgres_rehearsal -q
 ```
 
 Frontend static checks:

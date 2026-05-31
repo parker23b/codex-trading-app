@@ -5,9 +5,8 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import Engine, inspect, text
-from sqlmodel import SQLModel
 
-from app.db.schema import load_sqlmodel_metadata
+from app.db.schema import baseline_schema_tables, load_sqlmodel_metadata
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_INI_PATH = BACKEND_ROOT / "alembic.ini"
@@ -33,7 +32,9 @@ def ensure_database_schema_current(engine: Engine) -> None:
     if engine.dialect.name != "sqlite":
         raise RuntimeError(
             "Existing unversioned non-SQLite databases are not upgraded automatically. "
-            "Migrate them explicitly before starting the app."
+            "Create a fresh versioned database with Alembic and migrate data with a "
+            "manual export/import or a reviewed one-off migration before starting "
+            "the app."
         )
 
     _upgrade_legacy_sqlite_database(engine)
@@ -68,7 +69,8 @@ def _has_user_tables(connection) -> bool:
 
 
 def _upgrade_legacy_sqlite_database(engine: Engine) -> None:
-    SQLModel.metadata.create_all(engine)
+    metadata = load_sqlmodel_metadata()
+    metadata.create_all(engine, tables=baseline_schema_tables())
     _ensure_sqlite_column(engine, "position", "trade_intent_id", "INTEGER")
     _ensure_sqlite_column(engine, "position", "family_name", "VARCHAR")
     _ensure_sqlite_column(engine, "position", "broker_reference", "VARCHAR")

@@ -21,6 +21,20 @@ jobs:
     backend-audit:
         name: backend-audit
         runs-on: ubuntu-latest
+        services:
+            postgres:
+                image: postgres:17
+                env:
+                    POSTGRES_DB: postgres
+                    POSTGRES_USER: postgres
+                    POSTGRES_PASSWORD: postgres
+                ports:
+                    - 5432:5432
+                options: >-
+                    --health-cmd "pg_isready -U postgres -d postgres"
+                    --health-interval 10s
+                    --health-timeout 5s
+                    --health-retries 5
 
         defaults:
             run:
@@ -79,6 +93,11 @@ jobs:
 
             - name: Migration and drift tests
               run: pytest tests/test_database_migrations.py -q
+
+            - name: Postgres migration rehearsal
+              env:
+                  POSTGRES_REHEARSAL_ADMIN_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/postgres
+              run: pytest tests/test_postgres_migration_rehearsal.py -m postgres_rehearsal -q
 
             - name: Pytest
               run: pytest
