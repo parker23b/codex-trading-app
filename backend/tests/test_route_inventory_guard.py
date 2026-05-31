@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 from app.api.route_inventory import (
     ActiveReadVariant,
@@ -11,6 +12,10 @@ from app.api.route_inventory import (
     render_backend_api_routes_markdown,
     validate_route_inventory,
 )
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+ROUTE_DOC_PATH = REPO_ROOT / "docs" / "backend-api-routes.md"
 
 
 def _replace_manifest_entry(path: str, method: str, **changes):
@@ -29,7 +34,7 @@ def test_route_inventory_guard_matches_current_router():
 
 def test_route_inventory_guard_renders_current_docs():
     rendered = render_backend_api_routes_markdown()
-    assert rendered == open("docs/backend-api-routes.md", encoding="utf-8").read()
+    assert rendered == ROUTE_DOC_PATH.read_text(encoding="utf-8")
 
 
 def test_route_inventory_guard_detects_undocumented_route_registration():
