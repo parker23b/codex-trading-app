@@ -1,12 +1,13 @@
 import { Card } from "@/components/ui/card";
-import { formatPrice } from "@/lib/format";
+import { formatIdentifierDisplay, formatPrice } from "@/lib/format";
+import { SafeIdentifier } from "@/lib/types";
 
 type StrategyTapeRow = {
   name: string;
   instrument: string;
   instrumentLabel: string;
   runtimeKey?: string;
-  brokerReference?: string | null;
+  brokerReference?: SafeIdentifier | string | null;
   hasOpenPosition?: boolean;
   lastPrice?: number | null;
 };
@@ -34,7 +35,7 @@ export function StrategyTapePanel({ rows }: StrategyTapePanelProps) {
                 <div className="eyebrow">{row.name}</div>
                 <strong>{row.instrumentLabel}</strong>
                 <div className="muted">
-                  {row.hasOpenPosition ? row.brokerReference ?? "position open" : "scan runtime"}
+                  {row.hasOpenPosition ? formatIdentifierDisplay(row.brokerReference) ?? "position open" : "scan runtime"}
                 </div>
               </div>
               <div className="strategy-tape__price">{row.lastPrice != null ? formatPrice(row.lastPrice, row.instrument) : "Waiting..."}</div>

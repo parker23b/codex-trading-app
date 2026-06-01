@@ -3,6 +3,8 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
 
+from app.api.contracts.identifiers import IdentifierProjection
+from app.core.identifier_policy import identifier_matches_fingerprint, project_identifier
 from app.models.domain_event import DomainEvent
 from app.services.domain_event_service import domain_event_service
 
@@ -17,8 +19,8 @@ class DomainEventResponse(BaseModel):
     severity: str
     error_type: str | None
     source: str
-    correlation_id: str | None
-    runtime_id: str | None
+    correlation_id: IdentifierProjection | None
+    runtime_id: IdentifierProjection | None
     strategy_name: str | None
     instrument: str | None
     position_id: int | None
@@ -40,8 +42,14 @@ def _serialize_event(event: DomainEvent) -> DomainEventResponse:
         severity=event.severity,
         error_type=event.error_type,
         source=event.source,
-        correlation_id=event.correlation_id,
-        runtime_id=event.runtime_id,
+        correlation_id=project_identifier(
+            event.correlation_id,
+            kind="correlation_id",
+        ),
+        runtime_id=project_identifier(
+            event.runtime_id,
+            kind="runtime_id",
+        ),
         strategy_name=event.strategy_name,
         instrument=event.instrument,
         position_id=event.position_id,
@@ -65,6 +73,7 @@ def list_events(
     strategy_name: str | None = Query(default=None),
     instrument: str | None = Query(default=None),
     correlation_id: str | None = Query(default=None),
+    correlation_fingerprint: str | None = Query(default=None),
     since: datetime | None = Query(default=None),
     until: datetime | None = Query(default=None),
 ) -> list[DomainEventResponse]:
@@ -77,6 +86,14 @@ def list_events(
         strategy_name=strategy_name,
         instrument=instrument,
         correlation_id=correlation_id,
+        correlation_filter=(
+            lambda raw: identifier_matches_fingerprint(
+                raw,
+                fingerprint=correlation_fingerprint,
+            )
+        )
+        if correlation_fingerprint
+        else None,
         since=since,
         until=until,
     )

@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlmodel import select
 
+from app.core.identifier_policy import project_identifier
 from app.models.allocation_alert import AllocationAlert
 from app.models.trade import (
     AllocationCycle,
@@ -270,6 +271,22 @@ def test_allocation_contract_routes_expose_nested_risk_truth_and_drift(
                 "percent_drift_abs"
             ]
             == 50.0
+        )
+        assert intent["latest_execution"]["client_request_id"] == project_identifier(
+            "entry-contract-1",
+            kind="request_id",
+        )
+        assert intent["latest_execution"]["broker_reference"] == project_identifier(
+            "deal-contract-1",
+            kind="broker_reference",
+        )
+        assert intent["position"]["broker_reference"] == project_identifier(
+            "deal-contract-1",
+            kind="broker_reference",
+        )
+        assert intent["trade"]["broker_reference"] == project_identifier(
+            "deal-contract-1",
+            kind="broker_reference",
         )
 
         drift_response = client.get("/allocation/drift")

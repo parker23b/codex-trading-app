@@ -127,6 +127,37 @@ test("AUDIT-UI-006 risk alert mutation failure preserves backend detail and does
   await expect(page.getByText("Mutation confirmed after backend alert truth refreshed.")).toHaveCount(0);
 });
 
+test("AUDIT-UI-004 strategies start runtime preserves backend detail during pending failure", async ({ page, request }) => {
+  await setScenario(request, "strategies-start-failure-detail");
+
+  await page.goto("/strategies");
+  await page.getByRole("button", { name: "Start Runtime" }).click();
+
+  await expect(page.getByRole("button", { name: "Starting..." })).toBeVisible();
+  await expect(page.getByText("Runtime start failed: strategy runtime start failed because durable audit persistence is unavailable")).toBeVisible();
+  await expect(page.getByText("Runtime start confirmed after backend truth refreshed")).toHaveCount(0);
+});
+
+test("AUDIT-UI-004 strategies start runtime refresh failure avoids clean success copy", async ({ page, request }) => {
+  await setScenario(request, "strategies-start-refresh-failure");
+
+  await page.goto("/strategies");
+  await page.getByRole("button", { name: "Start Runtime" }).click();
+
+  await expect(page.getByRole("button", { name: "Starting..." })).toBeVisible();
+  await expect(page.getByText("Runtime start succeeded, but backend truth refresh failed: strategy truth refresh failed after runtime start")).toBeVisible();
+  await expect(page.getByText("Runtime start confirmed after backend truth refreshed")).toHaveCount(0);
+});
+
+test("AUDIT-UI-004 strategies start runtime disabled reason is explicit when launch truth is unavailable", async ({ page, request }) => {
+  await setScenario(request, "strategies-start-disabled-reason");
+
+  await page.goto("/strategies");
+
+  await expect(page.getByRole("button", { name: "Start Runtime" })).toBeDisabled();
+  await expect(page.getByText("Start unavailable because backend launch instrument truth is unavailable.")).toBeVisible();
+});
+
 test("FLOW-EXIT-001 strategies view keeps broker-confirmed open-risk stop truth visible", async ({ page, request }) => {
   await setScenario(request, "strategies-open-risk");
 
@@ -136,6 +167,41 @@ test("FLOW-EXIT-001 strategies view keeps broker-confirmed open-risk stop truth 
   await expect(page.locator("span.muted").filter({ hasText: "BROKER-OPEN-1" }).first()).toBeVisible();
   await expect(page.getByText("Stopping this runtime does not close broker-confirmed open risk.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Stop Runtime" })).toBeVisible();
+});
+
+test("FLOW-EXIT-001 strategies stop runtime requires explicit open-risk confirmation and keeps stop side effects visible", async ({ page, request }) => {
+  await setScenario(request, "strategies-stop-open-risk-confirmation");
+
+  await page.goto("/strategies");
+  await page.getByRole("button", { name: "Stop Runtime" }).click();
+
+  await expect(page.getByText("Stop only ends the selected runtime process. Broker-confirmed open risk remains live and may still need an exit-capable runtime, recovery path, or manual review.")).toBeVisible();
+  await page.getByRole("button", { name: "Confirm Stop Runtime" }).click();
+
+  await expect(page.getByRole("button", { name: "Stopping..." }).first()).toBeVisible();
+  await expect(page.getByText("Runtime stop confirmed after backend truth refreshed for Breakout on", { exact: false })).toBeVisible();
+});
+
+test("AUDIT-UI-006 strategies stop runtime failure preserves backend detail after open-risk confirmation", async ({ page, request }) => {
+  await setScenario(request, "strategies-stop-failure-detail");
+
+  await page.goto("/strategies");
+  await page.getByRole("button", { name: "Stop Runtime" }).click();
+  await page.getByRole("button", { name: "Confirm Stop Runtime" }).click();
+
+  await expect(page.getByRole("button", { name: "Stopping..." }).first()).toBeVisible();
+  await expect(page.getByText("Runtime stop failed: runtime stop failed because open-risk handoff audit persistence failed")).toBeVisible();
+  await expect(page.getByText("Runtime stop confirmed after backend truth refreshed")).toHaveCount(0);
+});
+
+test("AUDIT-LIFE-005 strategies execution feed keeps simulated local fill provenance distinct from broker-confirmed truth", async ({ page, request }) => {
+  await setScenario(request, "strategies-execution-simulated-provenance");
+
+  await page.goto("/strategies");
+  await page.getByRole("button", { name: "Execution Feed" }).click();
+
+  await expect(page.getByText("Simulated local fill")).toBeVisible();
+  await expect(page.getByText("Broker confirmed")).toHaveCount(0);
 });
 
 test("FLOW-AIMEE-001 passive AIMEE refresh stays read-only until explicit advisory submission", async ({ page, request }) => {
@@ -225,6 +291,16 @@ test("FLOW-MARKET-DATA-001 coverage view keeps polling fallback distinct from he
   await expect(page.getByText("No live tick")).toBeVisible();
 });
 
+test("FLOW-MARKET-DATA-001 coverage view keeps unknown tick freshness distinct from healthy streaming truth", async ({ page, request }) => {
+  await setScenario(request, "coverage-unknown-freshness");
+
+  await page.goto("/coverage");
+
+  await expect(page.getByText("Stream state unknown")).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Unknown", exact: true })).toBeVisible();
+  await expect(page.getByText("Streaming", { exact: true })).toHaveCount(0);
+});
+
 test("AUDIT-UI-006 markets view keeps unavailable catalogue truth distinct from zero healthy markets", async ({ page, request }) => {
   await setScenario(request, "markets-unavailable-truth");
 
@@ -245,6 +321,43 @@ test("FLOW-MARKET-DATA-001 markets watchlist provenance does not imply trading a
   await expect(page.getByText("Evaluation candidate only")).toBeVisible();
   await expect(page.getByText("Not trading approval. Entry still depends on governance, risk, broker, and market-data gates.")).toBeVisible();
   await expect(page.getByText("Trading approved")).toHaveCount(0);
+});
+
+test("AUDIT-UI-004 markets shortlist mutation failure preserves backend detail and supports retry without premature success", async ({ page, request }) => {
+  await setScenario(request, "markets-shortlist-failure-retry");
+
+  await page.goto("/markets");
+  await page.getByRole("button", { name: "Add to shortlist" }).click();
+
+  await expect(page.getByText("Shortlist mutation failed: shortlist write failed because operator audit persistence is unavailable")).toBeVisible();
+  await page.getByRole("button", { name: "Add to shortlist" }).click();
+
+  await expect(page.getByText("Shortlist mutation confirmed after backend truth refreshed for", { exact: false })).toBeVisible();
+  await expect(page.getByText("Shortlist mutation failed: shortlist write failed because operator audit persistence is unavailable")).toHaveCount(0);
+});
+
+test("AUDIT-UI-004 markets strategy-watchlist add refresh failure avoids clean success copy", async ({ page, request }) => {
+  await setScenario(request, "markets-watchlist-add-refresh-failure");
+
+  await page.goto("/markets");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+
+  await expect(page.getByRole("button", { name: "Adding..." }).first()).toBeVisible();
+  await expect(page.getByText("Strategy watchlist mutation succeeded, but backend truth refresh failed: strategy watchlist refresh failed after mutation")).toBeVisible();
+  await expect(page.getByText("Strategy watchlist mutation confirmed after backend truth refreshed.")).toHaveCount(0);
+});
+
+test("AUDIT-UI-004 markets strategy-watchlist remove confirms refreshed backend truth without implying approval", async ({ page, request }) => {
+  await setScenario(request, "markets-watchlist-remove-confirmed");
+
+  await page.goto("/markets");
+
+  await expect(page.getByText("Evaluation candidates. Not trading approval.")).toBeVisible();
+  await page.getByRole("button", { name: "Remove", exact: true }).click();
+
+  await expect(page.getByRole("button", { name: "Removing..." })).toBeVisible();
+  await expect(page.getByText("Strategy watchlist removal confirmed after backend truth refreshed for", { exact: false })).toBeVisible();
+  await expect(page.getByText("No active strategy watchlist instruments.")).toBeVisible();
 });
 
 test("AUDIT-UI-004 control-plane mutation refresh failure preserves backend detail and avoids clean success copy", async ({ page, request }) => {

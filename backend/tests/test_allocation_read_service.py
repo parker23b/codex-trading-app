@@ -15,7 +15,7 @@ from app.core.broker import (
 from app.core.config import get_settings
 from app.core.runtime import runtime_manager
 from app.core.signals import EntrySignal, SignalCandidate, SignalKind
-from app.models.trade import Position, TradeIntentState
+from app.models.trade import Position, TradeIntent, TradeIntentState
 from app.services.allocation_alert_service import AllocationAlertService
 from app.services.allocation_read_service import AllocationReadService
 from app.services.capital_allocator_service import CapitalAllocatorService
@@ -634,25 +634,22 @@ def test_exposure_summary_separates_reserved_and_live_risk(session, broker, fixe
         equity=10_000.0,
         account_type=AccountType.DEMO,
     )
-    decision = TradeDecisionService(session).decide_signal_candidates(
-        [
-            _candidate(
-                strategy_name="reserve_only",
-                instrument="CS.D.EURUSD.MINI.IP",
-                direction=OrderDirection.BUY,
-                signal_at=fixed_now,
-                broker=broker,
-                family_name="trend",
-                stop_loss_price=1.0990,
-            )
-        ],
-        received_at=fixed_now,
-    )[0]
     trade_service = TradeService(session)
-    trade_service.transition_trade_intent(
-        decision.intent,
-        state=TradeIntentState.APPROVED,
-        submitted_risk_amount=decision.intent.estimated_risk_amount,
+    trade_service.create_trade_intent(
+        TradeIntent(
+            strategy_name="reserve_only",
+            family_name="trend",
+            instrument="CS.D.EURUSD.MINI.IP",
+            direction=OrderDirection.BUY.value,
+            state=TradeIntentState.APPROVED.value,
+            signal_time=fixed_now,
+            proposed_size=1.0,
+            allocated_size=1.0,
+            estimated_risk_amount=50.0,
+            submitted_risk_amount=50.0,
+            proposed_risk_percent=0.5,
+            allocated_risk_percent=0.5,
+        )
     )
     trade_service.record_broker_position(
         Position(
@@ -836,37 +833,55 @@ def test_directional_currency_exposure_tracks_net_bias(session, broker, fixed_no
         equity=10_000.0,
         account_type=AccountType.DEMO,
     )
-    decisions = TradeDecisionService(session).decide_signal_candidates(
-        [
-            _candidate(
-                strategy_name="eur_trend",
-                instrument="CS.D.EURUSD.MINI.IP",
-                direction=OrderDirection.BUY,
-                signal_at=fixed_now,
-                broker=broker,
-                family_name="trend",
-                stop_loss_price=1.0990,
-            ),
-            _candidate(
-                strategy_name="gbp_trend",
-                instrument="CS.D.GBPUSD.MINI.IP",
-                direction=OrderDirection.BUY,
-                signal_at=fixed_now + timedelta(seconds=1),
-                broker=broker,
-                family_name="trend",
-                stop_loss_price=1.2490,
-                price=1.25,
-            ),
-        ],
-        received_at=fixed_now,
-    )
     trade_service = TradeService(session)
-    for result in decisions:
-        trade_service.transition_trade_intent(
-            result.intent,
-            state=TradeIntentState.APPROVED,
-            submitted_risk_amount=result.intent.estimated_risk_amount,
+    trade_service.create_trade_intent(
+        TradeIntent(
+            strategy_name="eur_trend",
+            family_name="trend",
+            instrument="CS.D.EURUSD.MINI.IP",
+            direction=OrderDirection.BUY.value,
+            state=TradeIntentState.APPROVED.value,
+            signal_time=fixed_now,
+            proposed_size=1.0,
+            allocated_size=1.0,
+            estimated_risk_amount=50.0,
+            submitted_risk_amount=50.0,
+            proposed_risk_percent=0.5,
+            allocated_risk_percent=0.5,
+            details={
+                "allocation": {
+                    "broker_details": {
+                        "base_currency": "EUR",
+                        "quote_currency": "USD",
+                    }
+                }
+            },
         )
+    )
+    trade_service.create_trade_intent(
+        TradeIntent(
+            strategy_name="gbp_trend",
+            family_name="trend",
+            instrument="CS.D.GBPUSD.MINI.IP",
+            direction=OrderDirection.BUY.value,
+            state=TradeIntentState.APPROVED.value,
+            signal_time=fixed_now + timedelta(seconds=1),
+            proposed_size=1.0,
+            allocated_size=1.0,
+            estimated_risk_amount=40.0,
+            submitted_risk_amount=40.0,
+            proposed_risk_percent=0.4,
+            allocated_risk_percent=0.4,
+            details={
+                "allocation": {
+                    "broker_details": {
+                        "base_currency": "GBP",
+                        "quote_currency": "USD",
+                    }
+                }
+            },
+        )
+    )
 
     summary = AllocationReadService(session).get_exposure_summary()
     usd = next(

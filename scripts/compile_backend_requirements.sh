@@ -31,6 +31,7 @@ compile_requirements() {
 
   "$PYTHON_BIN" -m piptools compile \
     --resolver=backtracking \
+    --upgrade \
     --strip-extras \
     --no-header \
     --cache-dir "$PIP_TOOLS_CACHE_DIR" \
@@ -45,6 +46,7 @@ compile_dev_requirements() {
 
   "$PYTHON_BIN" -m piptools compile \
     --resolver=backtracking \
+    --upgrade \
     --no-header \
     --cache-dir "$PIP_TOOLS_CACHE_DIR" \
     "$@" \

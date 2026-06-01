@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlmodel import Session
 
+from app.api.contracts.identifiers import IdentifierProjection
+from app.core.identifier_policy import project_identifier
 from app.db.session import get_session
 from app.models.trade import Execution
 from app.services.trade_service import TradeService
@@ -18,8 +20,8 @@ class ExecutionResponse(BaseModel):
     instrument: str
     phase: str
     status: str
-    client_request_id: str | None
-    broker_reference: str | None
+    client_request_id: IdentifierProjection | None
+    broker_reference: IdentifierProjection | None
     local_position_id: int | None
     local_trade_id: int | None
     signal_time: datetime
@@ -65,8 +67,14 @@ def _serialize_execution(execution: Execution) -> ExecutionResponse:
         instrument=execution.instrument,
         phase=execution.phase,
         status=execution.status,
-        client_request_id=execution.client_request_id,
-        broker_reference=execution.broker_reference,
+        client_request_id=project_identifier(
+            execution.client_request_id,
+            kind="request_id",
+        ),
+        broker_reference=project_identifier(
+            execution.broker_reference,
+            kind="broker_reference",
+        ),
         local_position_id=execution.local_position_id,
         local_trade_id=execution.local_trade_id,
         signal_time=execution.signal_time,

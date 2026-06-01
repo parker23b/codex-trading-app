@@ -5,6 +5,7 @@ from collections import Counter
 from sqlmodel import Session, desc, select
 
 from app.core.config import get_settings
+from app.core.identifier_policy import project_identifier
 from app.models.domain_event import DomainEvent
 from app.models.runtime import StrategyRuntimeState
 from app.models.strategy_deployment import StrategyDeployment
@@ -242,7 +243,10 @@ class ControlPlaneService:
                 "updated_at": None,
                 "persisted_runtimes": [
                     {
-                        "runtime_id": runtime.runtime_id,
+                        "runtime_id": project_identifier(
+                            runtime.runtime_id,
+                            kind="runtime_id",
+                        ),
                         "status": runtime.status,
                         "instrument": runtime.instrument,
                         "control_mode": runtime.control_mode,
@@ -256,7 +260,10 @@ class ControlPlaneService:
             }
         return {
             "is_running": True,
-            "active_runtime_id": active_runtime.runtime_id,
+            "active_runtime_id": project_identifier(
+                active_runtime.runtime_id,
+                kind="runtime_id",
+            ),
             "active_instrument": active_runtime.instrument,
             "active_profile_name": active_runtime.active_profile_name,
             "active_parameters": active_runtime.parameters,
@@ -266,7 +273,10 @@ class ControlPlaneService:
             "updated_at": active_runtime.updated_at,
             "persisted_runtimes": [
                 {
-                    "runtime_id": runtime.runtime_id,
+                    "runtime_id": project_identifier(
+                        runtime.runtime_id,
+                        kind="runtime_id",
+                    ),
                     "status": runtime.status,
                     "instrument": runtime.instrument,
                     "control_mode": runtime.control_mode,

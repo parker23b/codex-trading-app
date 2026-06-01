@@ -4,14 +4,16 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel
 
+from app.api.contracts.identifiers import IdentifierProjection
+from app.core.identifier_policy import project_identifier
 from app.models.trade import Position, Trade
 
 
 class TradeResponse(BaseModel):
     id: int
     strategy_name: str
-    broker_reference: str | None
-    close_broker_reference: str | None
+    broker_reference: IdentifierProjection | None
+    close_broker_reference: IdentifierProjection | None
     close_execution_source: str | None
     instrument: str
     direction: str
@@ -32,7 +34,7 @@ class TradeResponse(BaseModel):
 class OpenPositionResponse(BaseModel):
     id: int
     strategy_name: str
-    broker_reference: str | None
+    broker_reference: IdentifierProjection | None
     instrument: str
     direction: str
     size: float
@@ -59,8 +61,14 @@ def serialize_trade(trade: Trade) -> TradeResponse:
     return TradeResponse(
         id=trade.id or 0,
         strategy_name=trade.strategy_name,
-        broker_reference=trade.broker_reference,
-        close_broker_reference=trade.close_broker_reference,
+        broker_reference=project_identifier(
+            trade.broker_reference,
+            kind="broker_reference",
+        ),
+        close_broker_reference=project_identifier(
+            trade.close_broker_reference,
+            kind="broker_reference",
+        ),
         close_execution_source=trade.close_execution_source,
         instrument=trade.instrument,
         direction=trade.direction,
@@ -86,7 +94,10 @@ def serialize_open_position(
     return OpenPositionResponse(
         id=position.id or 0,
         strategy_name=position.strategy_name,
-        broker_reference=position.broker_reference,
+        broker_reference=project_identifier(
+            position.broker_reference,
+            kind="broker_reference",
+        ),
         instrument=position.instrument,
         direction=position.direction,
         size=position.size,

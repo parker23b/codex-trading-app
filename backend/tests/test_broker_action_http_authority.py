@@ -126,6 +126,15 @@ def _assert_runtime_authority(execution: Execution, expected_route_source: str) 
     assert runtime_authority["correlation_id"]
 
 
+def _assert_sanitized_runtime_authority_snapshot(snapshot: dict[str, object]) -> None:
+    assert snapshot["authority_kind"] == "http_route"
+    assert snapshot["route_source"]
+    assert snapshot["route_path"]
+    assert snapshot["actor_type"] == "operator"
+    assert snapshot["actor_id"] == "operator"
+    assert str(snapshot["correlation_id"]).startswith("[REDACTED_CORRELATION_ID:")
+
+
 def _route_file(path: str) -> Path:
     return Path(__file__).resolve().parents[1] / Path(path).relative_to("backend")
 
@@ -235,7 +244,9 @@ def test_audit_api_008_strategy_start_http_route_reachable_entry_preserves_autho
     assert operator_started.actor_id == "operator"
     assert operator_started.correlation_id == "route-start-entry-1"
     assert operator_started.runtime_id == runtime.runtime_id
-    assert operator_started.payload_json["startup_context"] == runtime.startup_context
+    _assert_sanitized_runtime_authority_snapshot(
+        operator_started.payload_json["startup_context"]
+    )
     _assert_runtime_authority(execution, "api.strategy.start")
     assert position_opened.execution_id == execution.id
     assert position_opened.position_id == execution.local_position_id
@@ -245,9 +256,8 @@ def test_audit_api_008_strategy_start_http_route_reachable_entry_preserves_autho
     assert position_opened.payload_json["broker_reference"].startswith(
         "[REDACTED_BROKER_REF:"
     )
-    assert (
+    _assert_sanitized_runtime_authority_snapshot(
         position_opened.payload_json["details"]["runtime_authority"]
-        == runtime.startup_context
     )
 
 
@@ -349,9 +359,8 @@ def test_audit_api_008_strategy_start_by_name_route_reachable_close_preserves_ma
         "[REDACTED_BROKER_REF:"
     )
     assert manual_review_event.payload_json["requires_manual_review"] is True
-    assert (
+    _assert_sanitized_runtime_authority_snapshot(
         manual_review_event.payload_json["details"]["runtime_authority"]
-        == runtime.startup_context
     )
 
 
@@ -472,7 +481,10 @@ def test_audit_api_008_strategy_stop_http_route_persists_stop_context_and_runtim
     assert operator_stopped.correlation_id == "route-stop-1"
     assert operator_stopped.payload_json["previous_state"] == "RUNNING"
     assert operator_stopped.payload_json["new_state"] == "STOPPED"
-    assert operator_stopped.payload_json["stopped_runtime_ids"] == [runtime.runtime_id]
+    assert len(operator_stopped.payload_json["stopped_runtime_ids"]) == 1
+    assert operator_stopped.payload_json["stopped_runtime_ids"][0].startswith(
+        "[REDACTED_RUNTIME_ID:"
+    )
 
 
 def test_audit_api_008_strategy_stop_by_name_http_route_persists_stop_context_and_runtime_ids(

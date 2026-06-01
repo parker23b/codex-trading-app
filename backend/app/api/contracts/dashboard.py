@@ -4,11 +4,13 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.api.contracts.identifiers import IdentifierProjection
+
 
 class DashboardBrokerInfoResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    accountId: str
+    accountId: IdentifierProjection
     accountType: Literal["DEMO", "LIVE"]
     balance: float
     available: float
@@ -22,7 +24,7 @@ class DashboardRunningStrategyResponse(BaseModel):
     name: str
     instrument: str
     runtimeKey: str
-    brokerReference: str | None = None
+    brokerReference: IdentifierProjection | None = None
     instrumentLabel: str
     lastPrice: float | None = None
     hasOpenPosition: bool

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from app.core.identifier_policy import project_identifier
 from app.models.trade import Position, Trade
 from app.services.trade_service import TradeService
 from tests.test_http_route_harness import _snapshot_rows
@@ -169,6 +170,14 @@ def test_api_004_trade_route_family_preserves_provenance_and_consumer_shape(
     assert simulated_trade_payload["risk_truth_confidence"] == "SIMULATED_LOCAL_FILL"
     assert simulated_trade_payload["close_execution_source"] == "SIMULATED_LOCAL_CLOSE"
     assert simulated_trade_payload["outcome"] == "loss"
+    assert simulated_trade_payload["broker_reference"] == project_identifier(
+        "trade-entry-sim-1",
+        kind="broker_reference",
+    )
+    assert simulated_trade_payload["close_broker_reference"] == project_identifier(
+        "trade-close-sim-1",
+        kind="broker_reference",
+    )
 
     broker_trade_payload = next(
         item for item in trades if item["close_execution_source"] == "BROKER_CONFIRMED"
@@ -226,7 +235,10 @@ def test_api_004_trade_route_family_preserves_provenance_and_consumer_shape(
         if item["broker_sync_status"] == "SIMULATED_LOCAL_FILL"
     )
     assert simulated_position_payload["risk_truth_confidence"] == "SIMULATED_LOCAL_FILL"
-    assert simulated_position_payload["broker_reference"] == "pos-sim-1"
+    assert simulated_position_payload["broker_reference"] == project_identifier(
+        "pos-sim-1",
+        kind="broker_reference",
+    )
     assert simulated_position_payload["close_execution_source"] is None
 
     unknown_position_payload = next(

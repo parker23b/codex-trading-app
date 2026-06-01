@@ -32,6 +32,8 @@ import {
 } from "@/lib/api";
 import {
   formatCurrency,
+  formatIdentifierDisplay,
+  formatIdentifierFingerprint,
   formatInstrumentLabel,
   formatPercent,
   formatRelativeDuration,
@@ -774,10 +776,19 @@ export function DashboardLive({
                         {errors.dashboard
                           ? "-"
                           : dashboard.brokerInfo
-                            ? dashboard.brokerInfo.accountId
+                            ? formatIdentifierDisplay(dashboard.brokerInfo.accountId)
                             : renderMetricOrUnavailable("-", true, "Broker account id is unavailable.")}
                       </strong>
-                      <em>{dashboard.brokerInfo ? formatSignedCurrency(dashboard.brokerInfo.profitLoss) : "broker metrics unavailable"}</em>
+                      <em>
+                        {dashboard.brokerInfo
+                          ? [
+                              formatIdentifierFingerprint(dashboard.brokerInfo.accountId),
+                              formatSignedCurrency(dashboard.brokerInfo.profitLoss),
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")
+                          : "broker metrics unavailable"}
+                      </em>
                     </div>
                   </div>
                 </section>
@@ -948,8 +959,36 @@ export function DashboardLive({
               { key: "strategy", header: "Strategy", render: (row) => row.strategy_name },
               { key: "instrument", header: "Instrument", render: (row) => formatInstrumentLabel(row.instrument) },
               { key: "status", header: "Status", render: (row) => row.status.replaceAll("_", " ") },
-              { key: "request", header: "Request", render: (row) => row.client_request_id ?? "n/a" },
-              { key: "broker", header: "Broker Ref", render: (row) => row.broker_reference ?? "n/a" },
+              {
+                key: "request",
+                header: "Request",
+                render: (row) =>
+                  formatIdentifierDisplay(row.client_request_id) ? (
+                    <div className="cell-stack">
+                      <span>{formatIdentifierDisplay(row.client_request_id)}</span>
+                      {formatIdentifierFingerprint(row.client_request_id) ? (
+                        <span className="muted">{formatIdentifierFingerprint(row.client_request_id)}</span>
+                      ) : null}
+                    </div>
+                  ) : (
+                    "n/a"
+                  ),
+              },
+              {
+                key: "broker",
+                header: "Broker Ref",
+                render: (row) =>
+                  formatIdentifierDisplay(row.broker_reference) ? (
+                    <div className="cell-stack">
+                      <span>{formatIdentifierDisplay(row.broker_reference)}</span>
+                      {formatIdentifierFingerprint(row.broker_reference) ? (
+                        <span className="muted">{formatIdentifierFingerprint(row.broker_reference)}</span>
+                      ) : null}
+                    </div>
+                  ) : (
+                    "n/a"
+                  ),
+              },
             ]}
           />
         ) : null}

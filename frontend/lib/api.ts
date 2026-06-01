@@ -551,6 +551,7 @@ export async function getDomainEvents(params?: {
   strategyName?: string;
   instrument?: string;
   correlationId?: string;
+  correlationFingerprint?: string;
   since?: string;
   until?: string;
 }): Promise<DomainEvent[]> {
@@ -575,6 +576,9 @@ export async function getDomainEvents(params?: {
   }
   if (params?.instrument) {
     query.set("instrument", params.instrument);
+  }
+  if (params?.correlationFingerprint) {
+    query.set("correlation_fingerprint", params.correlationFingerprint);
   }
   if (params?.correlationId) {
     query.set("correlation_id", params.correlationId);

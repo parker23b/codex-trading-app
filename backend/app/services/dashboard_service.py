@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from app.core.config import get_settings
+from app.core.identifier_policy import project_identifier
 from app.core.instrument_catalog import list_instruments
 from app.core.runtime import runtime_manager
 from app.models.trade import Position, Trade
@@ -176,7 +177,10 @@ class DashboardService:
                     "name": engine.strategy.name,
                     "instrument": instrument,
                     "runtimeKey": f"{engine.strategy.name}:{instrument}",
-                    "brokerReference": engine.current_position.broker_reference
+                    "brokerReference": project_identifier(
+                        engine.current_position.broker_reference,
+                        kind="broker_reference",
+                    )
                     if engine.current_position
                     else None,
                     "instrumentLabel": instruments.get(instrument, {}).get(

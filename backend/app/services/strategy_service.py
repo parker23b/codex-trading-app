@@ -13,6 +13,7 @@ from app.core.broker import (
     OrderRequest,
 )
 from app.core.config import get_settings
+from app.core.identifier_policy import project_identifier
 from app.core.logging import get_logger
 from app.core.signals import EntrySignal, ExitSignal, SignalCandidate, SignalStatus
 from app.core.instrument_catalog import list_instruments
@@ -40,6 +41,7 @@ from app.services.trade_decision_service import (
 )
 from app.services.domain_event_service import domain_event_service
 from app.services.health_service import get_health_service
+from app.services.lifecycle_rules import EXECUTION_LEGACY_COMPATIBILITY_STATUSES
 from app.services.market_status_service import MarketStatus, get_market_status_service
 from app.services.operational_state_service import OperationalStateService
 from app.services.runtime_state_service import RuntimeStateService
@@ -64,26 +66,20 @@ AMBIGUOUS_BROKER_ORDER_STATUSES = {
 
 class StrategyService:
     # Legacy execution statuses are read only so persisted older rows can still
-    # participate in retry suppression. New execution rows must start at
-    # `SUBMISSION_PENDING` and never write these statuses.
+    # exist for historical reads, but retries must create a new execution
+    # attempt rather than rewriting compatibility-only rows.
     LEGACY_EXECUTION_COMPAT_STATUSES = {
-        ExecutionStatus.SIGNAL_GENERATED.value,
-        ExecutionStatus.RISK_APPROVED.value,
-        ExecutionStatus.CLOSE_REQUESTED.value,
+        status.value for status in EXECUTION_LEGACY_COMPATIBILITY_STATUSES
     }
     RETRYABLE_EXECUTION_STATUSES = {
         ExecutionStatus.SUBMISSION_PENDING.value,
         ExecutionStatus.ORDER_SUBMITTED.value,
         ExecutionStatus.ORDER_ACKNOWLEDGED.value,
         ExecutionStatus.FILL_PARTIAL.value,
-        ExecutionStatus.FAILED.value,
         ExecutionStatus.NEEDS_MANUAL_REVIEW.value,
-    } | LEGACY_EXECUTION_COMPAT_STATUSES
+    }
     SAFE_CLOSE_RETRY_STATUSES = {
         ExecutionStatus.SUBMISSION_PENDING.value,
-    } | {
-        ExecutionStatus.SIGNAL_GENERATED.value,
-        ExecutionStatus.CLOSE_REQUESTED.value,
     }
     UNSAFE_ENTRY_RETRY_STATUSES = {
         ExecutionStatus.ORDER_SUBMITTED.value,
@@ -325,7 +321,10 @@ class StrategyService:
                             "instrument": engine.instrument,
                             "runtime_key": f"{metadata.name}:{engine.instrument}",
                             "has_open_position": engine.current_position is not None,
-                            "broker_reference": engine.current_position.broker_reference
+                            "broker_reference": project_identifier(
+                                engine.current_position.broker_reference,
+                                kind="broker_reference",
+                            )
                             if engine.current_position
                             else None,
                             "direction": engine.current_position.direction
@@ -392,7 +391,10 @@ class StrategyService:
                     ],
                     "open_positions": [
                         {
-                            "broker_reference": position.broker_reference,
+                            "broker_reference": project_identifier(
+                                position.broker_reference,
+                                kind="broker_reference",
+                            ),
                             "instrument": position.instrument,
                             "direction": position.direction,
                             "size": position.size,
@@ -405,7 +407,10 @@ class StrategyService:
                     ],
                     "persisted_runtimes": [
                         {
-                            "runtime_id": runtime.runtime_id,
+                            "runtime_id": project_identifier(
+                                runtime.runtime_id,
+                                kind="runtime_id",
+                            ),
                             "instrument": runtime.instrument,
                             "status": runtime.status,
                             "recovery_state": runtime.recovery_state,
@@ -3113,22 +3118,12 @@ class StrategyService:
             completed_reason="Close fill received",
         )
         if closed_order.status is not BrokerOrderStatus.FILLED:
-            previous_close_state = execution.status
-            trade_service.transition_execution(
-                execution,
-                status=ExecutionStatus.NEEDS_MANUAL_REVIEW,
-                trade_intent_id=intent.id,
-                client_request_id=execution.client_request_id,
-                completed_at=closed_order.executed_at,
-                reason="Close did not complete fully",
-                requires_manual_review=True,
-            )
-            trade_service.transition_trade_intent(
-                intent,
-                state=TradeIntentState.CLOSE_REQUESTED,
-                close_reason_code="close_incomplete",
-                close_reason="Close did not complete fully.",
-                completed_at=closed_order.executed_at,
+            previous_close_state = (
+                ExecutionStatus.FILL_PARTIAL.value
+                if closed_order.status is BrokerOrderStatus.PARTIALLY_FILLED
+                else ExecutionStatus.ORDER_ACKNOWLEDGED.value
+                if closed_order.status in AMBIGUOUS_BROKER_ORDER_STATUSES
+                else ExecutionStatus.ORDER_ACKNOWLEDGED.value
             )
             StrategyService._record_close_broker_action_event(
                 trade_service=trade_service,
@@ -3398,6 +3393,7 @@ class StrategyService:
         broker_result = StrategyService._broker_result_payload(
             order, client_request_id=client_request_id
         )
+        is_close_phase = execution.phase == ExecutionPhase.CLOSE.value
         trade_service.transition_execution(
             execution,
             status=ExecutionStatus.ORDER_ACKNOWLEDGED,
@@ -3421,6 +3417,71 @@ class StrategyService:
                 details={"broker_result": broker_result},
                 **intent_broker_reference_kwargs,
             )
+        if is_close_phase and order.status is not BrokerOrderStatus.FILLED:
+            if order.status is BrokerOrderStatus.PARTIALLY_FILLED:
+                trade_service.transition_execution(
+                    execution,
+                    status=ExecutionStatus.FILL_PARTIAL,
+                    trade_intent_id=trade_intent.id if trade_intent is not None else None,
+                    client_request_id=client_request_id,
+                    broker_reference=order.broker_reference,
+                    completed_at=order.executed_at,
+                    filled_size=order.filled_size or order.size,
+                    average_fill_price=order.average_fill_price or order.price,
+                    reason=order.reason or "Close partially filled.",
+                    error_code=order.error_code,
+                    error_message=order.error_message,
+                    requires_manual_review=True,
+                    details={"broker_result": broker_result},
+                )
+            trade_service.transition_execution(
+                execution,
+                status=ExecutionStatus.NEEDS_MANUAL_REVIEW,
+                trade_intent_id=trade_intent.id if trade_intent is not None else None,
+                client_request_id=client_request_id,
+                broker_reference=order.broker_reference,
+                completed_at=order.executed_at,
+                filled_size=order.filled_size or order.size,
+                average_fill_price=order.average_fill_price or order.price,
+                reason=order.reason or "Close did not complete fully.",
+                error_code=order.error_code
+                or (
+                    "BROKER_CONFIRMATION_AMBIGUOUS"
+                    if order.status in AMBIGUOUS_BROKER_ORDER_STATUSES
+                    else "BROKER_CLOSE_INCOMPLETE"
+                ),
+                error_message=order.error_message,
+                requires_manual_review=True,
+                details={"broker_result": broker_result},
+            )
+            if trade_intent is not None:
+                trade_service.transition_trade_intent(
+                    trade_intent,
+                    state=TradeIntentState.CLOSE_REQUESTED,
+                    execution_client_request_id=client_request_id,
+                    acknowledged_at=order.acknowledged_at or order.executed_at,
+                    completed_at=order.executed_at,
+                    close_reason_code="close_incomplete",
+                    close_reason=order.reason or "Close did not complete fully.",
+                    details={
+                        **StrategyService._allocation_outcome_update(
+                            stage="close_incomplete",
+                            final_status=TradeIntentState.CLOSE_REQUESTED.value,
+                            hard_risk_passed=True,
+                            execution_submitted=True,
+                            execution_blocked=True,
+                            fill_status=execution.status,
+                        ),
+                        "broker_result": {
+                            **broker_result,
+                            "confirmation_ambiguous": order.status
+                            in AMBIGUOUS_BROKER_ORDER_STATUSES,
+                        },
+                    },
+                    **intent_broker_reference_kwargs,
+                )
+            return
+
         if order.status in AMBIGUOUS_BROKER_ORDER_STATUSES:
             broker_result = {**broker_result, "confirmation_ambiguous": True}
             trade_service.transition_execution(

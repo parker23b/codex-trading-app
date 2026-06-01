@@ -102,6 +102,26 @@ Do not enable real broker dealing from this repository state. `BROKER_MODE=DEMO`
 - `/reviewer` - persisted reviewer summaries and review history.
 - AIMEE drawer - persistent assistant-style operational overview and Q&A surface.
 
+## Identifier Visibility And Retention
+
+Operator-facing APIs and UI surfaces no longer need raw broker/account/request/runtime/correlation identifiers for ordinary investigation.
+
+- What stays raw internally:
+  - broker/deal references used for reconciliation and later close authority
+  - execution client request ids used for duplicate suppression and retry correlation
+  - runtime ids and recovered broker position references used for recovery/lifecycle joins
+  - persisted domain-event correlation/runtime ids used for internal traceability
+- What operators see:
+  - reviewed surfaces now return a masked `display` plus stable `fingerprint`
+  - the masked display is for quick recognition without exposing the raw identifier
+  - the fingerprint is for cross-surface correlation across dashboard, events, trades, strategies, control-plane, and allocation views
+- What is forbidden:
+  - `Authorization`, `CST`, `X-SECURITY-TOKEN`, session/header/token/password/api-key fields must not survive persistence or serialization
+  - do not treat `NEXT_PUBLIC_*` values as secrets; they are browser-visible transport configuration
+- Retention limits:
+  - the repository still contains historical cleanup work outside this code change
+  - raw internal authority identifiers are intentionally retained in the database where lifecycle correctness still depends on exact values
+
 ## Environment Variables
 
 Backend env file: `backend/.env`.

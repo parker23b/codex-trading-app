@@ -45,11 +45,16 @@ export type TradeIntentState =
   | "RECOVERED_POSITION_ATTACHED"
   | "FORCED_RECONCILIATION_CLOSE";
 
+export type SafeIdentifier = {
+  display: string;
+  fingerprint: string;
+};
+
 export type Trade = {
   id: number;
   strategy_name: string;
-  broker_reference?: string | null;
-  close_broker_reference?: string | null;
+  broker_reference?: SafeIdentifier | string | null;
+  close_broker_reference?: SafeIdentifier | string | null;
   close_execution_source?: BrokerExecutionSource | string | null;
   instrument: string;
   direction: "BUY" | "SELL";
@@ -74,8 +79,8 @@ export type Execution = {
   instrument: string;
   phase: "ENTRY" | "CLOSE";
   status: ExecutionStatus | string;
-  client_request_id?: string | null;
-  broker_reference?: string | null;
+  client_request_id?: SafeIdentifier | string | null;
+  broker_reference?: SafeIdentifier | string | null;
   local_position_id?: number | null;
   local_trade_id?: number | null;
   signal_time: string;
@@ -106,7 +111,7 @@ export type Execution = {
 export type Position = {
   id: number;
   strategy_name: string;
-  broker_reference?: string | null;
+  broker_reference?: SafeIdentifier | string | null;
   instrument: string;
   direction: "BUY" | "SELL";
   size: number;
@@ -141,7 +146,7 @@ export type StrategyRuntime = {
   instrument: string;
   runtime_key: string;
   has_open_position: boolean;
-  broker_reference?: string | null;
+  broker_reference?: SafeIdentifier | string | null;
   direction?: "BUY" | "SELL" | null;
   current_price?: number | null;
   unrealized_pnl?: number | null;
@@ -153,7 +158,7 @@ export type StrategyRuntime = {
 };
 
 export type StrategyPositionSummary = {
-  broker_reference?: string | null;
+  broker_reference?: SafeIdentifier | string | null;
   instrument: string;
   direction: "BUY" | "SELL";
   size: number;
@@ -202,7 +207,7 @@ export type StrategyDefinition = {
   active_runtimes?: StrategyRuntime[];
   open_positions?: StrategyPositionSummary[];
   persisted_runtimes?: Array<{
-    runtime_id: string;
+    runtime_id: SafeIdentifier | string;
     instrument: string;
     status: string;
     recovery_state?: string | null;
@@ -466,7 +471,7 @@ export type ControlPlaneFamily = {
   } | null;
   runtime: {
     is_running: boolean;
-    active_runtime_id?: string | null;
+    active_runtime_id?: SafeIdentifier | string | null;
     active_instrument?: string | null;
     active_profile_name?: string | null;
     active_parameters: Record<string, number>;
@@ -475,7 +480,7 @@ export type ControlPlaneFamily = {
     recovery_state?: string | null;
     updated_at?: string | null;
     persisted_runtimes: Array<{
-      runtime_id: string;
+      runtime_id: SafeIdentifier | string;
       status: string;
       instrument: string;
       control_mode?: string | null;
@@ -702,8 +707,8 @@ export type DomainEvent = {
   severity: string;
   error_type?: string | null;
   source: string;
-  correlation_id?: string | null;
-  runtime_id?: string | null;
+  correlation_id?: SafeIdentifier | string | null;
+  runtime_id?: SafeIdentifier | string | null;
   strategy_name?: string | null;
   instrument?: string | null;
   position_id?: number | null;
@@ -725,7 +730,7 @@ export type DashboardSnapshot = {
   winRate?: number | null;
   riskReward?: number | null;
   brokerInfo?: {
-    accountId: string;
+    accountId: SafeIdentifier | string;
     accountType: "DEMO" | "LIVE";
     balance: number;
     available: number;
@@ -737,7 +742,7 @@ export type DashboardSnapshot = {
     instrument: string;
     instrumentLabel: string;
     runtimeKey?: string;
-    brokerReference?: string | null;
+    brokerReference?: SafeIdentifier | string | null;
     hasOpenPosition?: boolean;
     lastPrice?: number | null;
   }[];
@@ -1109,8 +1114,8 @@ export type AllocationIntentExecution = {
   id: number;
   phase: string;
   status: ExecutionStatus | string;
-  client_request_id?: string | null;
-  broker_reference?: string | null;
+  client_request_id?: SafeIdentifier | string | null;
+  broker_reference?: SafeIdentifier | string | null;
   submitted_at?: string | null;
   acknowledged_at?: string | null;
   completed_at?: string | null;
@@ -1131,7 +1136,7 @@ export type AllocationIntentExecution = {
 
 export type AllocationIntentPosition = {
   id: number;
-  broker_reference?: string | null;
+  broker_reference?: SafeIdentifier | string | null;
   instrument: string;
   direction: "BUY" | "SELL";
   size: number;
@@ -1148,8 +1153,8 @@ export type AllocationIntentPosition = {
 
 export type AllocationIntentTrade = {
   id: number;
-  broker_reference?: string | null;
-  close_broker_reference?: string | null;
+  broker_reference?: SafeIdentifier | string | null;
+  close_broker_reference?: SafeIdentifier | string | null;
   instrument: string;
   direction: "BUY" | "SELL";
   size: number;

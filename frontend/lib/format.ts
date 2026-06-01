@@ -1,3 +1,5 @@
+import type { SafeIdentifier } from "./types";
+
 export function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-GB", {
     style: "currency",
@@ -99,4 +101,18 @@ export function formatDateTime(value: string) {
     minute: "2-digit",
     second: "2-digit",
   }).format(new Date(value));
+}
+
+export function formatIdentifierDisplay(identifier?: SafeIdentifier | string | null) {
+  if (!identifier) {
+    return null;
+  }
+  return typeof identifier === "string" ? identifier : identifier.display;
+}
+
+export function formatIdentifierFingerprint(identifier?: SafeIdentifier | string | null) {
+  if (!identifier || typeof identifier === "string") {
+    return null;
+  }
+  return identifier.fingerprint;
 }

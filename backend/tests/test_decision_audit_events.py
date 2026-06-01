@@ -301,7 +301,16 @@ def test_audit_test_002_trade_intent_transition_persists_domain_event(session):
 
 
 def test_audit_test_002_trade_intent_transition_records_related_domain_ids(session):
-    intent = _seed_trade_intent(session)
+    intent = TradeService(session).create_trade_intent(
+        TradeIntent(
+            strategy_name="mean_reversion",
+            instrument="CS.D.EURUSD.CFD.IP",
+            direction="BUY",
+            state=TradeIntentState.FILLED.value,
+            signal_time=datetime(2026, 4, 10, 9, 0, tzinfo=UTC),
+            execution_client_request_id="entry-client-audit-1",
+        )
+    )
 
     TradeService(session).transition_trade_intent(
         intent,
@@ -322,7 +331,7 @@ def test_audit_test_002_trade_intent_transition_records_related_domain_ids(sessi
     assert event.trade_id == 23
     assert event.correlation_id == "close-client-audit-1"
     assert event.payload_json["trade_intent_id"] == intent.id
-    assert event.payload_json["previous_state"] == TradeIntentState.PROPOSED.value
+    assert event.payload_json["previous_state"] == TradeIntentState.FILLED.value
     assert event.payload_json["new_state"] == TradeIntentState.CLOSED.value
     assert event.payload_json["broker_reference"].startswith("[REDACTED_BROKER_REF:")
     assert event.payload_json["close_broker_reference"].startswith(

@@ -15,6 +15,7 @@ from app.models.trade import (
 from app.strategies.registry import strategy_registry
 from app.services.audit_event_recorder import record_required_domain_event
 from app.services.health_service import get_health_service
+from app.services.lifecycle_rules import TRADE_INTENT_PROVENANCE_STATES
 from app.services.runtime_state_service import RuntimeStateService
 from app.services.trade_service import TradeService
 
@@ -601,13 +602,14 @@ class ReconciliationService:
         if local_position is not None and local_position.trade_intent_id is not None:
             intent = self.trade_service.get_trade_intent(local_position.trade_intent_id)
             if intent is not None:
+                next_state = (
+                    intent.state
+                    if TradeIntentState(intent.state) in TRADE_INTENT_PROVENANCE_STATES
+                    else TradeIntentState.POSITION_OPENED.value
+                )
                 return self.trade_service.transition_trade_intent(
                     intent,
-                    state=(
-                        TradeIntentState.EXTERNAL_POSITION_ADOPTED
-                        if is_adopted
-                        else TradeIntentState.POSITION_OPENED
-                    ),
+                    state=next_state,
                     broker_reference=persisted_position.broker_reference,
                     position_id=persisted_position.id,
                     risk_truth_confidence=(

@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.api.contracts.identifiers import IdentifierProjection
+
 
 class ControlPlaneAlignmentCheckResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -68,7 +70,7 @@ class ControlPlaneDeploymentSummaryResponse(BaseModel):
 class ControlPlanePersistedRuntimeResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    runtime_id: str
+    runtime_id: IdentifierProjection
     status: str
     instrument: str
     control_mode: str | None = None
@@ -82,7 +84,7 @@ class ControlPlaneRuntimeSummaryResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     is_running: bool
-    active_runtime_id: str | None = None
+    active_runtime_id: IdentifierProjection | None = None
     active_instrument: str | None = None
     active_profile_name: str | None = None
     active_parameters: dict[str, Any] = Field(default_factory=dict)

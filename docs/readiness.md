@@ -18,26 +18,26 @@ Safe local use means:
 
 The current blocking themes are:
 
-- simulated-vs-broker-confirmed provenance is still incomplete across broader frontend/browser surfaces, even though dashboard trade truth, dashboard position sync truth, and events-surface simulated-vs-broker-confirmed close wording now have explicit browser coverage
-- backend/frontend enum parity is stronger for the covered vocabulary slice (`risk_truth_confidence`, `BrokerExecutionSource`, `broker_sync_status`, `ExecutionStatus`, and `TradeIntentState`), but broader operator-surface evidence is still incomplete even after the added events/live/control-plane/strategies/coverage browser slice
+- simulated-vs-broker-confirmed provenance is still incomplete across broader frontend/browser surfaces, even though dashboard trade truth, dashboard position sync truth, events-surface simulated-vs-broker-confirmed close wording, and strategy execution-feed simulated/local provenance now have explicit browser coverage
+- backend/frontend enum parity is stronger for the covered vocabulary slice (`risk_truth_confidence`, `BrokerExecutionSource`, `broker_sync_status`, `ExecutionStatus`, and `TradeIntentState`), but broader operator-surface evidence is still incomplete even after the added events/live/control-plane/strategies/coverage/markets browser slice
 - route-inventory and frontend-contract drift are now machine-guarded for the current route set, so this is no longer a present-tense blocker category; remaining route risk is broader broker-action/operator-evidence breadth rather than hypothetical future undocumented or raw routes
 - current backend durable-audit coverage is now inventory-backed for the present mutation, broker-action, and safety-critical background path set; remaining best-effort events are intentional informational paths, and future broker-action/route risk is now handled by guard tests instead of remaining a present-tense backend blocker
-- frontend operator truth now has selected browser/e2e coverage for stale, degraded, manual-review, passive-vs-mutation, simulated-vs-broker-confirmed, mutation-failure, events attention, test-only reset gating, and telemetry degradation states across events/dashboard/live/risk/strategies/AIMEE/control-plane/coverage/markets, but broad browser/e2e coverage is still incomplete
-- covered backend logging/API-error/domain-event redaction is now in place, covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position payloads now sanitize free-text and detail fields before commit, repo-level secret/history scan guardrails now block common local secret/SQLite/dump/test-artifact commits, dependency lock/audit tooling is now repeatable for Python and npm, and versioned Alembic migrations now have both SQLite drift checks and a CI-wired Postgres rehearsal path. Health and telemetry now aggregate the targeted operator degradation states across workers with explicit staleness and worker identity, while keeping non-target diagnostics clearly labelled as current-process only. Broader secrets hygiene, unversioned legacy non-SQLite migration handling, functional raw-identifier columns, and historical cleanup remain below readiness grade
+- frontend operator truth now has selected browser/e2e coverage for stale, degraded, manual-review, passive-vs-mutation, simulated-vs-broker-confirmed, mutation-failure, events attention, test-only reset gating, telemetry degradation, strategy runtime controls, shortlist/watchlist mutation truth, and unknown freshness states across events/dashboard/live/risk/strategies/AIMEE/control-plane/coverage/markets, but broad browser/e2e coverage is still incomplete
+- covered backend logging/API-error/domain-event redaction is now in place, covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position payloads now sanitize free-text and detail fields before commit, the current operator/API/events identifier boundary now exposes masked display plus stable fingerprint projections instead of raw broker/account/request/runtime/correlation strings, repo-level secret/history scan guardrails now block common local secret/SQLite/dump/test-artifact commits, dependency lock/audit tooling is now repeatable for Python and npm, and versioned Alembic migrations now have both SQLite drift checks and a CI-wired Postgres rehearsal path. Health and telemetry now aggregate the targeted operator degradation states across workers with explicit staleness and worker identity, while keeping non-target diagnostics clearly labelled as current-process only. Broader secrets hygiene, intentional raw internal authority fields, historical cleanup, and a fresh successful CI Postgres rehearsal run remain below readiness grade
 
 The canonical blocker list is in [audit-status.md](audit-status.md).
 
 ## Known Risks
 
-- Simulated/local execution and close provenance is not yet proved across broader frontend/browser operator surfaces outside the covered dashboard trade, dashboard position sync, and narrow events wording slices.
+- Simulated/local execution and close provenance is not yet proved across broader frontend/browser operator surfaces outside the covered dashboard trade, dashboard position sync, events wording, and strategy execution-feed slices.
 - Broader backend/frontend enum-parity proof is still incomplete even though the covered vocabulary slice now includes `risk_truth_confidence`, `BrokerExecutionSource`, `broker_sync_status`, `ExecutionStatus`, and `TradeIntentState`.
 - Future route-inventory and contract drift is now guarded mechanically, but broader broker-action and operator-evidence breadth still needs review when new routes appear.
 - The remaining backend audit risk is no longer “unknown current mutation/background paths”; it is future-path discipline plus broader operator/frontend breadth.
 - Candidate-only strategy events are intentionally best-effort informational, not lifecycle audit proof, even when they remain useful for observability.
-- Browser/e2e operator-state coverage is improved, including selected manual-review, control-plane mismatch, events attention/test-only truth, telemetry degradation, and market-data fallback/stale truth, but it is still too narrow for readiness claims.
-- Database evolution now uses Alembic plus SQLite drift checks and a Postgres migration rehearsal, but existing unversioned non-SQLite databases still require explicit manual upgrade and some dialect-specific indexes still depend on targeted assertions rather than generic autogenerate comparison.
+- Browser/e2e operator-state coverage is improved, including selected manual-review, control-plane mismatch, events attention/test-only truth, telemetry degradation, strategy runtime mutation truth, shortlist/watchlist mutation truth, and market-data fallback/stale/unknown freshness truth, but it is still too narrow for readiness claims.
+- Database evolution now uses Alembic plus SQLite drift checks and a Postgres migration rehearsal, but existing unversioned non-SQLite databases still require explicit manual upgrade and some dialect-specific indexes still depend on targeted assertions rather than generic autogenerate comparison. The latest available CI run failed before the rehearsal step, so DB portability has not been freshly re-verified by the latest CI evidence.
 - Python and npm dependency locking plus vulnerability gates are now repeatable, third-party Python dependencies can now be hash-verified, and backend/frontend SBOM generation now exists, but the editable local backend package remains outside hash enforcement and the repo still lacks broader non-Python/Node dependency scanning and stronger provenance attestation.
-- Covered logs, mirrored domain events, IG adapter failures, and operator-facing API errors now redact tokens, account identifiers, broker references, raw adapter payloads, and tracebacks, and covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position free-text and detail fields now redact the same patterns before commit. Required audit-write failures now also surface in health/telemetry as degraded state, and targeted degradation states now aggregate across workers with stale-expiry handling, but remaining readiness gaps still include raw identifier columns required for lifecycle authority, broader secrets hygiene, and broader operator/frontend evidence. Intentional best-effort informational events are not counted as durable lifecycle audit proof.
+- Covered logs, mirrored domain events, IG adapter failures, and operator-facing API errors now redact tokens, account identifiers, broker references, raw adapter payloads, and tracebacks; covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position free-text and detail fields now redact the same patterns before commit; and the reviewed operator-facing identifier surfaces now show masked display plus stable fingerprints instead of raw broker/account/request/runtime/correlation strings. Required audit-write failures now also surface in health/telemetry as degraded state, and targeted degradation states now aggregate across workers with stale-expiry handling, but remaining readiness gaps still include raw identifier columns retained for lifecycle authority, broader secrets hygiene, and broader operator/frontend evidence. Intentional best-effort informational events are not counted as durable lifecycle audit proof.
 - Repo-local guardrails now make it harder to commit `.env*` secrets, SQLite DBs, broker dumps, captured session tokens, logs, and Playwright/test artifacts, but historical repository cleanup and credential rotation still require manual action outside this repository.
 - Secrets hygiene, historical repository scanning follow-through, and multi-process observability still need platform hardening.
 
@@ -48,9 +48,59 @@ Before live or demo broker dealing, the app needs at least:
 - keep the checked-in route manifest and route-contract drift guard current as any new operator-critical routes are added
 - browser/e2e evidence for degraded, stale, simulated, unknown, manual-review, and mutation-failure operator states
 - browser/e2e evidence for broader events, mutation, provenance, and freshness permutations beyond the current selected slices
+- a latest CI run in which the Postgres rehearsal actually executes its five tests with zero skips
 - migration, dependency, redaction, identifier-minimization, and secrets controls that are strong enough for broker-connected operation
 - stronger supply-chain provenance than the current hash-and-SBOM baseline, including editable-package attestation and broader dependency scanning
 - regression tests for every fixed P0/P1 behaviour that still lacks route, frontend, or full-stack evidence
+
+## 2026-06-01 Identifier Boundary Slice
+
+This slice improves identifier minimization and operator-safe correlation, but it does not make the repository demo-safe or live-safe.
+
+- Internal authority that remains raw by design:
+  - broker/deal references used by reconciliation and later close authority
+  - execution client request ids used by duplicate suppression and retry correlation
+  - runtime ids and current broker position references used by recovery and later lifecycle joins
+  - persisted domain-event correlation/runtime ids used for internal traceability
+- What operators now see instead:
+  - reviewed API surfaces return `{ display, fingerprint }` projections for broker account ids, broker references, client request ids, runtime ids, and event correlation/runtime ids
+  - `display` is masked for human readability and `fingerprint` is stable for cross-surface correlation without exposing the raw value
+  - the events console now filters correlation through `correlation_fingerprint`, not a raw correlation id
+- What is forbidden:
+  - `Authorization`, `CST`, `X-SECURITY-TOKEN`, session/header/token/password/api-key style fields must not survive persistence or serialization
+  - new persisted identifier columns must be classified in the checked-in policy manifest before tests will pass
+  - new operator-facing response fields must not serialize DB-only raw broker/account/deal/request/runtime/correlation identifiers without an explicit reviewed exception
+- Current limits:
+  - raw internal authority fields are intentionally retained in the database because removing or masking them there would break lifecycle correctness
+  - current GitHub Actions evidence still does not include a post-fix successful five-test Postgres rehearsal with zero skips
+  - repository-history cleanup and any needed credential rotation remain manual actions outside this code change
+
+## 2026-06-01 Backend Lockfile And Lifecycle Guard Slice
+
+This slice improves backend safety posture, but it does not make the repository live-safe or demo-safe.
+
+- Backend lockfile gate:
+  - the failing `Verify backend lockfiles` CI step was reproduced locally with `./scripts/check_backend_requirements.sh`
+  - root cause was stale generated backend lockfiles caused by `scripts/compile_backend_requirements.sh` preserving existing transitive pins instead of forcing a fresh upgrade pass
+  - the helper now compiles with `--upgrade`, and the refreshed runtime/dev plain plus hashed lockfiles now agree with the freshness check
+  - after the fix, `./scripts/compile_backend_requirements.sh`, `./scripts/check_backend_requirements.sh`, `./scripts/verify_backend_dependency_integrity.sh`, and `backend/.venv/bin/pip-audit -r backend/requirements-hashed.txt --require-hashes` all passed locally; `pip-audit` reported `No known vulnerabilities found`
+- Lifecycle terminal protection:
+  - `TradeIntent` and `Execution` now use explicit centralized transition tables in `backend/app/services/lifecycle_rules.py`
+  - terminal `TradeIntent` states are now classified as `REJECTED`, `CLOSED`, `FAILED`, `CANCELLED`, and `FORCED_RECONCILIATION_CLOSE`
+  - terminal `Execution` statuses are now classified as `POSITION_OPENED`, `CLOSE_CONFIRMED`, `FAILED`, and `CANCELLED`
+  - compatibility-only legacy `Execution` statuses are now classified as `SIGNAL_GENERATED`, `RISK_APPROVED`, `RISK_REJECTED`, and `CLOSE_REQUESTED`, and new writes of those values are rejected
+  - invalid transitions are now rejected before any row mutation or transition audit event is written
+  - same-state/idempotent writes remain allowed only where the existing workflows rely on them
+  - failed execution retries now create a new attempt instead of reactivating a terminal failed row
+  - incomplete and partial close paths remain close-admissible without writing misleading terminal states first and then reviving them
+  - reconciliation now preserves `EXTERNAL_POSITION_ADOPTED` and `RECOVERED_POSITION_ATTACHED` provenance instead of flattening them into ordinary open-position state
+- Tests and current result:
+  - added `backend/tests/test_trade_lifecycle_transition_guards.py` for allowed transitions, representative invalid transitions, terminal reactivation rejection, same-state idempotence, legacy write rejection, reconciliation/recovery branches, and enum-classification guard coverage
+  - local backend suite result after this slice: `backend/.venv/bin/pytest backend/tests -q` -> `533 passed, 5 skipped, 1 warning`
+- CI/Postgres honesty:
+  - latest available GitHub Actions run is still [26663279789](https://github.com/parker23b/codex-trading-app/actions/runs/26663279789), which failed on 2026-05-29 at `Verify backend lockfiles`
+  - that run skipped `Migration and drift tests` and `Pytest`, so the Postgres rehearsal step was not reached there
+  - no newer post-fix CI run is available yet from this workspace, so `AUDIT-DB-001` remains open and this repo still cannot claim a successful five-test CI Postgres rehearsal with zero skips
 
 ## 2026-05-21 Backend Audit Closure Slice
 
@@ -134,11 +184,12 @@ The repository now has repeatable dependency commands:
 - `backend/.venv/bin/pip-audit -r backend/requirements-hashed.txt --require-hashes`
 - `./scripts/check_frontend_dependencies.sh`
 
-Current posture as of 2026-05-29:
+Current posture as of 2026-06-01:
 
 - backend runtime/transitive dependencies are pinned in `backend/requirements.txt`
 - backend dev/test tooling is separated through `backend/requirements-dev.in` and pinned in `backend/requirements-dev.txt`
 - backend also has hash-bearing third-party lockfiles in `backend/requirements-hashed.txt` and `backend/requirements-dev-hashed.txt`
+- `scripts/compile_backend_requirements.sh` now compiles with `--upgrade` so the checked-in generator matches the freshness check instead of silently preserving stale transitive pins
 - CI now verifies backend lock freshness before install, installs third-party Python packages through `--require-hashes`, uploads backend/frontend SBOM artifacts, and fails on the hashed-lock `pip-audit` command
 - CI and pre-push now fail on frontend lockfile inconsistency, `npm audit`, and `knip`
 - the current Python audit result is `No known vulnerabilities found`
@@ -151,7 +202,7 @@ Resolved dependency findings in this slice:
 
 - Python `aiohttp` updated from `3.13.3` to `3.13.5` through the `lightstreamer-client-lib` dependency chain
 - Python `idna` updated from `3.11` to `3.17`
-- Python `starlette` updated from `1.0.0` to `1.2.0`, clearing `PYSEC-2026-161`
+- Python `starlette` updated from `1.0.0` to `1.2.1`, clearing `PYSEC-2026-161`
 - Python `fastapi` updated from `0.136.1` to `0.136.3`
 - Python `uvicorn` updated from `0.47.0` to `0.48.0`
 - Python `httptools` updated from `0.7.1` to `0.8.0`
@@ -161,6 +212,7 @@ Resolved dependency findings in this slice:
 - dev-only Python `pytest` updated from `9.0.2` to `9.0.3`
 - dev-only Python `coverage` updated from `7.14.0` to `7.14.1`
 - dev-only Python `ruff` updated from `0.15.14` to `0.15.15`
+- dev-only Python `virtualenv` updated from `21.4.1` to `21.4.2`
 - frontend `next` updated in the lockfile from `15.5.15` to `15.5.18`
 
 Remaining dependency/supply-chain gaps:
@@ -210,9 +262,10 @@ Commands run for this slice on 2026-06-01:
 
 - `cd backend && .venv/bin/python -m pytest tests/test_database_migrations.py tests/test_initialize_database.py -q` -> `4 passed`
 - `cd backend && .venv/bin/python -m pytest tests/test_postgres_migration_rehearsal.py -q` -> `5 skipped` locally because `POSTGRES_REHEARSAL_ADMIN_URL` was not set and no supported local Postgres server was available in this environment
-- `cd backend && .venv/bin/python -m pytest tests -q` -> `449 passed, 5 skipped`
+- `cd backend && .venv/bin/python -m pytest tests -q` -> `533 passed, 5 skipped, 1 warning`
 - `python3 scripts/check_spec_coverage_matrix.py` -> `PASS`
 - `git diff --check` -> passed
+- Latest available CI result checked on 2026-06-01: [Repo Audit run 26663279789](https://github.com/parker23b/codex-trading-app/actions/runs/26663279789) failed in `backend-audit` at `Verify backend lockfiles`, and the later `Migration and drift tests` plus `Pytest` steps were skipped. No newer post-fix CI run is available yet from this workspace. The latest available CI evidence therefore still did not execute the five Postgres rehearsal tests with zero skips, so this repo should not claim fresh CI verification for the DB portability slice.
 
 ## Secrets Hygiene Status
 
@@ -320,3 +373,56 @@ This slice expands browser-level operator truth coverage without claiming full f
   - additional simulated/local provenance surfaces beyond the covered dashboard and events slices
   - broader freshness/unknown/manual-review permutations across dashboard, risk, and live summaries
   - complete browser breadth for all operator-critical vocabularies and enum families
+
+## 2026-06-01 Operator Control Truth Slice
+
+This slice expands operator-control and truthfulness evidence without claiming frontend readiness.
+
+- Controls covered:
+  - strategy runtime start
+  - strategy runtime stop with open-risk disclosure
+  - shortlist add/remove
+  - strategy-watchlist add/remove
+  - strategy execution-feed source/status labels
+  - coverage freshness downgrade for missing tick timestamps
+- Scenarios added:
+  - strategy start pending failure with backend `detail`
+  - strategy start success-followed-by-refresh-failure
+  - explicit strategy start disabled reason when launch truth is unavailable
+  - strategy stop open-risk confirmation and side-effect disclosure
+  - strategy stop failure with backend `detail`
+  - strategy execution simulated/local provenance beyond dashboard and events
+  - shortlist mutation failure plus retry
+  - strategy-watchlist add success-followed-by-refresh-failure
+  - strategy-watchlist remove success only after refreshed backend truth
+  - coverage unknown timestamp freshness downgrade
+- Fixtures used:
+  - explicit Playwright scenarios in `frontend/e2e/support/scenarios.mjs`
+  - no healthy default fallback objects
+  - delayed mutation responses for pending-state assertions
+  - sequential mutation-plus-refresh outcomes for retry and refresh-failure truth
+  - strategy execution fixtures with explicit `execution_source` / `close_execution_source`
+  - coverage feed-state fixtures that separate stale, polling fallback, and timestamp-unknown stream truth
+- Backend-detail and refresh-truth evidence:
+  - operator-visible mutation errors preserve backend `detail` for strategy start, strategy stop, and shortlist failure paths
+  - strategy start, strategy stop, shortlist, and strategy-watchlist mutations now avoid clean success copy until refreshed backend truth returns
+  - refresh failures remain visible as warnings instead of success
+  - stop runtime now explicitly states that stopping a runtime does not imply broker-confirmed open risk is flat
+  - watchlist/shortlist state stays framed as operator interest/coverage truth, not trading approval or autonomous deployment approval
+- Provenance and freshness states covered:
+  - strategy execution feed now uses shared vocabulary helpers on a browser-covered surface
+  - simulated/local provenance is now browser-covered on strategy execution rows as well as earlier dashboard/events slices
+  - coverage with missing tick freshness now renders `Unknown` / `Stream state unknown` rather than healthy live truth
+- Commands run and results:
+  - `cd frontend && npm run test:e2e -- --grep "AUDIT-|FLOW-"` -> `30 passed`
+  - `cd frontend && npm run test:frontend` -> `72 passed`
+  - `cd frontend && npm run typecheck` -> passed
+  - `python3 scripts/check_spec_coverage_matrix.py` -> `PASS`
+  - `git diff --check` -> `PASS`
+- Finding status after this slice:
+  - `AUDIT-UI-004`: narrowed, still open
+  - `AUDIT-UI-006`: narrowed, still open
+  - `AUDIT-UI-002`: narrowed, still open
+  - `AUDIT-LIFE-005`: narrowed, still open
+  - `AUDIT-005`: narrowed, still open
+  - `AUDIT-UI-005`: narrowed, still open

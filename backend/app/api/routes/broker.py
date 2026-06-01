@@ -3,15 +3,17 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
+from app.api.contracts.identifiers import IdentifierProjection
 from app.api.errors import operator_error_detail
 from app.core.broker import BrokerError
+from app.core.identifier_policy import project_identifier
 from app.services.broker_service import BrokerService
 
 router = APIRouter(prefix="/broker")
 
 
 class BrokerPositionResponse(BaseModel):
-    broker_reference: str
+    broker_reference: IdentifierProjection
     instrument: str
     direction: str
     size: float
@@ -35,7 +37,10 @@ def list_broker_positions() -> list[BrokerPositionResponse]:
 
     return [
         BrokerPositionResponse(
-            broker_reference=position.broker_reference,
+            broker_reference=project_identifier(
+                position.broker_reference,
+                kind="broker_reference",
+            ),
             instrument=position.instrument,
             direction=position.direction.value,
             size=position.size,

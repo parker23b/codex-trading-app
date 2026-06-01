@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from app.api.contracts.identifiers import IdentifierProjection
 from app.core.broker import OrderDirection
 from app.core.risk_truth import RiskTruthConfidence
 from app.models.trade import ExecutionPhase, ExecutionStatus, TradeIntentState
@@ -56,8 +57,8 @@ class AllocationIntentExecutionResponse(BaseModel):
     id: int
     phase: ExecutionPhase | str
     status: ExecutionStatus | str
-    client_request_id: str | None
-    broker_reference: str | None
+    client_request_id: IdentifierProjection | None
+    broker_reference: IdentifierProjection | None
     submitted_at: datetime | None
     acknowledged_at: datetime | None
     completed_at: datetime | None
@@ -78,7 +79,7 @@ class AllocationIntentExecutionResponse(BaseModel):
 
 class AllocationIntentPositionResponse(BaseModel):
     id: int
-    broker_reference: str | None
+    broker_reference: IdentifierProjection | None
     instrument: str
     direction: OrderDirection | str
     size: float
@@ -95,8 +96,8 @@ class AllocationIntentPositionResponse(BaseModel):
 
 class AllocationIntentTradeResponse(BaseModel):
     id: int
-    broker_reference: str | None
-    close_broker_reference: str | None
+    broker_reference: IdentifierProjection | None
+    close_broker_reference: IdentifierProjection | None
     instrument: str
     direction: OrderDirection | str
     size: float

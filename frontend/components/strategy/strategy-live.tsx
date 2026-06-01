@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
 import { CompactTable, DataIndicator, InspectorDrawer, Panel, StatusPill, StatusStrip } from "@/components/console/primitives";
 import { getBrokerAuthStatus, getExecutions, getStrategies, getStreamHealth, startStrategy, stopStrategy } from "@/lib/api";
-import { formatInstrumentLabel, formatPrice, formatSignedCurrency } from "@/lib/format";
-import { BrokerAuthStatus, Execution, StrategyDefinition, StreamHealthStatus } from "@/lib/types";
+import { formatIdentifierDisplay, formatIdentifierFingerprint, formatInstrumentLabel, formatPrice, formatSignedCurrency } from "@/lib/format";
+import { closeExecutionSourceMeta, executionStatusMeta } from "@/lib/operator-vocabulary";
+import { BrokerAuthStatus, Execution, SafeIdentifier, StrategyDefinition, StreamHealthStatus } from "@/lib/types";
 
 type StrategyResourceErrors = {
   strategies: string | null;
@@ -23,6 +23,22 @@ type StrategyLiveProps = {
   initialErrors: StrategyResourceErrors;
 };
 
+type StrategyMutationTarget = {
+  kind: "start" | "stop";
+  strategyName: string;
+  instrument: string;
+};
+
+type StrategyStatusNotice = {
+  tone: "neutral" | "warning";
+  message: string;
+};
+
+type StrategyRefreshResult = {
+  failureDetail: string | null;
+  strategies: StrategyDefinition[] | null;
+};
+
 function strategyTone(strategy: StrategyDefinition) {
   if (strategy.warning_message) {
     return "warning" as const;
@@ -37,8 +53,6 @@ export function StrategyLive({
   initialStreamHealth,
   initialErrors,
 }: StrategyLiveProps) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
   const [strategies, setStrategies] = useState(initialStrategies);
   const [executions, setExecutions] = useState(initialExecutions);
   const [brokerAuth, setBrokerAuth] = useState(initialBrokerAuth);
@@ -55,8 +69,15 @@ export function StrategyLive({
     Object.fromEntries(initialStrategies.map((strategy) => [strategy.name, strategy.instrument])),
   );
   const [dirtyOverrides, setDirtyOverrides] = useState<Record<string, boolean>>({});
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [statusNotice, setStatusNotice] = useState<StrategyStatusNotice | null>(null);
+  const [mutationTarget, setMutationTarget] = useState<StrategyMutationTarget | null>(null);
+  const [stopConfirmation, setStopConfirmation] = useState<{
+    strategyName: string;
+    instrument: string;
+    brokerReference?: SafeIdentifier | string | null;
+  } | null>(null);
   const [executionDrawerOpen, setExecutionDrawerOpen] = useState(false);
+  const pending = mutationTarget !== null;
 
   useEffect(() => {
     setStrategies(initialStrategies);
@@ -66,53 +87,66 @@ export function StrategyLive({
     setErrors(initialErrors);
   }, [initialStrategies, initialExecutions, initialBrokerAuth, initialErrors, initialStreamHealth]);
 
+  const strategyErrorMessage = (reason: unknown, fallback: string) =>
+    reason instanceof Error ? reason.message : fallback;
+
+  const refreshResources = async (): Promise<StrategyRefreshResult> => {
+    setLoading({
+      strategies: true,
+      executions: true,
+      brokerAuth: true,
+      streamHealth: true,
+    });
+    const [nextStrategies, nextExecutions, nextBrokerAuth, nextStreamHealth] = await Promise.allSettled([
+      getStrategies(),
+      getExecutions(),
+      getBrokerAuthStatus(),
+      getStreamHealth(),
+    ]);
+    if (nextStrategies.status === "fulfilled") {
+      setStrategies(nextStrategies.value);
+    }
+    if (nextExecutions.status === "fulfilled") {
+      setExecutions(nextExecutions.value);
+    }
+    if (nextBrokerAuth.status === "fulfilled") {
+      setBrokerAuth(nextBrokerAuth.value);
+    }
+    if (nextStreamHealth.status === "fulfilled") {
+      setStreamHealth(nextStreamHealth.value);
+    }
+    const nextErrors = {
+      strategies: nextStrategies.status === "rejected" ? strategyErrorMessage(nextStrategies.reason, "Failed to load strategies.") : null,
+      executions: nextExecutions.status === "rejected" ? strategyErrorMessage(nextExecutions.reason, "Failed to load executions.") : null,
+      brokerAuth: nextBrokerAuth.status === "rejected" ? strategyErrorMessage(nextBrokerAuth.reason, "Failed to load broker status.") : null,
+      streamHealth: nextStreamHealth.status === "rejected" ? strategyErrorMessage(nextStreamHealth.reason, "Failed to load stream health.") : null,
+    };
+    setErrors(nextErrors);
+    setLoading({
+      strategies: false,
+      executions: false,
+      brokerAuth: false,
+      streamHealth: false,
+    });
+
+    return {
+      failureDetail: nextErrors.strategies ?? nextErrors.executions ?? nextErrors.brokerAuth ?? nextErrors.streamHealth,
+      strategies: nextStrategies.status === "fulfilled" ? nextStrategies.value : null,
+    };
+  };
+
   useEffect(() => {
     let cancelled = false;
 
     const refresh = async () => {
-      setLoading({
-        strategies: true,
-        executions: true,
-        brokerAuth: true,
-        streamHealth: true,
-      });
-      const [nextStrategies, nextExecutions, nextBrokerAuth, nextStreamHealth] = await Promise.allSettled([
-        getStrategies(),
-        getExecutions(),
-        getBrokerAuthStatus(),
-        getStreamHealth(),
-      ]);
       if (cancelled) {
         return;
       }
-      if (nextStrategies.status === "fulfilled") {
-        setStrategies(nextStrategies.value);
-      }
-      if (nextExecutions.status === "fulfilled") {
-        setExecutions(nextExecutions.value);
-      }
-      if (nextBrokerAuth.status === "fulfilled") {
-        setBrokerAuth(nextBrokerAuth.value);
-      }
-      if (nextStreamHealth.status === "fulfilled") {
-        setStreamHealth(nextStreamHealth.value);
-      }
-      setErrors({
-        strategies: nextStrategies.status === "rejected" ? (nextStrategies.reason instanceof Error ? nextStrategies.reason.message : "Failed to load strategies.") : null,
-        executions: nextExecutions.status === "rejected" ? (nextExecutions.reason instanceof Error ? nextExecutions.reason.message : "Failed to load executions.") : null,
-        brokerAuth: nextBrokerAuth.status === "rejected" ? (nextBrokerAuth.reason instanceof Error ? nextBrokerAuth.reason.message : "Failed to load broker status.") : null,
-        streamHealth: nextStreamHealth.status === "rejected" ? (nextStreamHealth.reason instanceof Error ? nextStreamHealth.reason.message : "Failed to load stream health.") : null,
-      });
-      setLoading({
-        strategies: false,
-        executions: false,
-        brokerAuth: false,
-        streamHealth: false,
-      });
+      await refreshResources();
     };
 
     void refresh();
-    const intervalId = window.setInterval(refresh, 3000);
+    const intervalId = window.setInterval(refresh, 10000);
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
@@ -148,6 +182,23 @@ export function StrategyLive({
   const selectedStrategy =
     sortedStrategies.find((strategy) => strategy.name === selectedStrategyName) ?? sortedStrategies[0] ?? null;
 
+  const mutationErrorMessage = (actionLabel: string, error: unknown) =>
+    `${actionLabel} failed: ${error instanceof Error ? error.message : "backend truth could not be updated."}`;
+
+  const startDisabledReason = (() => {
+    if (!selectedStrategy) {
+      return "Start unavailable because no strategy is selected.";
+    }
+    const selectedInstrument = instrumentOverrides[selectedStrategy.name]?.trim();
+    if (!selectedInstrument) {
+      return "Start unavailable because backend launch instrument truth is unavailable.";
+    }
+    if (!(selectedStrategy.instrument_options ?? []).length) {
+      return "Start unavailable because backend launch instrument options are unavailable.";
+    }
+    return null;
+  })();
+
   const executionQueue = executions
     .slice()
     .sort((left, right) => new Date(right.last_transition_at).getTime() - new Date(left.last_transition_at).getTime());
@@ -179,32 +230,103 @@ export function StrategyLive({
   );
 
   const runAction = (strategy: StrategyDefinition) => {
-    startTransition(async () => {
+    const instrument = instrumentOverrides[strategy.name]?.trim();
+    if (!instrument) {
+      setStatusNotice({
+        tone: "warning",
+        message: "Start unavailable because backend launch instrument truth is unavailable.",
+      });
+      return;
+    }
+    void (async () => {
+      setMutationTarget({
+        kind: "start",
+        strategyName: strategy.name,
+        instrument,
+      });
+      setStopConfirmation(null);
+      setStatusNotice(null);
       try {
-        const instrument = instrumentOverrides[strategy.name];
-        const result = await startStrategy(strategy.name, instrument);
-        setStatusMessage(
-          result.status === "started" ? `Started ${strategy.name} on ${formatInstrumentLabel(instrument)}.` : result.status,
-        );
-        router.refresh();
+        await startStrategy(strategy.name, instrument);
+        const refreshed = await refreshResources();
+        const refreshedStrategy = refreshed.strategies?.find((entry) => entry.name === strategy.name);
+        const runtimeVisible = refreshedStrategy?.active_runtimes?.some((runtime) => runtime.instrument === instrument) ?? false;
+        if (refreshed.failureDetail) {
+          setStatusNotice({
+            tone: "warning",
+            message: `Runtime start succeeded, but backend truth refresh failed: ${refreshed.failureDetail}`,
+          });
+        } else if (!runtimeVisible) {
+          setStatusNotice({
+            tone: "warning",
+            message: `Runtime start route succeeded, but refreshed backend truth does not yet show ${strategy.name} on ${formatInstrumentLabel(instrument)} as active.`,
+          });
+        } else {
+          setStatusNotice({
+            tone: "neutral",
+            message: `Runtime start confirmed after backend truth refreshed for ${strategy.name} on ${formatInstrumentLabel(instrument)}.`,
+          });
+        }
       } catch (error) {
-        setStatusMessage(error instanceof Error ? error.message : "Failed to start strategy.");
+        setStatusNotice({
+          tone: "warning",
+          message: mutationErrorMessage("Runtime start", error),
+        });
+      } finally {
+        setMutationTarget(null);
       }
-    });
+    })();
   };
 
-  const stopRuntime = (strategyName: string, instrument: string) => {
-    startTransition(async () => {
-      try {
-        const result = await stopStrategy({ strategyName, instrument });
-        setStatusMessage(
-          result.status === "stopped" ? `Stopped ${strategyName} on ${formatInstrumentLabel(instrument)}.` : result.status,
-        );
-        router.refresh();
-      } catch (error) {
-        setStatusMessage(error instanceof Error ? error.message : "Failed to stop strategy.");
-      }
+  const stopRuntime = async (strategyName: string, instrument: string) => {
+    setMutationTarget({
+      kind: "stop",
+      strategyName,
+      instrument,
     });
+    setStatusNotice(null);
+    try {
+      await stopStrategy({ strategyName, instrument });
+      const refreshed = await refreshResources();
+      const refreshedStrategy = refreshed.strategies?.find((entry) => entry.name === strategyName);
+      const runtimeStillVisible = refreshedStrategy?.active_runtimes?.some((runtime) => runtime.instrument === instrument) ?? false;
+      if (refreshed.failureDetail) {
+        setStatusNotice({
+          tone: "warning",
+          message: `Runtime stop succeeded, but backend truth refresh failed: ${refreshed.failureDetail}`,
+        });
+      } else if (runtimeStillVisible) {
+        setStatusNotice({
+          tone: "warning",
+          message: `Runtime stop route succeeded, but refreshed backend truth still shows ${strategyName} on ${formatInstrumentLabel(instrument)} as active.`,
+        });
+      } else {
+        setStatusNotice({
+          tone: "neutral",
+          message: `Runtime stop confirmed after backend truth refreshed for ${strategyName} on ${formatInstrumentLabel(instrument)}.`,
+        });
+      }
+    } catch (error) {
+      setStatusNotice({
+        tone: "warning",
+        message: mutationErrorMessage("Runtime stop", error),
+      });
+    } finally {
+      setMutationTarget(null);
+      setStopConfirmation(null);
+    }
+  };
+
+  const executionSourceMeta = (execution: Execution) => {
+    const detailSource = execution.details?.execution_source;
+    if (typeof detailSource === "string") {
+      return closeExecutionSourceMeta(detailSource);
+    }
+    const closeSource = execution.details?.close_execution_source;
+    if (typeof closeSource === "string") {
+      return closeExecutionSourceMeta(closeSource);
+    }
+    return null;
   };
 
   return (
@@ -316,8 +438,13 @@ export function StrategyLive({
         actions={
           selectedStrategy ? (
             <div className="console-inline-actions">
-              <button type="button" className="console-button" disabled={pending} onClick={() => runAction(selectedStrategy)}>
-                {pending ? "Starting..." : "Start Runtime"}
+              <button
+                type="button"
+                className="console-button"
+                disabled={pending || Boolean(startDisabledReason)}
+                onClick={() => runAction(selectedStrategy)}
+              >
+                {pending && mutationTarget?.kind === "start" && mutationTarget.strategyName === selectedStrategy.name ? "Starting..." : "Start Runtime"}
               </button>
               <button type="button" className="console-button console-button--ghost" onClick={() => setExecutionDrawerOpen(true)}>
                 Execution Feed
@@ -379,6 +506,7 @@ export function StrategyLive({
                     }));
                   }
                 }
+                disabled={pending}
               >
                 {(selectedStrategy.instrument_options ?? []).map((option) => (
                   <option key={option.epic} value={option.epic}>
@@ -386,7 +514,39 @@ export function StrategyLive({
                   </option>
                 ))}
               </select>
+              <p className="status-note status-note--inline">
+                {startDisabledReason
+                  ? startDisabledReason
+                  : "Starts a manual runtime only. This does not imply governance approval, entry eligibility, or broker mutation."}
+              </p>
             </div>
+
+            {stopConfirmation && stopConfirmation.strategyName === selectedStrategy.name ? (
+              <div className="console-alert console-alert--warning">
+                Stop only ends the selected runtime process. Broker-confirmed open risk remains live and may still need an exit-capable runtime, recovery path, or manual review.
+                <div className="status-note status-note--inline">
+                  {formatInstrumentLabel(stopConfirmation.instrument)} · {formatIdentifierDisplay(stopConfirmation.brokerReference) ?? "Broker reference unavailable"}
+                </div>
+                <div className="console-inline-actions">
+                  <button
+                    type="button"
+                    className="console-button"
+                    disabled={pending}
+                    onClick={() => stopRuntime(stopConfirmation.strategyName, stopConfirmation.instrument)}
+                  >
+                    {pending && mutationTarget?.kind === "stop" && mutationTarget.instrument === stopConfirmation.instrument ? "Stopping..." : "Confirm Stop Runtime"}
+                  </button>
+                  <button
+                    type="button"
+                    className="console-button console-button--ghost"
+                    disabled={pending}
+                    onClick={() => setStopConfirmation(null)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
             <CompactTable
               dense
@@ -402,11 +562,18 @@ export function StrategyLive({
                     row.has_open_position ? (
                       <div className="cell-stack">
                         <StatusPill label={`${row.direction ?? "live"} position`} tone="warning" />
-                        <span className="muted">{row.broker_reference ?? "broker reference unavailable"}</span>
+                        <span className="muted">{formatIdentifierDisplay(row.broker_reference) ?? "broker reference unavailable"}</span>
+                        {formatIdentifierFingerprint(row.broker_reference) ? (
+                          <span className="muted">{formatIdentifierFingerprint(row.broker_reference)}</span>
+                        ) : null}
+                        <span className="muted">{`${row.control_mode ?? "UNKNOWN"} / ${row.runtime_mode ?? "NORMAL"} runtime`}</span>
                         <span className="muted">Stopping this runtime does not close broker-confirmed open risk.</span>
                       </div>
                     ) : (
-                      <StatusPill label="watching" tone="positive" />
+                      <div className="cell-stack">
+                        <StatusPill label="watching" tone="positive" />
+                        <span className="muted">{`${row.control_mode ?? "UNKNOWN"} / ${row.runtime_mode ?? "NORMAL"} runtime`}</span>
+                      </div>
                     ),
                 },
                 {
@@ -427,9 +594,20 @@ export function StrategyLive({
                           ? "Stops the runtime process only; broker-confirmed open risk remains visible for exit management."
                           : "Stops this runtime."
                       }
-                      onClick={() => stopRuntime(selectedStrategy.name, row.instrument)}
+                      onClick={() => {
+                        if (row.has_open_position) {
+                          setStatusNotice(null);
+                          setStopConfirmation({
+                            strategyName: selectedStrategy.name,
+                            instrument: row.instrument,
+                            brokerReference: row.broker_reference,
+                          });
+                          return;
+                        }
+                        void stopRuntime(selectedStrategy.name, row.instrument);
+                      }}
                     >
-                      Stop Runtime
+                      {pending && mutationTarget?.kind === "stop" && mutationTarget.strategyName === selectedStrategy.name && mutationTarget.instrument === row.instrument ? "Stopping..." : "Stop Runtime"}
                     </button>
                   ),
                 },
@@ -442,7 +620,7 @@ export function StrategyLive({
       </Panel>
 
       {errors.executions ? <div className="console-alert console-alert--warning">Execution feed unavailable. {errors.executions}</div> : null}
-      {statusMessage ? <div className="console-alert console-alert--neutral">{statusMessage}</div> : null}
+      {statusNotice ? <div className={`console-alert console-alert--${statusNotice.tone}`}>{statusNotice.message}</div> : null}
 
       <InspectorDrawer
         title="Execution Feed"
@@ -464,9 +642,52 @@ export function StrategyLive({
           columns={[
             { key: "strategy", header: "Strategy", render: (row) => row.strategy_name },
             { key: "instrument", header: "Instrument", render: (row) => formatInstrumentLabel(row.instrument) },
-            { key: "status", header: "Status", render: (row) => row.status.replaceAll("_", " ") },
-            { key: "request", header: "Request", render: (row) => row.client_request_id ?? "n/a" },
-            { key: "broker", header: "Broker Ref", render: (row) => row.broker_reference ?? "n/a" },
+            {
+              key: "status",
+              header: "Status",
+              render: (row) => {
+                const meta = executionStatusMeta(row.status);
+                return <StatusPill label={meta.label} tone={meta.tone} title={meta.detail} />;
+              },
+            },
+            {
+              key: "source",
+              header: "Source",
+              render: (row) => {
+                const meta = executionSourceMeta(row);
+                return meta ? <StatusPill label={meta.label} tone={meta.tone} title={meta.detail} /> : "n/a";
+              },
+            },
+            {
+              key: "request",
+              header: "Request",
+              render: (row) =>
+                formatIdentifierDisplay(row.client_request_id) ? (
+                  <div className="cell-stack">
+                    <span>{formatIdentifierDisplay(row.client_request_id)}</span>
+                    {formatIdentifierFingerprint(row.client_request_id) ? (
+                      <span className="muted">{formatIdentifierFingerprint(row.client_request_id)}</span>
+                    ) : null}
+                  </div>
+                ) : (
+                  "n/a"
+                ),
+            },
+            {
+              key: "broker",
+              header: "Broker Ref",
+              render: (row) =>
+                formatIdentifierDisplay(row.broker_reference) ? (
+                  <div className="cell-stack">
+                    <span>{formatIdentifierDisplay(row.broker_reference)}</span>
+                    {formatIdentifierFingerprint(row.broker_reference) ? (
+                      <span className="muted">{formatIdentifierFingerprint(row.broker_reference)}</span>
+                    ) : null}
+                  </div>
+                ) : (
+                  "n/a"
+                ),
+            },
             { key: "reason", header: "Reason", render: (row) => row.error_message ?? row.reason ?? "n/a" },
           ]}
         />

@@ -485,6 +485,31 @@ function baseStrategy(overrides = {}) {
   };
 }
 
+function baseMarketCatalogueRow(overrides = {}) {
+  return {
+    id: "CS.D.EURUSD.MINI.IP",
+    instrument: "CS.D.EURUSD.MINI.IP",
+    name: "EUR/USD",
+    symbol: "EUR/USD",
+    asset_class: "FOREX",
+    category: "Forex",
+    currency: "USD",
+    base_currency: "EUR",
+    quote_currency: "USD",
+    forex_major: true,
+    tradable: true,
+    shortlisted: false,
+    in_strategy_watchlist: false,
+    streaming_now: false,
+    activity_level: "HIGH",
+    strategy_compatibility: ["Breakout"],
+    reference_price: 1.08,
+    shortlisted_at: null,
+    note: null,
+    ...overrides,
+  };
+}
+
 function baseEvent(overrides = {}) {
   return {
     id: 1,
@@ -818,6 +843,86 @@ export function buildScenarioRoutes(name) {
           detail: "backend domain-event persistence failed for alert 5",
         }),
       });
+    case "strategies-start-failure-detail":
+      return mergeRoutes({
+        "GET /strategies": ok([
+          baseStrategy({
+            status: "STOPPED",
+            current_pnl: 0,
+            last_price: null,
+            price_status: "STOPPED",
+            active_instruments: [],
+            active_runtime_count: 0,
+            open_position_count: 0,
+            active_runtimes: [],
+            open_positions: [],
+          }),
+        ]),
+        "POST /strategy/start": delayed(
+          response(503, {
+            detail: "strategy runtime start failed because durable audit persistence is unavailable",
+          }),
+          400,
+        ),
+      });
+    case "strategies-start-refresh-failure":
+      return mergeRoutes({
+        "GET /strategies": [
+          ok([
+            baseStrategy({
+              status: "STOPPED",
+              current_pnl: 0,
+              last_price: null,
+              price_status: "STOPPED",
+              active_instruments: [],
+              active_runtime_count: 0,
+              open_position_count: 0,
+              active_runtimes: [],
+              open_positions: [],
+            }),
+          ]),
+          ok([
+            baseStrategy({
+              status: "STOPPED",
+              current_pnl: 0,
+              last_price: null,
+              price_status: "STOPPED",
+              active_instruments: [],
+              active_runtime_count: 0,
+              open_position_count: 0,
+              active_runtimes: [],
+              open_positions: [],
+            }),
+          ]),
+          unavailable("strategy truth refresh failed after runtime start"),
+        ],
+        "POST /strategy/start": delayed(
+          ok({
+            status: "started",
+            strategy: "Breakout",
+            instrument: "CS.D.EURUSD.MINI.IP",
+          }),
+          400,
+        ),
+      });
+    case "strategies-start-disabled-reason":
+      return mergeRoutes({
+        "GET /strategies": ok([
+          baseStrategy({
+            status: "STOPPED",
+            current_pnl: 0,
+            instrument: "",
+            last_price: null,
+            price_status: "STOPPED",
+            active_instruments: [],
+            active_runtime_count: 0,
+            open_position_count: 0,
+            active_runtimes: [],
+            open_positions: [],
+            instrument_options: [],
+          }),
+        ]),
+      });
     case "strategies-open-risk":
       return mergeRoutes({
         "GET /strategies": ok([
@@ -839,6 +944,128 @@ export function buildScenarioRoutes(name) {
             status: "POSITION_OPENED",
             broker_reference: "BROKER-OPEN-1",
             reason: "Broker-confirmed open position remains live.",
+          }),
+        ]),
+      });
+    case "strategies-stop-open-risk-confirmation":
+      return mergeRoutes({
+        "GET /strategies": [
+          ok([
+            baseStrategy({
+              active_runtimes: [
+                {
+                  instrument: "CS.D.EURUSD.MINI.IP",
+                  has_open_position: true,
+                  direction: "BUY",
+                  broker_reference: "BROKER-OPEN-9",
+                  unrealized_pnl: 45,
+                  control_mode: "MANUAL",
+                  runtime_mode: "EXITS_ONLY",
+                },
+              ],
+              open_positions: [basePosition({ broker_reference: "BROKER-OPEN-9" })],
+            }),
+          ]),
+          ok([
+            baseStrategy({
+              active_runtimes: [
+                {
+                  instrument: "CS.D.EURUSD.MINI.IP",
+                  has_open_position: true,
+                  direction: "BUY",
+                  broker_reference: "BROKER-OPEN-9",
+                  unrealized_pnl: 45,
+                  control_mode: "MANUAL",
+                  runtime_mode: "EXITS_ONLY",
+                },
+              ],
+              open_positions: [basePosition({ broker_reference: "BROKER-OPEN-9" })],
+            }),
+          ]),
+          ok([
+            baseStrategy({
+              status: "STOPPED",
+              current_pnl: 0,
+              last_price: 1.09,
+              price_status: "POSITION",
+              active_instruments: [],
+              active_runtime_count: 0,
+              open_position_count: 1,
+              active_runtimes: [],
+              open_positions: [basePosition({ broker_reference: "BROKER-OPEN-9" })],
+            }),
+          ]),
+        ],
+        "POST /strategy/stop": delayed(
+          ok({
+            status: "stopped",
+            strategy: "Breakout",
+            instrument: "CS.D.EURUSD.MINI.IP",
+          }),
+          400,
+        ),
+      });
+    case "strategies-stop-failure-detail":
+      return mergeRoutes({
+        "GET /strategies": [
+          ok([
+            baseStrategy({
+              active_runtimes: [
+                {
+                  instrument: "CS.D.EURUSD.MINI.IP",
+                  has_open_position: true,
+                  direction: "BUY",
+                  broker_reference: "BROKER-OPEN-10",
+                  unrealized_pnl: 30,
+                  control_mode: "MANUAL",
+                  runtime_mode: "EXITS_ONLY",
+                },
+              ],
+              open_positions: [basePosition({ broker_reference: "BROKER-OPEN-10" })],
+            }),
+          ]),
+          ok([
+            baseStrategy({
+              active_runtimes: [
+                {
+                  instrument: "CS.D.EURUSD.MINI.IP",
+                  has_open_position: true,
+                  direction: "BUY",
+                  broker_reference: "BROKER-OPEN-10",
+                  unrealized_pnl: 30,
+                  control_mode: "MANUAL",
+                  runtime_mode: "EXITS_ONLY",
+                },
+              ],
+              open_positions: [basePosition({ broker_reference: "BROKER-OPEN-10" })],
+            }),
+          ]),
+        ],
+        "POST /strategy/stop": delayed(
+          response(503, {
+            detail: "runtime stop failed because open-risk handoff audit persistence failed",
+          }),
+          400,
+        ),
+      });
+    case "strategies-execution-simulated-provenance":
+      return mergeRoutes({
+        "GET /strategies": ok([
+          baseStrategy({
+            open_position_count: 0,
+            active_runtimes: [],
+            open_positions: [],
+          }),
+        ]),
+        "GET /executions": ok([
+          baseExecution({
+            id: 91,
+            status: "POSITION_OPENED",
+            broker_reference: "SIM-ENTRY-91",
+            reason: "Local simulated fill remains visible until broker reconciliation is complete.",
+            details: {
+              execution_source: "SIMULATED_LOCAL_FILL",
+            },
           }),
         ]),
       });
@@ -1147,6 +1374,330 @@ export function buildScenarioRoutes(name) {
           ],
         }),
       });
+    case "markets-shortlist-failure-retry":
+      return mergeRoutes({
+        "GET /markets/catalogue": [
+          ok({
+            generated_at: TIMESTAMP,
+            instruments: [baseMarketCatalogueRow()],
+            summary: {
+              total_count: 1,
+              shortlisted_count: 0,
+              strategy_watchlist_count: 0,
+              streaming_count: 0,
+            },
+          }),
+          ok({
+            generated_at: TIMESTAMP,
+            instruments: [
+              baseMarketCatalogueRow({
+                shortlisted: true,
+              }),
+            ],
+            summary: {
+              total_count: 1,
+              shortlisted_count: 1,
+              strategy_watchlist_count: 0,
+              streaming_count: 0,
+            },
+          }),
+        ],
+        "GET /strategy-watchlist": [
+          ok({
+            generated_at: TIMESTAMP,
+            limit: 8,
+            active_count: 0,
+            normal_count: 0,
+            streaming_count: 0,
+            protective_count: 0,
+            cap_exceeded_by_protective_coverage: false,
+            instruments: [],
+          }),
+          ok({
+            generated_at: TIMESTAMP,
+            limit: 8,
+            active_count: 0,
+            normal_count: 0,
+            streaming_count: 0,
+            protective_count: 0,
+            cap_exceeded_by_protective_coverage: false,
+            instruments: [],
+          }),
+        ],
+        "GET /markets/overview": [
+          ok({
+            generatedAt: TIMESTAMP,
+            summary: {
+              category: "forex",
+              label: "Forex",
+              description: "Major FX instruments.",
+              status: "OPEN",
+              headline: "Forex open",
+              detail: "Market overview available.",
+              nextTransitionAt: "2026-05-17T17:00:00.000Z",
+              nextTransitionLabel: "Close",
+              tradableCount: 1,
+              activeCount: 0,
+              totalCount: 1,
+            },
+            instruments: [],
+          }),
+          ok({
+            generatedAt: TIMESTAMP,
+            summary: {
+              category: "forex",
+              label: "Forex",
+              description: "Major FX instruments.",
+              status: "OPEN",
+              headline: "Forex open",
+              detail: "Market overview available.",
+              nextTransitionAt: "2026-05-17T17:00:00.000Z",
+              nextTransitionLabel: "Close",
+              tradableCount: 1,
+              activeCount: 0,
+              totalCount: 1,
+            },
+            instruments: [],
+          }),
+        ],
+        "POST /watchlist/shortlist/CS.D.EURUSD.MINI.IP": [
+          delayed(
+            response(503, {
+              detail: "shortlist write failed because operator audit persistence is unavailable",
+            }),
+            400,
+          ),
+          delayed(
+            ok({
+              status: "shortlisted",
+              instrument: "CS.D.EURUSD.MINI.IP",
+            }),
+            400,
+          ),
+        ],
+      });
+    case "markets-watchlist-add-refresh-failure":
+      return mergeRoutes({
+        "GET /markets/catalogue": [
+          ok({
+            generated_at: TIMESTAMP,
+            instruments: [
+              baseMarketCatalogueRow({
+                shortlisted: true,
+              }),
+            ],
+            summary: {
+              total_count: 1,
+              shortlisted_count: 1,
+              strategy_watchlist_count: 0,
+              streaming_count: 0,
+            },
+          }),
+          ok({
+            generated_at: TIMESTAMP,
+            instruments: [
+              baseMarketCatalogueRow({
+                shortlisted: true,
+                in_strategy_watchlist: true,
+              }),
+            ],
+            summary: {
+              total_count: 1,
+              shortlisted_count: 1,
+              strategy_watchlist_count: 1,
+              streaming_count: 0,
+            },
+          }),
+        ],
+        "GET /strategy-watchlist": [
+          ok({
+            generated_at: TIMESTAMP,
+            limit: 8,
+            active_count: 0,
+            normal_count: 0,
+            streaming_count: 0,
+            protective_count: 0,
+            cap_exceeded_by_protective_coverage: false,
+            instruments: [],
+          }),
+          unavailable("strategy watchlist refresh failed after mutation"),
+        ],
+        "GET /markets/overview": [
+          ok({
+            generatedAt: TIMESTAMP,
+            summary: {
+              category: "forex",
+              label: "Forex",
+              description: "Major FX instruments.",
+              status: "OPEN",
+              headline: "Forex open",
+              detail: "Market overview available.",
+              nextTransitionAt: "2026-05-17T17:00:00.000Z",
+              nextTransitionLabel: "Close",
+              tradableCount: 1,
+              activeCount: 0,
+              totalCount: 1,
+            },
+            instruments: [],
+          }),
+          ok({
+            generatedAt: TIMESTAMP,
+            summary: {
+              category: "forex",
+              label: "Forex",
+              description: "Major FX instruments.",
+              status: "OPEN",
+              headline: "Forex open",
+              detail: "Market overview available.",
+              nextTransitionAt: "2026-05-17T17:00:00.000Z",
+              nextTransitionLabel: "Close",
+              tradableCount: 1,
+              activeCount: 0,
+              totalCount: 1,
+            },
+            instruments: [],
+          }),
+        ],
+        "POST /strategy-watchlist/bulk": delayed(
+          ok({
+            added: [
+              {
+                instrument: "CS.D.EURUSD.MINI.IP",
+                reason: "shortlist",
+                reason_detail: {
+                  code: "shortlist",
+                  label: "Shortlist",
+                  operator_action: "Moved from operator shortlist into evaluation watchlist only.",
+                },
+              },
+            ],
+            skipped: [],
+            limit: 8,
+          }),
+          400,
+        ),
+      });
+    case "markets-watchlist-remove-confirmed":
+      return mergeRoutes({
+        "GET /markets/catalogue": [
+          ok({
+            generated_at: TIMESTAMP,
+            instruments: [
+              baseMarketCatalogueRow({
+                shortlisted: true,
+                in_strategy_watchlist: true,
+              }),
+            ],
+            summary: {
+              total_count: 1,
+              shortlisted_count: 1,
+              strategy_watchlist_count: 1,
+              streaming_count: 0,
+            },
+          }),
+          ok({
+            generated_at: TIMESTAMP,
+            instruments: [
+              baseMarketCatalogueRow({
+                shortlisted: true,
+                in_strategy_watchlist: false,
+              }),
+            ],
+            summary: {
+              total_count: 1,
+              shortlisted_count: 1,
+              strategy_watchlist_count: 0,
+              streaming_count: 0,
+            },
+          }),
+        ],
+        "GET /strategy-watchlist": [
+          ok({
+            generated_at: TIMESTAMP,
+            limit: 8,
+            active_count: 1,
+            normal_count: 1,
+            streaming_count: 0,
+            protective_count: 0,
+            cap_exceeded_by_protective_coverage: false,
+            instruments: [
+              {
+                instrument: "CS.D.EURUSD.MINI.IP",
+                tier: "TIER1",
+                status: "ACTIVE",
+                asset_class: "FOREX",
+                pinned: false,
+                reason: "strategy_watchlist",
+                reason_detail: {
+                  code: "strategy_watchlist",
+                  label: "Strategy watchlist",
+                  operator_action: "Watchlisted for evaluation only; entry still depends on governance, risk, broker, and market-data gates.",
+                },
+                protective: false,
+                priority_score: 1,
+                requested_frequency: "1s",
+                promotion_expires_at: null,
+                last_streamed_at: null,
+                last_refreshed_at: TIMESTAMP,
+                streamed: false,
+              },
+            ],
+          }),
+          ok({
+            generated_at: TIMESTAMP,
+            limit: 8,
+            active_count: 0,
+            normal_count: 0,
+            streaming_count: 0,
+            protective_count: 0,
+            cap_exceeded_by_protective_coverage: false,
+            instruments: [],
+          }),
+        ],
+        "GET /markets/overview": [
+          ok({
+            generatedAt: TIMESTAMP,
+            summary: {
+              category: "forex",
+              label: "Forex",
+              description: "Major FX instruments.",
+              status: "OPEN",
+              headline: "Forex open",
+              detail: "Market overview available.",
+              nextTransitionAt: "2026-05-17T17:00:00.000Z",
+              nextTransitionLabel: "Close",
+              tradableCount: 1,
+              activeCount: 0,
+              totalCount: 1,
+            },
+            instruments: [],
+          }),
+          ok({
+            generatedAt: TIMESTAMP,
+            summary: {
+              category: "forex",
+              label: "Forex",
+              description: "Major FX instruments.",
+              status: "OPEN",
+              headline: "Forex open",
+              detail: "Market overview available.",
+              nextTransitionAt: "2026-05-17T17:00:00.000Z",
+              nextTransitionLabel: "Close",
+              tradableCount: 1,
+              activeCount: 0,
+              totalCount: 1,
+            },
+            instruments: [],
+          }),
+        ],
+        "DELETE /strategy-watchlist/CS.D.EURUSD.MINI.IP": delayed(
+          ok({
+            status: "removed",
+            instrument: "CS.D.EURUSD.MINI.IP",
+          }),
+          400,
+        ),
+      });
     case "control-plane-mutation-refresh-failure":
       return mergeRoutes({
         "GET /control-plane/summary": [
@@ -1387,6 +1938,86 @@ export function buildScenarioRoutes(name) {
               },
               strategies_may_evaluate: false,
               active_strategy_runtime_count: 1,
+              watchlist_entry: null,
+            },
+          ],
+        }),
+      });
+    case "coverage-unknown-freshness":
+      return mergeRoutes({
+        "GET /coverage/summary": ok(
+          baseCoverageSummary({
+            streaming: {
+              active_instruments: [
+                {
+                  instrument: "CS.D.EURUSD.MINI.IP",
+                  tier: "TIER1",
+                  status: "ACTIVE",
+                  asset_class: "FOREX",
+                  pinned: false,
+                  reason: "strategy_watchlist",
+                  reason_detail: null,
+                  protective: false,
+                  priority_score: 1,
+                  requested_frequency: "1s",
+                  promotion_expires_at: null,
+                  last_streamed_at: null,
+                  last_refreshed_at: TIMESTAMP,
+                  streamed: true,
+                },
+              ],
+              execution_readiness: [
+                {
+                  instrument: "CS.D.EURUSD.MINI.IP",
+                  is_ok: false,
+                  market_open: true,
+                  tradable: true,
+                  quote_fresh: false,
+                  spread_ok: true,
+                  session_valid: true,
+                  dealing_allowed: true,
+                  last_price_age_ms: 0,
+                  spread: null,
+                  reason: "unknown_tick_time",
+                },
+              ],
+              desired_instruments: ["CS.D.EURUSD.MINI.IP"],
+              pinned_instruments: [],
+              capped_instruments: [],
+              asset_class_usage: {},
+            },
+          }),
+        ),
+        "GET /market-data/feed-state": ok({
+          generated_at: TIMESTAMP,
+          instruments: [
+            {
+              instrument: "CS.D.EURUSD.MINI.IP",
+              stream_status: "streaming",
+              stream_reason: {
+                code: "unknown_tick_time",
+                label: "Stream state unknown",
+                operator_action: "Stream coverage exists, but the latest tick timestamp is unavailable.",
+              },
+              stream_connected: true,
+              stream_enabled: true,
+              streaming_now: true,
+              desired: true,
+              capped: false,
+              last_tick_at: null,
+              last_tick_age_ms: null,
+              spread: 1.1,
+              price_source: "STREAM",
+              market_status: null,
+              market_error: null,
+              entry_eligibility: "UNKNOWN",
+              entry_eligibility_reason: {
+                code: "unknown_tick_time",
+                label: "Unknown freshness",
+                operator_action: "Freshness is unknown; do not treat this instrument as healthy live stream truth.",
+              },
+              strategies_may_evaluate: false,
+              active_strategy_runtime_count: 0,
               watchlist_entry: null,
             },
           ],

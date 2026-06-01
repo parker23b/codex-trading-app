@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { CompactTable, DataIndicator, Panel, SplitPanel, StatusPill, StatusStrip, StickyToolbar } from "@/components/console/primitives";
 import {
@@ -10,6 +10,7 @@ import {
   getMarketOverview,
   getStrategyWatchlist,
   removeShortlistInstrument,
+  removeStrategyWatchlistInstrument,
 } from "@/lib/api";
 import { formatInstrumentLabel } from "@/lib/format";
 import { MarketCatalogueInstrument, MarketCatalogueResponse, MarketCategoryOverviewResponse, StrategyWatchlistResponse } from "@/lib/types";
@@ -21,6 +22,21 @@ type MarketOverviewDashboardProps = {
   initialCatalogueError: string | null;
   initialStrategyWatchlist: StrategyWatchlistResponse;
   initialStrategyWatchlistError: string | null;
+};
+
+type MarketMutationState = {
+  kind:
+    | "shortlist-add"
+    | "shortlist-remove"
+    | "watchlist-add"
+    | "watchlist-remove"
+    | "refresh";
+  instruments: string[];
+};
+
+type MarketStatusNotice = {
+  tone: "neutral" | "warning";
+  message: string;
 };
 
 const ASSET_CLASSES = ["ALL", "FOREX", "INDICES", "COMMODITIES", "STOCKS", "CRYPTO"];
@@ -94,8 +110,9 @@ export function MarketOverviewDashboard({
   const [watchlistOnly, setWatchlistOnly] = useState(false);
   const [streamingOnly, setStreamingOnly] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [statusNotice, setStatusNotice] = useState<MarketStatusNotice | null>(null);
+  const [mutationState, setMutationState] = useState<MarketMutationState | null>(null);
+  const isPending = mutationState !== null;
 
   useEffect(() => {
     setCatalogue(initialCatalogue);
@@ -169,46 +186,157 @@ export function MarketOverviewDashboard({
     } else {
       setWatchlistError(nextWatchlist.reason instanceof Error ? nextWatchlist.reason.message : "Strategy watchlist unavailable.");
     }
-    setOverviewError(nextOverview.status === "rejected" ? (nextOverview.reason instanceof Error ? nextOverview.reason.message : "Market overview unavailable.") : null);
+    const nextOverviewError = nextOverview.status === "rejected" ? (nextOverview.reason instanceof Error ? nextOverview.reason.message : "Market overview unavailable.") : null;
+    setOverviewError(nextOverviewError);
+
+    return {
+      failureDetail:
+        (nextCatalogue.status === "rejected" ? (nextCatalogue.reason instanceof Error ? nextCatalogue.reason.message : "Catalogue unavailable.") : null)
+        ?? (nextWatchlist.status === "rejected" ? (nextWatchlist.reason instanceof Error ? nextWatchlist.reason.message : "Strategy watchlist unavailable.") : null)
+        ?? nextOverviewError,
+      catalogue: nextCatalogue.status === "fulfilled" ? nextCatalogue.value : null,
+      strategyWatchlist: nextWatchlist.status === "fulfilled" ? nextWatchlist.value : null,
+    };
   };
 
   const toggleShortlist = (instrumentId: string, currentlyShortlisted: boolean) => {
-    startTransition(async () => {
+    void (async () => {
+      setMutationState({
+        kind: currentlyShortlisted ? "shortlist-remove" : "shortlist-add",
+        instruments: [instrumentId],
+      });
+      setStatusNotice(null);
       try {
         if (currentlyShortlisted) {
           await removeShortlistInstrument(instrumentId);
-          setStatusMessage(`${formatInstrumentLabel(instrumentId)} removed from shortlist.`);
         } else {
           await addShortlistInstrument(instrumentId);
-          setStatusMessage(`${formatInstrumentLabel(instrumentId)} added to shortlist.`);
         }
-        await refreshAll();
+        const refreshed = await refreshAll();
+        const shortlistVisible =
+          refreshed.catalogue?.instruments.find((row) => row.instrument === instrumentId)?.shortlisted ?? currentlyShortlisted;
+        if (refreshed.failureDetail) {
+          setStatusNotice({
+            tone: "warning",
+            message: `Shortlist mutation succeeded, but backend truth refresh failed: ${refreshed.failureDetail}`,
+          });
+        } else if (currentlyShortlisted ? shortlistVisible : !shortlistVisible) {
+          setStatusNotice({
+            tone: "warning",
+            message: `Shortlist mutation route succeeded, but refreshed backend truth does not yet show ${formatInstrumentLabel(instrumentId)} in the expected shortlist state.`,
+          });
+        } else {
+          setStatusNotice({
+            tone: "neutral",
+            message: `Shortlist mutation confirmed after backend truth refreshed for ${formatInstrumentLabel(instrumentId)}.`,
+          });
+        }
       } catch (error) {
-        setStatusMessage(error instanceof Error ? error.message : "Shortlist update failed.");
+        setStatusNotice({
+          tone: "warning",
+          message: `Shortlist mutation failed: ${error instanceof Error ? error.message : "backend shortlist truth could not be updated."}`,
+        });
+      } finally {
+        setMutationState(null);
       }
-    });
+    })();
   };
 
   const addToStrategyWatchlist = (instrumentIds: string[]) => {
-    startTransition(async () => {
+    void (async () => {
+      setMutationState({
+        kind: "watchlist-add",
+        instruments: instrumentIds,
+      });
+      setStatusNotice(null);
       try {
         const result = await addStrategyWatchlistInstruments(instrumentIds);
+        const refreshed = await refreshAll();
+        const visibleInstruments = new Set((refreshed.strategyWatchlist?.instruments ?? []).map((row) => row.instrument));
+        const expectedVisible = result.added.every((item) => visibleInstruments.has(item.instrument));
         const skippedReasons = result.skipped
           .slice(0, 3)
           .map((item) => `${formatInstrumentLabel(item.instrument)}: ${item.reason_detail?.label ?? item.reason}`)
           .join(" · ");
-        setStatusMessage(`${result.added.length} added, ${result.skipped.length} blocked.${skippedReasons ? ` ${skippedReasons}` : ""}`);
         setSelectedIds([]);
-        await refreshAll();
+        if (refreshed.failureDetail) {
+          setStatusNotice({
+            tone: "warning",
+            message: `Strategy watchlist mutation succeeded, but backend truth refresh failed: ${refreshed.failureDetail}`,
+          });
+        } else if (!expectedVisible) {
+          setStatusNotice({
+            tone: "warning",
+            message: "Strategy watchlist mutation route succeeded, but refreshed backend truth does not yet show every added instrument.",
+          });
+        } else {
+          setStatusNotice({
+            tone: "neutral",
+            message: `Strategy watchlist mutation confirmed after backend truth refreshed. ${result.added.length} added, ${result.skipped.length} blocked.${skippedReasons ? ` ${skippedReasons}` : ""}`,
+          });
+        }
       } catch (error) {
-        setStatusMessage(error instanceof Error ? error.message : "Strategy watchlist update failed.");
+        setStatusNotice({
+          tone: "warning",
+          message: `Strategy watchlist mutation failed: ${error instanceof Error ? error.message : "backend watchlist truth could not be updated."}`,
+        });
+      } finally {
+        setMutationState(null);
       }
-    });
+    })();
+  };
+
+  const removeFromStrategyWatchlist = (instrumentId: string) => {
+    void (async () => {
+      setMutationState({
+        kind: "watchlist-remove",
+        instruments: [instrumentId],
+      });
+      setStatusNotice(null);
+      try {
+        await removeStrategyWatchlistInstrument(instrumentId);
+        const refreshed = await refreshAll();
+        const stillVisible = refreshed.strategyWatchlist?.instruments.some((row) => row.instrument === instrumentId) ?? true;
+        if (refreshed.failureDetail) {
+          setStatusNotice({
+            tone: "warning",
+            message: `Strategy watchlist mutation succeeded, but backend truth refresh failed: ${refreshed.failureDetail}`,
+          });
+        } else if (stillVisible) {
+          setStatusNotice({
+            tone: "warning",
+            message: `Strategy watchlist remove route succeeded, but refreshed backend truth still shows ${formatInstrumentLabel(instrumentId)} as an evaluation candidate.`,
+          });
+        } else {
+          setStatusNotice({
+            tone: "neutral",
+            message: `Strategy watchlist removal confirmed after backend truth refreshed for ${formatInstrumentLabel(instrumentId)}.`,
+          });
+        }
+      } catch (error) {
+        setStatusNotice({
+          tone: "warning",
+          message: `Strategy watchlist mutation failed: ${error instanceof Error ? error.message : "backend watchlist truth could not be updated."}`,
+        });
+      } finally {
+        setMutationState(null);
+      }
+    })();
   };
 
   const selectedRows = catalogue.instruments.filter((row) => selectedIds.includes(row.instrument));
   const normalWatchlistCount = strategyWatchlist.normal_count ?? Math.max(0, strategyWatchlist.active_count - (strategyWatchlist.protective_count ?? 0));
   const addableShortlist = shortlistedRows.filter((row) => !canAdd(row, strategyWatchlist.limit, normalWatchlistCount));
+  const addSelectedDisabledReason = Boolean(catalogueError || watchlistError)
+    ? catalogueError ?? watchlistError
+    : !selectedRows.length
+      ? "Select one or more catalogue instruments before sending a strategy-watchlist mutation."
+      : null;
+  const addAllDisabledReason = Boolean(catalogueError || watchlistError)
+    ? catalogueError ?? watchlistError
+    : !addableShortlist.length
+      ? "No shortlisted instruments are currently eligible for strategy-watchlist add."
+      : null;
 
   return (
     <main className="console-page console-page--dense">
@@ -257,7 +385,35 @@ export function MarketOverviewDashboard({
           <label className="console-toggle"><input type="checkbox" checked={shortlistedOnly} onChange={() => setShortlistedOnly((value) => !value)} />Shortlisted</label>
           <label className="console-toggle"><input type="checkbox" checked={watchlistOnly} onChange={() => setWatchlistOnly((value) => !value)} />Strategy watchlist</label>
           <label className="console-toggle"><input type="checkbox" checked={streamingOnly} onChange={() => setStreamingOnly((value) => !value)} />Streaming</label>
-          <button type="button" className="console-button console-button--ghost" disabled={isPending} onClick={() => startTransition(() => void refreshAll())}>Refresh</button>
+          <button
+            type="button"
+            className="console-button console-button--ghost"
+            disabled={isPending}
+            onClick={() =>
+              void (async () => {
+                setMutationState({
+                  kind: "refresh",
+                  instruments: [],
+                });
+                setStatusNotice(null);
+                const refreshed = await refreshAll();
+                setStatusNotice(
+                  refreshed.failureDetail
+                    ? {
+                        tone: "warning",
+                        message: `Markets refresh failed: ${refreshed.failureDetail}`,
+                      }
+                    : {
+                        tone: "neutral",
+                        message: "Markets truth refreshed from backend sources.",
+                      },
+                );
+                setMutationState(null);
+              })()
+            }
+          >
+            {isPending && mutationState?.kind === "refresh" ? "Refreshing..." : "Refresh"}
+          </button>
         </div>
       </StickyToolbar>
 
@@ -279,7 +435,14 @@ export function MarketOverviewDashboard({
                   key: "star",
                   header: "",
                   render: (row) => (
-                    <button type="button" className={`star-button ${row.shortlisted ? "is-active" : ""}`.trim()} disabled={isPending} onClick={() => toggleShortlist(row.instrument, row.shortlisted)} aria-label={row.shortlisted ? "Remove from shortlist" : "Add to shortlist"}>
+                    <button
+                      type="button"
+                      className={`star-button ${row.shortlisted ? "is-active" : ""}`.trim()}
+                      disabled={isPending}
+                      onClick={() => toggleShortlist(row.instrument, row.shortlisted)}
+                      aria-label={row.shortlisted ? "Remove from shortlist" : "Add to shortlist"}
+                      title={row.shortlisted ? "Operator interest only. Removing from shortlist does not remove streaming or trading approval because shortlist state is not approval." : "Operator interest only. Adding to shortlist does not deploy, stream, or approve trading."}
+                    >
                       {row.shortlisted ? "★" : "☆"}
                     </button>
                   ),
@@ -305,7 +468,7 @@ export function MarketOverviewDashboard({
           </Panel>
         }
         center={
-          <Panel title="Shortlist" subtitle={catalogueError ? "Shortlist source unavailable." : "Operator interest only."} priority="secondary" tone={catalogueError ? "inactive" : "neutral"} actions={<div className="console-inline-actions"><button type="button" className="console-button console-button--ghost" disabled={Boolean(catalogueError || watchlistError) || !selectedRows.length || isPending} onClick={() => addToStrategyWatchlist(selectedRows.map((row) => row.instrument))}>Add Selected</button><button type="button" className="console-button" disabled={Boolean(catalogueError || watchlistError) || !addableShortlist.length || isPending} onClick={() => addToStrategyWatchlist(addableShortlist.map((row) => row.instrument))}>Add All Eligible</button></div>}>
+          <Panel title="Shortlist" subtitle={catalogueError ? "Shortlist source unavailable." : "Operator interest only."} priority="secondary" tone={catalogueError ? "inactive" : "neutral"} actions={<div className="console-inline-actions"><button type="button" className="console-button console-button--ghost" disabled={Boolean(addSelectedDisabledReason) || isPending} onClick={() => addToStrategyWatchlist(selectedRows.map((row) => row.instrument))}>{isPending && mutationState?.kind === "watchlist-add" && mutationState.instruments.length === selectedRows.length ? "Adding..." : "Add Selected"}</button><button type="button" className="console-button" disabled={Boolean(addAllDisabledReason) || isPending} onClick={() => addToStrategyWatchlist(addableShortlist.map((row) => row.instrument))}>{isPending && mutationState?.kind === "watchlist-add" && mutationState.instruments.length === addableShortlist.length ? "Adding..." : "Add All Eligible"}</button></div>}>
             <CompactTable
               rows={shortlistedRows}
               emptyLabel={catalogueError ? "Shortlist unavailable." : "No shortlisted instruments yet."}
@@ -323,7 +486,7 @@ export function MarketOverviewDashboard({
                   header: "Action",
                   render: (row) => (
                     <button type="button" className="console-button console-button--ghost" disabled={Boolean(canAdd(row, strategyWatchlist.limit, normalWatchlistCount)) || isPending} onClick={() => addToStrategyWatchlist([row.instrument])}>
-                      Add
+                      {isPending && mutationState?.kind === "watchlist-add" && mutationState.instruments.includes(row.instrument) ? "Adding..." : "Add"}
                     </button>
                   ),
                 },
@@ -360,6 +523,20 @@ export function MarketOverviewDashboard({
                       </span>
                     ),
                   },
+                  {
+                    key: "action",
+                    header: "Action",
+                    render: (row) => (
+                      <button
+                        type="button"
+                        className="console-button console-button--ghost"
+                        disabled={Boolean(watchlistError) || isPending}
+                        onClick={() => removeFromStrategyWatchlist(row.instrument)}
+                      >
+                        {isPending && mutationState?.kind === "watchlist-remove" && mutationState.instruments.includes(row.instrument) ? "Removing..." : "Remove"}
+                      </button>
+                    ),
+                  },
                 ]}
               />
             </Panel>
@@ -372,8 +549,10 @@ export function MarketOverviewDashboard({
                 <div className="metric-stack__row"><span>Normal capacity</span><strong>{watchlistError ? "Unavailable" : `${normalWatchlistCount}/${strategyWatchlist.limit || "-"}`}</strong></div>
                 <div className="metric-stack__row"><span>Protective coverage</span><strong>{watchlistError ? "Unavailable" : `${strategyWatchlist.protective_count ?? 0} pinned separately`}</strong></div>
               </div>
+              {addSelectedDisabledReason ? <div className="status-note status-note--inline">Add Selected unavailable: {addSelectedDisabledReason}</div> : null}
+              {addAllDisabledReason ? <div className="status-note status-note--inline">Add All Eligible unavailable: {addAllDisabledReason}</div> : null}
               {overviewError || catalogueError || watchlistError ? <div className="console-alert console-alert--warning">{overviewError ?? catalogueError ?? watchlistError}<DataIndicator state="error" message={overviewError ?? catalogueError ?? watchlistError ?? "Market data unavailable."} /></div> : null}
-              {statusMessage ? <div className="console-alert console-alert--neutral">{statusMessage}</div> : null}
+              {statusNotice ? <div className={`console-alert console-alert--${statusNotice.tone}`}>{statusNotice.message}</div> : null}
               <div className="console-empty">Forex overview: {initialOverview.summary.detail}</div>
             </Panel>
           </div>

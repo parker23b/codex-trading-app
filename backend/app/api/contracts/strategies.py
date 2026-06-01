@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.api.contracts.identifiers import IdentifierProjection
+
 
 class StrategyRuntimeResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -13,7 +15,7 @@ class StrategyRuntimeResponse(BaseModel):
     instrument: str
     runtime_key: str
     has_open_position: bool
-    broker_reference: str | None = None
+    broker_reference: IdentifierProjection | None = None
     direction: Literal["BUY", "SELL"] | None = None
     current_price: float | None = None
     unrealized_pnl: float | None = None
@@ -27,7 +29,7 @@ class StrategyRuntimeResponse(BaseModel):
 class StrategyPositionSummaryResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    broker_reference: str | None = None
+    broker_reference: IdentifierProjection | None = None
     instrument: str
     direction: Literal["BUY", "SELL"]
     size: float
@@ -40,7 +42,7 @@ class StrategyPositionSummaryResponse(BaseModel):
 class StrategyPersistedRuntimeResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    runtime_id: str
+    runtime_id: IdentifierProjection
     instrument: str
     status: str
     recovery_state: str | None = None

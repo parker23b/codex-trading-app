@@ -19,6 +19,11 @@ from app.models.trade import (
     utc_now,
 )
 from app.services.domain_event_service import domain_event_service
+from app.services.lifecycle_rules import (
+    validate_execution_transition,
+    validate_new_execution_status,
+    validate_trade_intent_transition,
+)
 
 
 class ActiveTradeIntentConflictError(RuntimeError):
@@ -465,8 +470,12 @@ class TradeService:
         opened_at: datetime | None = None,
         closed_at: datetime | None = None,
     ) -> TradeIntent:
+        next_state = validate_trade_intent_transition(
+            current_state=intent.state,
+            target_state=state,
+        )
         previous_state = intent.state
-        intent.state = state.value if isinstance(state, TradeIntentState) else state
+        intent.state = next_state.value
         intent.updated_at = utc_now()
         if allocation_cycle_id is not None:
             intent.allocation_cycle_id = allocation_cycle_id
@@ -546,6 +555,7 @@ class TradeService:
             raise
 
     def create_execution(self, execution: Execution) -> Execution:
+        execution.status = validate_new_execution_status(execution.status).value
         if (
             execution.status == ExecutionStatus.SUBMISSION_PENDING.value
             and execution.submitted_at is None
@@ -614,10 +624,12 @@ class TradeService:
         requires_manual_review: bool | None = None,
         details: dict[str, object] | None = None,
     ) -> Execution:
-        previous_status = execution.status
-        execution.status = (
-            status.value if isinstance(status, ExecutionStatus) else status
+        next_status = validate_execution_transition(
+            current_status=execution.status,
+            target_status=status,
         )
+        previous_status = execution.status
+        execution.status = next_status.value
         execution.last_transition_at = (
             completed_at or acknowledged_at or submitted_at or utc_now()
         )

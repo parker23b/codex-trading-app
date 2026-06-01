@@ -3,7 +3,7 @@ import Link from "next/link";
 import { CompactTable, Panel, StatusPill, StickyToolbar } from "@/components/console/primitives";
 import { ResetHistoryButton } from "@/components/testing/reset-history-button";
 import { getDomainEvents } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, formatIdentifierDisplay, formatIdentifierFingerprint } from "@/lib/format";
 
 const EVENT_TYPE_OPTIONS = [
   "strategy.runtime_started",
@@ -109,9 +109,17 @@ function hasAuditWriteDegradation(event: Awaited<ReturnType<typeof getDomainEven
 }
 
 function lifecycleReferences(event: Awaited<ReturnType<typeof getDomainEvents>>[number]) {
+  const correlation = formatIdentifierDisplay(event.correlation_id);
+  const correlationFingerprint = formatIdentifierFingerprint(event.correlation_id);
+  const runtime = formatIdentifierDisplay(event.runtime_id);
+  const runtimeFingerprint = formatIdentifierFingerprint(event.runtime_id);
   return [
-    event.correlation_id ? `Correlation · ${event.correlation_id}` : null,
-    event.runtime_id ? `Runtime · ${event.runtime_id}` : null,
+    correlation
+      ? `Correlation · ${correlation}${correlationFingerprint ? ` (${correlationFingerprint})` : ""}`
+      : null,
+    runtime
+      ? `Runtime · ${runtime}${runtimeFingerprint ? ` (${runtimeFingerprint})` : ""}`
+      : null,
     event.position_id != null ? `Position · ${event.position_id}` : null,
     event.trade_id != null ? `Trade · ${event.trade_id}` : null,
     event.execution_id != null ? `Execution · ${event.execution_id}` : null,
@@ -127,7 +135,7 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
   const severity = tab === "errors" ? "error" : readParam(resolvedParams.severity);
   const strategyName = readParam(resolvedParams.strategy_name);
   const instrument = readParam(resolvedParams.instrument);
-  const correlationId = readParam(resolvedParams.correlation_id);
+  const correlationFingerprint = readParam(resolvedParams.correlation_fingerprint);
   const selectedId = readParam(resolvedParams.selected);
   const limitValue = readParam(resolvedParams.limit);
   const limit = Number.parseInt(limitValue || "150", 10);
@@ -143,7 +151,7 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
     severity: severity || undefined,
     strategyName: strategyName || undefined,
     instrument: instrument || undefined,
-    correlationId: correlationId || undefined,
+    correlationFingerprint: correlationFingerprint || undefined,
   });
 
   const selectedEvent = selectedId ? (events.find((event) => String(event.id) === selectedId) ?? null) : null;
@@ -184,7 +192,7 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
             <div className="summary-bar__item">
               <span>Audit trail</span>
               <strong>{auditWriteDegradedEvent ? "Degraded" : "No active audit degradation event"}</strong>
-              <em>{auditWriteDegradedEvent?.correlation_id ?? "event context only"}</em>
+              <em>{formatIdentifierFingerprint(auditWriteDegradedEvent?.correlation_id) ?? formatIdentifierDisplay(auditWriteDegradedEvent?.correlation_id) ?? "event context only"}</em>
             </div>
             <div className="summary-bar__item">
               <span>Testing reset</span>
@@ -259,7 +267,7 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
           </label>
           <label>
             <span className="console-kicker">Correlation</span>
-            <input className="console-input" name="correlation_id" defaultValue={correlationId} placeholder="ent-..." />
+            <input className="console-input" name="correlation_fingerprint" defaultValue={correlationFingerprint} placeholder="fp:..." />
           </label>
           <label>
             <span className="console-kicker">Limit</span>
@@ -366,7 +374,7 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
                 <div className="summary-bar__item">
                   <span>Time</span>
                   <strong>{formatDateTime(selectedEvent.created_at)}</strong>
-                  <em>{selectedEvent.correlation_id ?? "no correlation"}</em>
+                  <em>{formatIdentifierFingerprint(selectedEvent.correlation_id) ?? formatIdentifierDisplay(selectedEvent.correlation_id) ?? "no correlation"}</em>
                 </div>
                 <div className="summary-bar__item">
                   <span>Source</span>

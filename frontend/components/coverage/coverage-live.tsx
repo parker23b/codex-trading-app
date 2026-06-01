@@ -87,6 +87,14 @@ function coverageStreamDisplay(row: CoverageWatchlistEntry, feed?: FeedState) {
     };
   }
 
+  if (feed.streaming_now && feed.last_tick_age_ms == null) {
+    return {
+      label: reasonLabel ?? "Stream state unknown",
+      tone: "warning" as const,
+      title: reasonDetail ?? "Stream coverage exists, but the latest tick timestamp is unavailable.",
+    };
+  }
+
   if (feed.stream_connected && feed.streaming_now) {
     return {
       label: reasonLabel ?? "Streaming",
@@ -117,8 +125,14 @@ function coverageLastTickLabel(row: CoverageWatchlistEntry, feed?: FeedState) {
   if (feed?.last_tick_age_ms != null) {
     return formatAge(feed.last_tick_age_ms);
   }
+  if (feed?.streaming_now) {
+    return "Unknown";
+  }
   if (feed && !feed.streaming_now) {
     return "No live tick";
+  }
+  if (row.streamed) {
+    return "Unknown";
   }
   return row.last_streamed_at ? `${formatRelativeDuration(row.last_streamed_at)} ago` : "never";
 }

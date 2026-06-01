@@ -503,18 +503,65 @@ def test_audit_test_002_background_reconcile_preserves_authority_for_later_entry
     assert runtime.startup_context["correlation_id"].startswith("deployment-reconcile:")
     assert broker.placed_orders
     assert broker.placed_orders[0].client_request_id == execution.client_request_id
-    assert execution.details["runtime_authority"] == runtime.startup_context
+    assert execution.details["runtime_authority"]["authority_kind"] == (
+        "deployment_reconcile"
+    )
+    assert execution.details["runtime_authority"]["authority_source"] == (
+        "strategy_deployment_manager.reconcile"
+    )
+    assert execution.details["runtime_authority"]["actor_type"] == "service"
+    assert execution.details["runtime_authority"]["actor_id"] == (
+        "strategy_deployment_manager"
+    )
+    assert execution.details["runtime_authority"]["correlation_id"].startswith(
+        "[REDACTED_CORRELATION_ID:"
+    )
     assert runtime_started.correlation_id == runtime.startup_context["correlation_id"]
-    assert runtime_started.payload_json["startup_context"] == runtime.startup_context
+    assert runtime_started.payload_json["startup_context"]["authority_kind"] == (
+        "deployment_reconcile"
+    )
+    assert runtime_started.payload_json["startup_context"]["authority_source"] == (
+        "strategy_deployment_manager.reconcile"
+    )
+    assert runtime_started.payload_json["startup_context"]["actor_type"] == "service"
+    assert runtime_started.payload_json["startup_context"]["actor_id"] == (
+        "strategy_deployment_manager"
+    )
+    assert runtime_started.payload_json["startup_context"]["correlation_id"].startswith(
+        "[REDACTED_CORRELATION_ID:"
+    )
     assert restarted.correlation_id == runtime.startup_context["correlation_id"]
-    assert restarted.payload_json["startup_context"] == runtime.startup_context
+    assert restarted.payload_json["startup_context"]["authority_kind"] == (
+        "deployment_reconcile"
+    )
+    assert restarted.payload_json["startup_context"]["authority_source"] == (
+        "strategy_deployment_manager.reconcile"
+    )
+    assert restarted.payload_json["startup_context"]["actor_type"] == "service"
+    assert restarted.payload_json["startup_context"]["actor_id"] == (
+        "strategy_deployment_manager"
+    )
+    assert restarted.payload_json["startup_context"]["correlation_id"].startswith(
+        "[REDACTED_CORRELATION_ID:"
+    )
     assert position_opened.correlation_id == execution.client_request_id
     assert position_opened.execution_id == execution.id
     assert position_opened.position_id == execution.local_position_id
-    assert (
-        position_opened.payload_json["details"]["runtime_authority"]
-        == runtime.startup_context
-    )
+    assert position_opened.payload_json["details"]["runtime_authority"][
+        "authority_kind"
+    ] == "deployment_reconcile"
+    assert position_opened.payload_json["details"]["runtime_authority"][
+        "authority_source"
+    ] == "strategy_deployment_manager.reconcile"
+    assert position_opened.payload_json["details"]["runtime_authority"][
+        "actor_type"
+    ] == "service"
+    assert position_opened.payload_json["details"]["runtime_authority"][
+        "actor_id"
+    ] == "strategy_deployment_manager"
+    assert position_opened.payload_json["details"]["runtime_authority"][
+        "correlation_id"
+    ].startswith("[REDACTED_CORRELATION_ID:")
 
 
 def test_reconcile_emergency_stop_blocks_and_stops_auto_runtime(

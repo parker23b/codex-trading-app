@@ -1196,6 +1196,107 @@ test("AUDIT-UI-006 rendered coverage watchlist does not tone polling fallback as
   }
 });
 
+test("UI-011 rendered coverage watchlist treats missing tick freshness as unknown, not healthy streaming", () => {
+  const { tempRoot, outDir } = compileRenderedModules();
+  try {
+    withCompiledAliases(outDir, () => {
+      const coverage = require(path.join(outDir, "components", "coverage", "coverage-live.js"));
+      const api = require(path.join(outDir, "lib", "api.js"));
+      const timestamp = "2026-05-17T10:00:00.000Z";
+      const instrument = "CS.D.EURUSD.MINI.IP";
+
+      const html = renderComponent(coverage.CoverageLive, {
+        initialCoverage: {
+          ...api.UNAVAILABLE_COVERAGE_SUMMARY,
+          streaming: {
+            ...api.UNAVAILABLE_COVERAGE_SUMMARY.streaming,
+            active_instruments: [
+              {
+                instrument,
+                tier: "TIER1",
+                status: "ACTIVE",
+                asset_class: "FOREX",
+                pinned: false,
+                reason: "strategy_watchlist",
+                reason_detail: null,
+                protective: false,
+                priority_score: 1,
+                requested_frequency: "1s",
+                promotion_expires_at: null,
+                last_streamed_at: null,
+                last_refreshed_at: timestamp,
+                streamed: true,
+              },
+            ],
+            execution_readiness: [
+              {
+                instrument,
+                is_ok: false,
+                market_open: true,
+                tradable: true,
+                quote_fresh: false,
+                spread_ok: true,
+                session_valid: true,
+                dealing_allowed: true,
+                last_price_age_ms: 0,
+                spread: null,
+                reason: "unknown_tick_time",
+              },
+            ],
+            desired_instruments: [instrument],
+          },
+        },
+        initialTelemetry: {
+          ...api.UNAVAILABLE_OPERATIONAL_TELEMETRY,
+          status: "degraded",
+        },
+        initialOperatingLimits: api.UNAVAILABLE_SYSTEM_OPERATING_LIMITS,
+        initialFeedState: {
+          generated_at: timestamp,
+          instruments: [
+            {
+              instrument,
+              stream_status: "streaming",
+              stream_connected: true,
+              stream_enabled: true,
+              streaming_now: true,
+              desired: true,
+              capped: false,
+              last_tick_at: null,
+              last_tick_age_ms: null,
+              spread: 1.1,
+              price_source: "STREAM",
+              stream_reason: {
+                code: "unknown_tick_time",
+                label: "Stream state unknown",
+                operator_action: "Stream coverage exists, but the latest tick timestamp is unavailable.",
+              },
+              market_status: null,
+              market_error: null,
+              entry_eligibility: "UNKNOWN",
+              entry_eligibility_reason: {
+                code: "unknown_tick_time",
+                label: "Unknown freshness",
+                operator_action: "Freshness is unknown; do not treat this instrument as healthy live stream truth.",
+              },
+              strategies_may_evaluate: false,
+              active_strategy_runtime_count: 0,
+              watchlist_entry: null,
+            },
+          ],
+        },
+        initialErrors: baseCoverageErrors(),
+      });
+
+      assert.match(html, /Stream state unknown/i);
+      assert.match(html, />Unknown</i);
+      assert.doesNotMatch(html, /compact-table__row--positive[\s\S]{0,520}Streaming/i);
+    });
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("AUDIT-UI-006 rendered markets dashboard does not turn unavailable sources into market counts", () => {
   const { tempRoot, outDir } = compileRenderedModules();
   try {
@@ -1419,6 +1520,48 @@ test("AUDIT-UI-006 rendered strategy open-position runtime keeps stop action pro
       assert.match(html, /Stopping this runtime does not close broker-confirmed open risk/i);
       assert.match(html, /Stop Runtime/i);
       assert.doesNotMatch(html, />Stop<\/button>/i);
+    });
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("AUDIT-UI-004 rendered strategy launcher gives an explicit disabled reason when backend launch truth is unavailable", () => {
+  const { tempRoot, outDir } = compileRenderedModules();
+  try {
+    withCompiledAliases(outDir, () => {
+      const strategy = require(path.join(outDir, "components", "strategy", "strategy-live.js"));
+      const api = require(path.join(outDir, "lib", "api.js"));
+
+      const html = renderComponent(strategy.StrategyLive, {
+        initialStrategies: [
+          baseStrategy({
+            status: "STOPPED",
+            current_pnl: 0,
+            instrument: "",
+            last_price: null,
+            price_status: "STOPPED",
+            active_instruments: [],
+            active_runtime_count: 0,
+            open_position_count: 0,
+            active_runtimes: [],
+            open_positions: [],
+            instrument_options: [],
+          }),
+        ],
+        initialExecutions: [],
+        initialBrokerAuth: api.UNAVAILABLE_BROKER_AUTH_STATUS,
+        initialStreamHealth: api.UNAVAILABLE_STREAM_HEALTH_STATUS,
+        initialErrors: {
+          strategies: null,
+          executions: null,
+          brokerAuth: null,
+          streamHealth: null,
+        },
+      });
+
+      assert.match(html, /Start unavailable because backend launch instrument truth is unavailable/i);
+      assert.doesNotMatch(html, /Starts a manual runtime only/i);
     });
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });

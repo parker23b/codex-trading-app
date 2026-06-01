@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from collections.abc import Callable
 
 from sqlmodel import Session, desc, select
 
@@ -213,6 +214,7 @@ class DomainEventService:
         strategy_name: str | None = None,
         instrument: str | None = None,
         correlation_id: str | None = None,
+        correlation_filter: Callable[[str | None], bool] | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
     ) -> list[DomainEvent]:
@@ -240,8 +242,15 @@ class DomainEventService:
                 statement = statement.where(DomainEvent.created_at <= until)
             statement = statement.order_by(
                 desc(DomainEvent.created_at), desc(DomainEvent.id)
-            ).limit(limit)
-            return list(session.exec(statement))
+            )
+            events = list(session.exec(statement))
+            if correlation_filter is not None:
+                events = [
+                    event
+                    for event in events
+                    if correlation_filter(event.correlation_id)
+                ]
+            return events[:limit]
 
     def get_event(self, event_id: int) -> DomainEvent | None:
         with Session(engine) as session:

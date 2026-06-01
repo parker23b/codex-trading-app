@@ -191,8 +191,8 @@ def test_audit_test_002_reconciliation_correction_persists_domain_event(
     assert event.payload_json["broker_reference"].startswith("[REDACTED_BROKER_REF:")
     assert event.payload_json["trade_intent_id"] == intent.id
     assert event.payload_json["execution_id"] == execution.id
-    assert event.payload_json["execution_client_request_id"] == (
-        "reconcile-correct-request-1"
+    assert event.payload_json["execution_client_request_id"].startswith(
+        "[REDACTED_REQUEST_ID:"
     )
     assert event.payload_json["allocation_cycle_id"] == "alloc-reconcile-correct-1"
     assert event.payload_json["matched_local_position"] is True
@@ -383,7 +383,9 @@ def test_audit_life_001_reconciliation_links_ambiguous_entry_by_broker_reference
     assert refreshed_execution.details["reconciliation_linked_open_position"] is True
     assert events[0].event_type == "POSITION_SYNCED_FROM_BROKER"
     assert events[0].trade_intent_id == intent.id
-    assert events[0].details["execution_client_request_id"] == "ent-ambiguous-1"
+    assert events[0].details["execution_client_request_id"].startswith(
+        "[REDACTED_REQUEST_ID:"
+    )
 
 
 def test_reconciliation_closes_local_position_missing_at_broker(session, fixed_now):
@@ -664,8 +666,8 @@ def test_audit_test_002_reconciliation_forced_close_persists_domain_events(
         )
         assert event.payload_json["trade_intent_id"] == intent.id
         assert event.payload_json["execution_id"] == execution.id
-        assert event.payload_json["execution_client_request_id"] == (
-            "reconcile-force-request-1"
+        assert event.payload_json["execution_client_request_id"].startswith(
+            "[REDACTED_REQUEST_ID:"
         )
         assert event.payload_json["forced_trade_id"] == trades[0].id
         assert event.payload_json["trade_id"] == trades[0].id

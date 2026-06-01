@@ -46,6 +46,9 @@ def test_audit_sec_002_record_error_redacts_exception_details(monkeypatch):
             payload_json={
                 "Authorization": "Bearer super-secret",
                 "account_id": "ACC-12345",
+                "client_request_id": "entry-redaction-1",
+                "correlation_id": "entry-redaction-1",
+                "runtime_id": "runtime-redaction-1",
                 "response_body": {"dealReference": "DEAL-67890"},
             },
             exc=exc,
@@ -57,6 +60,9 @@ def test_audit_sec_002_record_error_redacts_exception_details(monkeypatch):
     payload = captured["payload_json"]
     assert payload["Authorization"] == "[REDACTED]"
     assert payload["account_id"].startswith("[REDACTED_ACCOUNT_ID:")
+    assert payload["client_request_id"].startswith("[REDACTED_REQUEST_ID:")
+    assert payload["correlation_id"].startswith("[REDACTED_CORRELATION_ID:")
+    assert payload["runtime_id"].startswith("[REDACTED_RUNTIME_ID:")
     assert payload["response_body"] == "[RAW_BROKER_PAYLOAD REDACTED]"
     assert payload["exception_message"] == captured["message"]
     assert payload["traceback"] == "[TRACEBACK REDACTED]"
@@ -75,6 +81,9 @@ def test_audit_sec_002_record_event_in_session_redacts_sensitive_payload(session
             "Authorization": "Bearer abc123",
             "account_id": "ACC-12345",
             "broker_reference": "DEAL-999",
+            "client_request_id": "entry-redaction-2",
+            "correlation_id": "entry-redaction-2",
+            "runtime_id": "runtime-redaction-2",
             "response_text": '{"dealReference":"DEAL-999"}',
         },
     )
@@ -88,6 +97,13 @@ def test_audit_sec_002_record_event_in_session_redacts_sensitive_payload(session
     assert persisted.payload_json["broker_reference"].startswith(
         "[REDACTED_BROKER_REF:"
     )
+    assert persisted.payload_json["client_request_id"].startswith(
+        "[REDACTED_REQUEST_ID:"
+    )
+    assert persisted.payload_json["correlation_id"].startswith(
+        "[REDACTED_CORRELATION_ID:"
+    )
+    assert persisted.payload_json["runtime_id"].startswith("[REDACTED_RUNTIME_ID:")
     assert persisted.payload_json["response_text"] == "[RAW_BROKER_PAYLOAD REDACTED]"
 
 
@@ -290,7 +306,7 @@ def test_audit_sec_002_trade_service_redacts_persisted_execution_and_intent_fiel
             strategy_name="mean_reversion",
             instrument="CS.D.EURUSD.CFD.IP",
             direction="BUY",
-            state=TradeIntentState.APPROVED.value,
+            state=TradeIntentState.POSITION_OPENED.value,
             signal_time=datetime(2026, 5, 1, 9, 0, tzinfo=UTC),
             decision_reason="Approved for persistence redaction coverage.",
         )

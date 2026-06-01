@@ -286,8 +286,8 @@ def test_audit_life_001_blocks_submitted_entry_duplicate_retry_until_review(
     assert execution.requires_manual_review is True
     assert execution.details["duplicate_retry_blocked"] is True
     assert execution.details["duplicate_attempt_count"] == 1
-    assert execution.details["blocked_duplicate_client_request_id"] == (
-        "ent-submitted-request"
+    assert execution.details["blocked_duplicate_client_request_id"].startswith(
+        "[REDACTED_REQUEST_ID:"
     )
     assert len(executions) == 1
 
@@ -346,8 +346,8 @@ def test_audit_test_002_duplicate_entry_retry_suppression_persists_domain_event(
     assert retry_event.instrument == INSTRUMENT
     assert retry_event.payload_json["previous_state"] == "ORDER_SUBMITTED"
     assert retry_event.payload_json["new_state"] == "NEEDS_MANUAL_REVIEW"
-    assert retry_event.payload_json["blocked_duplicate_client_request_id"] == (
-        "ent-submitted-request"
+    assert retry_event.payload_json["blocked_duplicate_client_request_id"].startswith(
+        "[REDACTED_REQUEST_ID:"
     )
     assert retry_event.payload_json["duplicate_attempt_count"] == 1
     assert execution.status == ExecutionStatus.NEEDS_MANUAL_REVIEW.value
@@ -988,8 +988,8 @@ def test_audit_test_002_successful_close_persists_broker_action_domain_event(
         "[REDACTED_BROKER_REF:"
     )
     assert event.payload_json["execution_source"] == "BROKER_CONFIRMED"
-    assert event.payload_json["broker_result"]["client_request_id"] == (
-        execution.client_request_id
+    assert event.payload_json["broker_result"]["client_request_id"].startswith(
+        "[REDACTED_REQUEST_ID:"
     )
 
 
@@ -1061,7 +1061,7 @@ def test_audit_test_002_successful_entry_persists_broker_action_domain_events(
     )
     assert acknowledged.payload_json["details"]["broker_result"][
         "client_request_id"
-    ] == (execution.client_request_id)
+    ].startswith("[REDACTED_REQUEST_ID:")
     assert opened.position_id == position.id
     assert opened.payload_json["trade_intent_id"] == intent.id
     assert opened.payload_json["broker_reference"].startswith("[REDACTED_BROKER_REF:")
@@ -1296,8 +1296,8 @@ def test_audit_test_002_incomplete_close_persists_manual_review_domain_event(
     assert event.payload_json["previous_state"] == "FILL_PARTIAL"
     assert event.payload_json["new_state"] == "NEEDS_MANUAL_REVIEW"
     assert event.payload_json["broker_result"]["status"] == "PARTIALLY_FILLED"
-    assert event.payload_json["broker_result"]["client_request_id"] == (
-        execution.client_request_id
+    assert event.payload_json["broker_result"]["client_request_id"].startswith(
+        "[REDACTED_REQUEST_ID:"
     )
 
 
@@ -3304,9 +3304,8 @@ def test_audit_life_001_non_final_entry_results_preserve_manual_review_state(
     assert execution.broker_reference == f"entry-{broker_status.value.lower()}"
     assert execution.client_request_id == broker.placed_orders[0].client_request_id
     assert execution.details["broker_result"]["status"] == broker_status.value
-    assert (
-        execution.details["broker_result"]["client_request_id"]
-        == broker.placed_orders[0].client_request_id
+    assert execution.details["broker_result"]["client_request_id"].startswith(
+        "[REDACTED_REQUEST_ID:"
     )
 
 

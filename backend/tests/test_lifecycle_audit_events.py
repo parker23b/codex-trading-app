@@ -124,7 +124,32 @@ def test_audit_test_002_execution_transition_persists_domain_event_despite_globa
 def test_audit_test_002_execution_transition_records_related_domain_ids(session):
     intent, execution = _seed_execution(session)
 
-    TradeService(session).transition_execution(
+    trade_service = TradeService(session)
+    execution = trade_service.transition_execution(
+        execution,
+        status=ExecutionStatus.ORDER_SUBMITTED,
+        submitted_at=datetime(2026, 4, 10, 9, 1, tzinfo=UTC),
+        broker_reference="close-ref-audit-1",
+        reason="Submitted to broker.",
+    )
+    execution = trade_service.transition_execution(
+        execution,
+        status=ExecutionStatus.ORDER_ACKNOWLEDGED,
+        acknowledged_at=datetime(2026, 4, 10, 9, 2, tzinfo=UTC),
+        broker_reference="close-ref-audit-1",
+        reason="Broker acknowledged order.",
+    )
+    execution = trade_service.transition_execution(
+        execution,
+        status=ExecutionStatus.FILL_FULL,
+        completed_at=datetime(2026, 4, 10, 9, 4, tzinfo=UTC),
+        broker_reference="close-ref-audit-1",
+        filled_size=1.0,
+        average_fill_price=1.12,
+        reason="Fill received.",
+    )
+
+    trade_service.transition_execution(
         execution,
         status=ExecutionStatus.CLOSE_CONFIRMED,
         local_position_id=17,
@@ -140,15 +165,18 @@ def test_audit_test_002_execution_transition_records_related_domain_ids(session)
     events = _execution_events(session)
     assert [event.event_type for event in events] == [
         "execution.submission_pending_created",
+        "execution.order_submitted",
+        "execution.order_acknowledged",
+        "execution.fill_received",
         "execution.position_closed",
     ]
-    event = events[1]
+    event = events[-1]
     assert event.event_type == "execution.position_closed"
     assert event.position_id == 17
     assert event.trade_id == 23
     assert event.execution_id == execution.id
     assert event.payload_json["trade_intent_id"] == intent.id
-    assert event.payload_json["previous_state"] == "SUBMISSION_PENDING"
+    assert event.payload_json["previous_state"] == "FILL_FULL"
     assert event.payload_json["new_state"] == "CLOSE_CONFIRMED"
     assert event.payload_json["filled_size"] == 1.0
     assert event.payload_json["average_fill_price"] == 1.12

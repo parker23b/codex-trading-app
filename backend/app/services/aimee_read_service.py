@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from sqlmodel import Session, desc, select
 
 from app.core.config import get_settings
+from app.core.identifier_policy import project_identifier
 from app.models.domain_event import DomainEvent
 from app.models.promotion_request import PromotionRequest
 from app.models.runtime import StrategyRuntimeState
@@ -233,8 +234,14 @@ class AimeeReadService:
                 "severity": event.severity,
                 "error_type": event.error_type,
                 "source": event.source,
-                "correlation_id": event.correlation_id,
-                "runtime_id": event.runtime_id,
+                "correlation_id": project_identifier(
+                    event.correlation_id,
+                    kind="correlation_id",
+                ),
+                "runtime_id": project_identifier(
+                    event.runtime_id,
+                    kind="runtime_id",
+                ),
                 "strategy_name": event.strategy_name,
                 "instrument": event.instrument,
                 "position_id": event.position_id,

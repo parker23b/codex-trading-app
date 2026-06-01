@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import { StatusBadge } from "@/components/ui/status-badge";
-import { formatInstrumentLabel, formatPrice, formatSignedCurrency } from "@/lib/format";
+import { formatIdentifierDisplay, formatInstrumentLabel, formatPrice, formatSignedCurrency } from "@/lib/format";
 import { startStrategy, stopStrategy } from "@/lib/api";
 import { StrategyDefinition } from "@/lib/types";
 
@@ -282,7 +282,7 @@ export function StrategyControlPanel({ strategies }: StrategyControlPanelProps) 
                         <strong>{formatInstrumentLabel(runtime.instrument)}</strong>
                         <span className="muted">
                           {runtime.has_open_position
-                            ? `${runtime.direction ?? "LIVE"} ${runtime.broker_reference ?? "pending fill"}`
+                            ? `${runtime.direction ?? "LIVE"} ${formatIdentifierDisplay(runtime.broker_reference) ?? "pending fill"}`
                             : "Scanning only"}
                         </span>
                       </div>

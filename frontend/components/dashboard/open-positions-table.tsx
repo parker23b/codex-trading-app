@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 
 import { StatusBadge } from "@/components/ui/status-badge";
-import { formatInstrumentLabel, formatPercent, formatPrice, formatRelativeDuration, formatSignedCurrency } from "@/lib/format";
+import { formatIdentifierDisplay, formatIdentifierFingerprint, formatInstrumentLabel, formatPercent, formatPrice, formatRelativeDuration, formatSignedCurrency } from "@/lib/format";
 import { brokerSyncStatusMeta } from "@/lib/operator-vocabulary";
 import { Position } from "@/lib/types";
 
@@ -52,7 +52,10 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
               </td>
               <td data-label="Broker Ref">
                 <div className="cell-stack">
-                  <span className="muted">{position.broker_reference ?? "pending"}</span>
+                  <span className="muted">{formatIdentifierDisplay(position.broker_reference) ?? "pending"}</span>
+                  {formatIdentifierFingerprint(position.broker_reference) ? (
+                    <span className="muted">{formatIdentifierFingerprint(position.broker_reference)}</span>
+                  ) : null}
                   <StatusBadge label={syncMeta.label} tone={syncMeta.tone} />
                   <span className="muted">{syncMeta.detail}</span>
                 </div>

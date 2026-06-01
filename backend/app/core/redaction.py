@@ -4,35 +4,18 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from app.core.identifier_policy import SENSITIVE_PAYLOAD_KEY_PARTS
+
 REDACTED = "[REDACTED]"
 TRACEBACK_REDACTED = "[TRACEBACK REDACTED]"
 RAW_BROKER_PAYLOAD_REDACTED = "[RAW_BROKER_PAYLOAD REDACTED]"
 
-_SECRET_KEY_PARTS = (
-    "authorization",
-    "password",
-    "passwd",
-    "secret",
-    "token",
-    "api_key",
-    "apikey",
-    "session",
-    "credential",
-)
-_ACCOUNT_KEY_PARTS = (
-    "account_id",
-    "accountid",
-    "current_account_id",
-    "currentaccountid",
-)
-_DEAL_KEY_PARTS = (
-    "deal_reference",
-    "dealreference",
-    "deal_id",
-    "dealid",
-    "broker_reference",
-    "close_broker_reference",
-)
+_SECRET_KEY_PARTS = SENSITIVE_PAYLOAD_KEY_PARTS["secret"]
+_ACCOUNT_KEY_PARTS = SENSITIVE_PAYLOAD_KEY_PARTS["account_id"]
+_DEAL_KEY_PARTS = SENSITIVE_PAYLOAD_KEY_PARTS["broker_reference"]
+_CORRELATION_KEY_PARTS = SENSITIVE_PAYLOAD_KEY_PARTS["correlation_id"]
+_REQUEST_KEY_PARTS = SENSITIVE_PAYLOAD_KEY_PARTS["request_id"]
+_RUNTIME_KEY_PARTS = SENSITIVE_PAYLOAD_KEY_PARTS["runtime_id"]
 _RAW_BROKER_KEY_PARTS = (
     "payload",
     "market_payload",
@@ -131,9 +114,15 @@ def _sanitize_value(value: Any, *, parent_key: str | None) -> Any:
             if _matches_any(normalized_key, _SECRET_KEY_PARTS):
                 return REDACTED
             if _matches_any(normalized_key, _ACCOUNT_KEY_PARTS):
-                return _mask_identifier(value, label="ACCOUNT_ID")
+                return _mask_identifier_value(value, label="ACCOUNT_ID")
             if _matches_any(normalized_key, _DEAL_KEY_PARTS):
-                return _mask_identifier(value, label="BROKER_REF")
+                return _mask_identifier_value(value, label="BROKER_REF")
+            if _matches_any(normalized_key, _CORRELATION_KEY_PARTS):
+                return _mask_identifier_value(value, label="CORRELATION_ID")
+            if _matches_any(normalized_key, _REQUEST_KEY_PARTS):
+                return _mask_identifier_value(value, label="REQUEST_ID")
+            if _matches_any(normalized_key, _RUNTIME_KEY_PARTS):
+                return _mask_identifier_value(value, label="RUNTIME_ID")
             if _matches_any(normalized_key, _RAW_BROKER_KEY_PARTS):
                 return RAW_BROKER_PAYLOAD_REDACTED
         return sanitize_text(value)
@@ -149,10 +138,22 @@ def _sanitize_value(value: Any, *, parent_key: str | None) -> Any:
                 result[key_text] = REDACTED
                 continue
             if _matches_any(normalized_key, _ACCOUNT_KEY_PARTS):
-                result[key_text] = _mask_identifier(item, label="ACCOUNT_ID")
+                result[key_text] = _mask_identifier_value(item, label="ACCOUNT_ID")
                 continue
             if _matches_any(normalized_key, _DEAL_KEY_PARTS):
-                result[key_text] = _mask_identifier(item, label="BROKER_REF")
+                result[key_text] = _mask_identifier_value(item, label="BROKER_REF")
+                continue
+            if _matches_any(normalized_key, _CORRELATION_KEY_PARTS):
+                result[key_text] = _mask_identifier_value(
+                    item,
+                    label="CORRELATION_ID",
+                )
+                continue
+            if _matches_any(normalized_key, _REQUEST_KEY_PARTS):
+                result[key_text] = _mask_identifier_value(item, label="REQUEST_ID")
+                continue
+            if _matches_any(normalized_key, _RUNTIME_KEY_PARTS):
+                result[key_text] = _mask_identifier_value(item, label="RUNTIME_ID")
                 continue
             result[key_text] = _sanitize_value(item, parent_key=key_text)
         return result
@@ -175,3 +176,9 @@ def _mask_identifier(value: Any, *, label: str) -> str:
         return f"[REDACTED_{label}]"
     suffix = text[-4:] if len(text) > 4 else text
     return f"[REDACTED_{label}:{suffix}]"
+
+
+def _mask_identifier_value(value: Any, *, label: str) -> Any:
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_mask_identifier(item, label=label) for item in value]
+    return _mask_identifier(value, label=label)

@@ -366,7 +366,17 @@ def test_audit_test_002_runtime_recovery_resumed_runtime_preserves_authority_for
             "client_request_id": execution.client_request_id,
         }
     ]
-    assert execution.details["runtime_authority"] == runtime.startup_context
+    assert execution.details["runtime_authority"]["authority_kind"] == "runtime_recovery"
+    assert execution.details["runtime_authority"]["authority_source"] == (
+        "runtime_recovery_service.recover"
+    )
+    assert execution.details["runtime_authority"]["actor_type"] == "service"
+    assert execution.details["runtime_authority"]["actor_id"] == (
+        "runtime_recovery_service"
+    )
+    assert execution.details["runtime_authority"]["correlation_id"].startswith(
+        "[REDACTED_CORRELATION_ID:"
+    )
     assert execution.status == "CLOSE_CONFIRMED"
     assert trade is not None
     assert close_event.source == "strategy_service.execute_exit_signal"

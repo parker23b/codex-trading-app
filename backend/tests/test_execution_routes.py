@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.api.routes.executions import _serialize_execution
+from app.core.identifier_policy import project_identifier
 from app.models.trade import Execution, ExecutionPhase, ExecutionStatus
 from app.services.trade_service import TradeService
 
@@ -41,8 +42,14 @@ def test_audit_life_001_execution_response_preserves_ambiguity_and_correlation(
 
     assert response.status == ExecutionStatus.NEEDS_MANUAL_REVIEW.value
     assert response.requires_manual_review is True
-    assert response.client_request_id == "ent-ambiguous-route-1"
-    assert response.broker_reference == "entry-ambiguous-route-1"
+    assert response.client_request_id.model_dump() == project_identifier(
+        "ent-ambiguous-route-1",
+        kind="request_id",
+    )
+    assert response.broker_reference.model_dump() == project_identifier(
+        "entry-ambiguous-route-1",
+        kind="broker_reference",
+    )
     assert response.local_position_id == 11
     assert response.error_code == "BROKER_CONFIRMATION_AMBIGUOUS"
     assert response.details["broker_result"]["status"] == "AMBIGUOUS"
@@ -148,6 +155,10 @@ def test_audit_sec_002_execution_response_uses_redacted_persisted_details(sessio
 
     assert response.error_message == (
         "Authorization: Bearer [REDACTED] accountId=[REDACTED] dealReference=[REDACTED]"
+    )
+    assert response.client_request_id.model_dump() == project_identifier(
+        "route-redaction-1",
+        kind="request_id",
     )
     assert response.details["broker_result"]["broker_reference"].startswith(
         "[REDACTED_BROKER_REF:"

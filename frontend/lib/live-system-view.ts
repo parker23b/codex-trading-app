@@ -1,4 +1,4 @@
-import { formatInstrumentLabel } from "@/lib/format";
+import { formatIdentifierDisplay, formatInstrumentLabel } from "@/lib/format";
 import { executionStatusMeta } from "@/lib/operator-vocabulary";
 import type {
   AllocationAlert,
@@ -1207,7 +1207,10 @@ function buildInspectionModel(
         ...relatedAnomalies.map((item) => item.title),
         ...(family?.recent_events.slice(0, 3).map((event) => event.title) ?? []),
       ].slice(0, 5),
-      identifiers: uniqueStrings([strategy.id, family?.runtime.active_runtime_id ?? null]),
+      identifiers: uniqueStrings([
+        strategy.id,
+        formatIdentifierDisplay(family?.runtime.active_runtime_id) ?? null,
+      ]),
       links: [
         { label: "Strategy diagnostics", href: "/strategies" },
         { label: "Control-plane state", href: "/control-plane" },

@@ -6,6 +6,7 @@ from datetime import timedelta
 from sqlmodel import Session
 
 from app.core.config import get_settings
+from app.core.identifier_policy import project_identifier
 from app.models.trade import (
     AllocationCycle,
     Execution,
@@ -783,8 +784,14 @@ class AllocationReadService:
             "id": execution.id,
             "phase": execution.phase,
             "status": execution.status,
-            "client_request_id": execution.client_request_id,
-            "broker_reference": execution.broker_reference,
+            "client_request_id": project_identifier(
+                execution.client_request_id,
+                kind="request_id",
+            ),
+            "broker_reference": project_identifier(
+                execution.broker_reference,
+                kind="broker_reference",
+            ),
             "submitted_at": execution.submitted_at,
             "acknowledged_at": execution.acknowledged_at,
             "completed_at": execution.completed_at,
@@ -809,7 +816,10 @@ class AllocationReadService:
             return None
         return {
             "id": position.id,
-            "broker_reference": position.broker_reference,
+            "broker_reference": project_identifier(
+                position.broker_reference,
+                kind="broker_reference",
+            ),
             "instrument": position.instrument,
             "direction": position.direction,
             "size": position.size,
@@ -830,8 +840,14 @@ class AllocationReadService:
             return None
         return {
             "id": trade.id,
-            "broker_reference": trade.broker_reference,
-            "close_broker_reference": trade.close_broker_reference,
+            "broker_reference": project_identifier(
+                trade.broker_reference,
+                kind="broker_reference",
+            ),
+            "close_broker_reference": project_identifier(
+                trade.close_broker_reference,
+                kind="broker_reference",
+            ),
             "instrument": trade.instrument,
             "direction": trade.direction,
             "size": trade.size,
