@@ -37,7 +37,11 @@ def _temporary_postgres_database():
         connection.execute(text(f"CREATE DATABASE {database_name}"))
 
     try:
-        yield str(make_url(admin_url).set(database=database_name))
+        yield (
+            make_url(admin_url)
+            .set(database=database_name)
+            .render_as_string(hide_password=False)
+        )
     finally:
         admin_engine.dispose()
         cleanup_engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
