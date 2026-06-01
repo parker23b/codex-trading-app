@@ -47,6 +47,7 @@ compile_requirements() {
     --resolver=backtracking \
     --strip-extras \
     --no-header \
+    --no-annotate \
     --cache-dir "$PIP_TOOLS_CACHE_DIR" \
     "$@" \
     pyproject.toml \
@@ -61,6 +62,7 @@ compile_dev_requirements() {
     --quiet \
     --resolver=backtracking \
     --no-header \
+    --no-annotate \
     --cache-dir "$PIP_TOOLS_CACHE_DIR" \
     "$@" \
     requirements-dev.in \
@@ -75,6 +77,7 @@ compile_hashed_lockfile() {
     --quiet \
     --resolver=backtracking \
     --no-header \
+    --no-annotate \
     --generate-hashes \
     --reuse-hashes \
     --cache-dir "$PIP_TOOLS_CACHE_DIR" \

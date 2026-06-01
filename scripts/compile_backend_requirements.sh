@@ -45,6 +45,7 @@ compile_requirements() {
     --upgrade \
     --strip-extras \
     --no-header \
+    --no-annotate \
     --cache-dir "$PIP_TOOLS_CACHE_DIR" \
     "$@" \
     pyproject.toml \
@@ -59,6 +60,7 @@ compile_dev_requirements() {
     --resolver=backtracking \
     --upgrade \
     --no-header \
+    --no-annotate \
     --cache-dir "$PIP_TOOLS_CACHE_DIR" \
     "$@" \
     requirements-dev.in \
@@ -72,6 +74,7 @@ compile_hashed_lockfile() {
   "$PYTHON_BIN" -m piptools compile \
     --resolver=backtracking \
     --no-header \
+    --no-annotate \
     --generate-hashes \
     --reuse-hashes \
     --cache-dir "$PIP_TOOLS_CACHE_DIR" \
