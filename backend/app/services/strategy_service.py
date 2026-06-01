@@ -3422,7 +3422,9 @@ class StrategyService:
                 trade_service.transition_execution(
                     execution,
                     status=ExecutionStatus.FILL_PARTIAL,
-                    trade_intent_id=trade_intent.id if trade_intent is not None else None,
+                    trade_intent_id=trade_intent.id
+                    if trade_intent is not None
+                    else None,
                     client_request_id=client_request_id,
                     broker_reference=order.broker_reference,
                     completed_at=order.executed_at,

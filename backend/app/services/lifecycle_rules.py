@@ -260,7 +260,9 @@ def validate_trade_intent_transition(
     return target
 
 
-def validate_new_execution_status(target_status: ExecutionStatus | str) -> ExecutionStatus:
+def validate_new_execution_status(
+    target_status: ExecutionStatus | str,
+) -> ExecutionStatus:
     target = parse_execution_status(target_status)
     if target in EXECUTION_LEGACY_COMPATIBILITY_STATUSES:
         raise LegacyLifecycleWriteError(

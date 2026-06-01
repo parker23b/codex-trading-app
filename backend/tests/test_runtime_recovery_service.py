@@ -366,7 +366,9 @@ def test_audit_test_002_runtime_recovery_resumed_runtime_preserves_authority_for
             "client_request_id": execution.client_request_id,
         }
     ]
-    assert execution.details["runtime_authority"]["authority_kind"] == "runtime_recovery"
+    assert (
+        execution.details["runtime_authority"]["authority_kind"] == "runtime_recovery"
+    )
     assert execution.details["runtime_authority"]["authority_source"] == (
         "runtime_recovery_service.recover"
     )

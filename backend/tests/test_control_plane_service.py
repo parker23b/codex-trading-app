@@ -547,18 +547,22 @@ def test_audit_test_002_background_reconcile_preserves_authority_for_later_entry
     assert position_opened.correlation_id == execution.client_request_id
     assert position_opened.execution_id == execution.id
     assert position_opened.position_id == execution.local_position_id
-    assert position_opened.payload_json["details"]["runtime_authority"][
-        "authority_kind"
-    ] == "deployment_reconcile"
-    assert position_opened.payload_json["details"]["runtime_authority"][
-        "authority_source"
-    ] == "strategy_deployment_manager.reconcile"
-    assert position_opened.payload_json["details"]["runtime_authority"][
-        "actor_type"
-    ] == "service"
-    assert position_opened.payload_json["details"]["runtime_authority"][
-        "actor_id"
-    ] == "strategy_deployment_manager"
+    assert (
+        position_opened.payload_json["details"]["runtime_authority"]["authority_kind"]
+        == "deployment_reconcile"
+    )
+    assert (
+        position_opened.payload_json["details"]["runtime_authority"]["authority_source"]
+        == "strategy_deployment_manager.reconcile"
+    )
+    assert (
+        position_opened.payload_json["details"]["runtime_authority"]["actor_type"]
+        == "service"
+    )
+    assert (
+        position_opened.payload_json["details"]["runtime_authority"]["actor_id"]
+        == "strategy_deployment_manager"
+    )
     assert position_opened.payload_json["details"]["runtime_authority"][
         "correlation_id"
     ].startswith("[REDACTED_CORRELATION_ID:")

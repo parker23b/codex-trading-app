@@ -383,8 +383,10 @@ def test_audit_life_001_reconciliation_links_ambiguous_entry_by_broker_reference
     assert refreshed_execution.details["reconciliation_linked_open_position"] is True
     assert events[0].event_type == "POSITION_SYNCED_FROM_BROKER"
     assert events[0].trade_intent_id == intent.id
-    assert events[0].details["execution_client_request_id"].startswith(
-        "[REDACTED_REQUEST_ID:"
+    assert (
+        events[0]
+        .details["execution_client_request_id"]
+        .startswith("[REDACTED_REQUEST_ID:")
     )
 
 

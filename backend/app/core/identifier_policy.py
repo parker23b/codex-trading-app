@@ -577,7 +577,9 @@ SENSITIVE_PAYLOAD_KEY_PARTS = {
 }
 
 PERSISTED_IDENTIFIER_FIELD_NAMES = {
-    entry.location for entry in IDENTIFIER_POLICY if not entry.location.startswith("api.")
+    entry.location
+    for entry in IDENTIFIER_POLICY
+    if not entry.location.startswith("api.")
 }
 
 

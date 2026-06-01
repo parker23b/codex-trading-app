@@ -4,7 +4,10 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
 
 from app.api.contracts.identifiers import IdentifierProjection
-from app.core.identifier_policy import identifier_matches_fingerprint, project_identifier
+from app.core.identifier_policy import (
+    identifier_matches_fingerprint,
+    project_identifier,
+)
 from app.models.domain_event import DomainEvent
 from app.services.domain_event_service import domain_event_service
 

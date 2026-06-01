@@ -56,7 +56,9 @@ def _make_intent(
             signal_time=at,
             proposed_size=0.2,
             allocated_size=0.2,
-            broker_reference="guard-intent-ref" if state != TradeIntentState.PROPOSED else None,
+            broker_reference="guard-intent-ref"
+            if state != TradeIntentState.PROPOSED
+            else None,
             execution_client_request_id="guard-intent-request",
             opened_at=at if state in TRADE_INTENT_PROVENANCE_STATES else None,
         )
@@ -139,7 +141,10 @@ def test_execution_transition_table_allows_classified_transitions(
     [
         (TradeIntentState.PROPOSED, TradeIntentState.POSITION_OPENED),
         (TradeIntentState.CLOSED, TradeIntentState.POSITION_OPENED),
-        (TradeIntentState.RECOVERED_POSITION_ATTACHED, TradeIntentState.POSITION_OPENED),
+        (
+            TradeIntentState.RECOVERED_POSITION_ATTACHED,
+            TradeIntentState.POSITION_OPENED,
+        ),
         (TradeIntentState.EXTERNAL_POSITION_ADOPTED, TradeIntentState.POSITION_OPENED),
         (TradeIntentState.APPROVED, TradeIntentState.CLOSED),
     ],

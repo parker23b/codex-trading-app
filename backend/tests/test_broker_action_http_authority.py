@@ -331,7 +331,6 @@ def test_audit_api_008_strategy_start_by_name_route_reachable_close_preserves_ma
         received_at=fixed_now + timedelta(seconds=40),
     )
 
-    runtime = _runtime(session)
     execution = _latest_execution(session)
     intent = _latest_intent(session)
     events = _events(session)

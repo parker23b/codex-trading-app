@@ -144,7 +144,8 @@ def _candidate_persisted_identifier_fields() -> set[str]:
                 or "reference" in normalized
                 or normalized.endswith("_key")
                 or normalized in IDENTIFIER_JSON_FIELDS
-                or normalized in {"owner_id", "lease_name", "scope_id", "worker_id", "actor_id"}
+                or normalized
+                in {"owner_id", "lease_name", "scope_id", "worker_id", "actor_id"}
             ):
                 candidates.add(f"{model.__name__}.{field_name}")
     return candidates
@@ -161,7 +162,9 @@ def _annotation_includes_identifier_projection(annotation: object) -> bool:
 
 def test_identifier_policy_guard_covers_all_persisted_identifier_fields():
     assert _candidate_persisted_identifier_fields() <= {
-        entry.location for entry in IDENTIFIER_POLICY if not entry.location.startswith("api.")
+        entry.location
+        for entry in IDENTIFIER_POLICY
+        if not entry.location.startswith("api.")
     }
 
 
@@ -171,7 +174,9 @@ def test_identifier_policy_guard_forbids_secret_like_response_fields():
             normalized = field_name.lower()
             assert not any(
                 forbidden in normalized for forbidden in FORBIDDEN_RESPONSE_FIELD_PARTS
-            ), f"{model.__name__}.{field_name} must not expose secret/header/token fields."
+            ), (
+                f"{model.__name__}.{field_name} must not expose secret/header/token fields."
+            )
 
 
 def test_identifier_policy_guard_requires_safe_projection_for_sensitive_response_fields():
@@ -208,9 +213,7 @@ def test_identifier_policy_guard_redacts_all_sensitive_payload_identifier_famili
     assert sanitized["runtime_id"].startswith("[REDACTED_RUNTIME_ID:")
 
     covered_keys = {
-        key
-        for family in SENSITIVE_PAYLOAD_KEY_PARTS.values()
-        for key in family
+        key for family in SENSITIVE_PAYLOAD_KEY_PARTS.values() for key in family
     }
     assert {
         "authorization",
