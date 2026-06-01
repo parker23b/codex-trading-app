@@ -80,12 +80,16 @@ starlette==1.2.1
     # via fastapi
 typing-extensions==4.15.0
     # via
+    #   aiosignal
     #   alembic
+    #   anyio
     #   fastapi
+    #   psycopg
     #   pydantic
     #   pydantic-core
     #   sqlalchemy
     #   sqlmodel
+    #   starlette
     #   typing-inspection
 typing-inspection==0.4.2
     # via

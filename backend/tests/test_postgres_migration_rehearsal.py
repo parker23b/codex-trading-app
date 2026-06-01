@@ -86,6 +86,25 @@ def _pg_indexdef(engine, *, table_name: str, index_name: str) -> str:
         ).scalar_one()
 
 
+def _pg_index_predicate(engine, *, table_name: str, index_name: str) -> str | None:
+    with engine.connect() as connection:
+        return connection.execute(
+            text(
+                """
+                SELECT pg_get_expr(indexrel.indpred, indexrel.indrelid)
+                FROM pg_index AS indexrel
+                JOIN pg_class AS index_class ON index_class.oid = indexrel.indexrelid
+                JOIN pg_class AS table_class ON table_class.oid = indexrel.indrelid
+                JOIN pg_namespace AS namespace ON namespace.oid = table_class.relnamespace
+                WHERE namespace.nspname = current_schema()
+                  AND table_class.relname = :table_name
+                  AND index_class.relname = :index_name
+                """
+            ),
+            {"table_name": table_name, "index_name": index_name},
+        ).scalar_one()
+
+
 def _normalize_pg_default(raw_default: object) -> str | None:
     if raw_default is None:
         return None
@@ -169,6 +188,11 @@ def test_postgres_schema_enforces_targeted_portability_contracts():
                 table_name="tradeintent",
                 index_name="uq_trade_intent_active_instrument",
             )
+            active_intent_predicate = _pg_index_predicate(
+                engine,
+                table_name="tradeintent",
+                index_name="uq_trade_intent_active_instrument",
+            )
             observability_scope_index = _pg_indexdef(
                 engine,
                 table_name="observabilitystate",
@@ -209,7 +233,10 @@ def test_postgres_schema_enforces_targeted_portability_contracts():
             assert "uq_observabilitystate_key_scope_worker" in (
                 observability_unique_constraints
             )
-            assert "WHERE state IN (" in active_intent_index
+            assert "WHERE " in active_intent_index
+            assert active_intent_predicate is not None
+            assert "PROPOSED" in active_intent_predicate
+            assert "CLOSE_REQUESTED" in active_intent_predicate
             assert "RECOVERED_POSITION_ATTACHED" in active_intent_index
             assert "observed_at DESC" in observability_scope_index
             assert "expires_at DESC" in runtimelease_owner_index
