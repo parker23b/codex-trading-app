@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { CompactTable, DataIndicator, InspectorDrawer, Panel, StatusPill, StatusStrip } from "@/components/console/primitives";
 import { getBrokerAuthStatus, getExecutions, getStrategies, getStreamHealth, startStrategy, stopStrategy } from "@/lib/api";
@@ -43,6 +43,10 @@ type StrategyRefreshResult = {
   failureDetail: string | null;
   strategies: StrategyDefinition[] | null;
 };
+
+function strategyErrorMessage(reason: unknown, fallback: string) {
+  return reason instanceof Error ? reason.message : fallback;
+}
 
 function strategyTone(strategy: StrategyDefinition) {
   if (strategy.warning_message) {
@@ -92,10 +96,7 @@ export function StrategyLive({
     setErrors(initialErrors);
   }, [initialStrategies, initialExecutions, initialBrokerAuth, initialErrors, initialStreamHealth]);
 
-  const strategyErrorMessage = (reason: unknown, fallback: string) =>
-    reason instanceof Error ? reason.message : fallback;
-
-  const refreshResources = async (): Promise<StrategyRefreshResult> => {
+  const refreshResources = useCallback(async (): Promise<StrategyRefreshResult> => {
     setLoading({
       strategies: true,
       executions: true,
@@ -138,7 +139,7 @@ export function StrategyLive({
       failureDetail: nextErrors.strategies ?? nextErrors.executions ?? nextErrors.brokerAuth ?? nextErrors.streamHealth,
       strategies: nextStrategies.status === "fulfilled" ? nextStrategies.value : null,
     };
-  };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -156,7 +157,7 @@ export function StrategyLive({
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, []);
+  }, [refreshResources]);
 
   useEffect(() => {
     setInstrumentOverrides((current) => ({

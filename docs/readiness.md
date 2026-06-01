@@ -20,22 +20,20 @@ The current blocking themes are:
 
 - route-inventory and frontend-contract drift are now machine-guarded for the current route set, so this is no longer a present-tense blocker category; remaining route risk is broader broker-action/operator-evidence breadth rather than hypothetical future undocumented or raw routes
 - current backend durable-audit coverage is now inventory-backed for the present mutation, broker-action, and safety-critical background path set; remaining best-effort events are intentional informational paths, and future broker-action/route risk is now handled by guard tests instead of remaining a present-tense backend blocker
-- frontend operator truth now has browser/e2e coverage for stale, degraded, manual-review, passive-vs-mutation, simulated-vs-broker-confirmed, recovery/adoption provenance, mutation-failure, events attention, test-only reset gating, telemetry degradation, strategy/runtime controls, allocation-alert/control-plane/markets mutation confirmation truth, shortlist/watchlist mutation truth, disconnected/recovered coverage freshness, and unknown freshness states across events/dashboard/live/risk/strategies/AIMEE/control-plane/coverage/markets, but broader event-detail, live/dashboard freshness, and non-covered unsupported-state browser breadth is still incomplete under `AUDIT-UI-006`; the current closure slice was deferred because the latest `Repo Audit` run still failed at the backend lockfile gate
-- current CI still does not have a successful `Repo Audit` run proving backend lockfile verification, migration/drift execution, a five-test zero-skip Postgres rehearsal, and backend pytest together; the newest run is [26772490408](https://github.com/parker23b/codex-trading-app/actions/runs/26772490408), and it failed at `Verify backend lockfiles`
+- the current `AUDIT-UI-006` browser breadth gap is closed for the reviewed events/dashboard/live/control-plane/markets surface inventory; future operator-state breadth still needs the same discipline as new surfaces or enum branches are added, but the targeted present-tense browser gap is no longer open
+- current CI does have a successful `Repo Audit` run proving backend lockfile verification, migration/drift execution, a five-test zero-skip Postgres rehearsal, and backend pytest together; the newest run is [26776683955](https://github.com/parker23b/codex-trading-app/actions/runs/26776683955), which succeeded, and the remaining `AUDIT-DB-001` scope is now the documented legacy unversioned non-SQLite manual-upgrade limitation rather than missing CI truth
 - covered backend logging/API-error/domain-event redaction is now in place, covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position payloads now sanitize free-text and detail fields before commit, the current operator/API/events identifier boundary now exposes masked display plus stable fingerprint projections instead of raw broker/account/request/runtime/correlation strings, repo-level secret/history scan guardrails now block common local secret/SQLite/dump/test-artifact commits, dependency lock/audit tooling is now repeatable for Python and npm, and versioned Alembic migrations now have both SQLite drift checks and a CI-wired Postgres rehearsal path. Health and telemetry now aggregate the targeted operator degradation states across workers with explicit staleness and worker identity, while keeping non-target diagnostics clearly labelled as current-process only. Broader secrets hygiene, intentional raw internal authority fields, historical cleanup, and a fresh successful CI Postgres rehearsal run remain below readiness grade
 
 The canonical blocker list is in [audit-status.md](audit-status.md).
 
 ## Known Risks
 
-- Browser proof is still missing for events detail permutations that combine recovery/adoption provenance with manual-review close context.
-- Live and dashboard summary surfaces still do not have disconnected or recovered freshness permutations proved in-browser, even though coverage now does.
-- Unsupported or unknown values are parity-guarded on shared helpers, but some non-covered operator surfaces still lack direct browser proof that they degrade rather than render nominally.
+- The current selected `AUDIT-UI-006` gaps are browser-covered now, but any new operator surface or enum branch still needs the same explicit browser/parity guard discipline before it should be trusted.
 - Future route-inventory and contract drift is now guarded mechanically, but broader broker-action and operator-evidence breadth still needs review when new routes appear.
 - The remaining backend audit risk is no longer “unknown current mutation/background paths”; it is future-path discipline plus broader operator/frontend breadth.
 - Candidate-only strategy events are intentionally best-effort informational, not lifecycle audit proof, even when they remain useful for observability.
-- Browser/e2e operator-state coverage is improved, including selected manual-review, recovery/adoption provenance, control-plane mismatch, risk-alert/control-plane/watchlist mutation confirmation truth, events attention/test-only truth, telemetry degradation, strategy runtime mutation truth, shortlist/watchlist mutation truth, and market-data disconnected/stale/recovered/unknown freshness truth, but it is still too narrow for readiness claims.
-- Database evolution now uses Alembic plus SQLite drift checks and a Postgres migration rehearsal, but existing unversioned non-SQLite databases still require explicit manual upgrade and some dialect-specific indexes still depend on targeted assertions rather than generic autogenerate comparison. The latest available CI run failed before the rehearsal step, so DB portability has not been freshly re-verified by the latest CI evidence.
+- Browser/e2e operator-state coverage is much stronger, including events detail lifecycle truth, control-plane override and unsupported-state truth, dashboard/live disconnected-stale-recovered-unknown freshness truth, strategy runtime mutation truth, shortlist/watchlist mutation truth, and market-data disconnected/stale/recovered/unknown freshness truth, but the repository still is not readiness-grade for broker dealing.
+- Database evolution now uses Alembic plus SQLite drift checks and a Postgres migration rehearsal, and current CI does prove the five-test zero-skip rehearsal in run [26776683955](https://github.com/parker23b/codex-trading-app/actions/runs/26776683955); however, existing unversioned non-SQLite databases still require explicit manual upgrade and some dialect-specific indexes still depend on targeted assertions rather than generic autogenerate comparison, so full production-grade DB portability is still not claimed.
 - Python and npm dependency locking plus vulnerability gates are now repeatable, third-party Python dependencies can now be hash-verified, and backend/frontend SBOM generation now exists, but the editable local backend package remains outside hash enforcement and the repo still lacks broader non-Python/Node dependency scanning and stronger provenance attestation.
 - Covered logs, mirrored domain events, IG adapter failures, and operator-facing API errors now redact tokens, account identifiers, broker references, raw adapter payloads, and tracebacks; covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position free-text and detail fields now redact the same patterns before commit; and the reviewed operator-facing identifier surfaces now show masked display plus stable fingerprints instead of raw broker/account/request/runtime/correlation strings. Required audit-write failures now also surface in health/telemetry as degraded state, and targeted degradation states now aggregate across workers with stale-expiry handling, but remaining readiness gaps still include raw identifier columns retained for lifecycle authority, broader secrets hygiene, and broader operator/frontend evidence. Intentional best-effort informational events are not counted as durable lifecycle audit proof.
 - Repo-local guardrails now make it harder to commit `.env*` secrets, SQLite DBs, broker dumps, captured session tokens, logs, and Playwright/test artifacts, but historical repository cleanup and credential rotation still require manual action outside this repository.
@@ -52,6 +50,39 @@ Before live or demo broker dealing, the app needs at least:
 - migration, dependency, redaction, identifier-minimization, and secrets controls that are strong enough for broker-connected operation
 - stronger supply-chain provenance than the current hash-and-SBOM baseline, including editable-package attestation and broader dependency scanning
 - regression tests for every fixed P0/P1 behaviour that still lacks route, frontend, or full-stack evidence
+
+## 2026-06-01 Final CI Truth And Frontend Closure Slice
+
+This slice closes the current `AUDIT-UI-006` operator-truth browser gap, but it does not make the repository live-safe or demo-safe.
+
+- newest `Repo Audit` run reviewed before and after the frontend work: [26776683955](https://github.com/parker23b/codex-trading-app/actions/runs/26776683955)
+- exact workflow result:
+  - `Verify backend lockfiles`: passed
+  - `Migration and drift tests`: passed (`3 passed, 1 warning`)
+  - `Postgres migration rehearsal`: passed exactly five tests with zero skips (`5 passed, 1 warning`)
+  - backend `Pytest`: passed
+- `AUDIT-DB-001` status:
+  - CI-verification portion is closed by the run above
+  - remaining open scope is only the documented legacy unversioned non-SQLite manual-upgrade limitation
+  - do not claim full production-grade DB portability
+- Playwright scenarios added in this slice:
+  - `AUDIT-UI-006 events detail keeps recovered and adopted lifecycle provenance explicit with safe identifier projections`
+  - `AUDIT-UI-006 events detail keeps partial, failed, and ambiguous close truth visibly open-risk aware`
+  - `AUDIT-UI-006 events detail keeps stopped runtime distinct from flat broker risk`
+  - `AUDIT-UI-006 dashboard summary keeps disconnected and recovered stream truth distinct from live`
+  - `AUDIT-UI-006 live summary distinguishes polling-fallback and stale stream states`
+  - `AUDIT-UI-006 live summary distinguishes disconnected, recovered, and unknown-freshness truth`
+  - `AUDIT-UI-006 control-plane surfaces keep override and unsupported family states degraded`
+  - `AUDIT-UI-006 live summary keeps unsupported feed-source state unknown instead of live`
+  - `AUDIT-UI-006 markets surface keeps unavailable truth from collapsing into nominal market state`
+- surfaces and states covered:
+  - events detail: recovered/adopted provenance, safe identifier `{ display, fingerprint }`, partial/failed/rejected/ambiguous close truth, backend detail preservation, and stopped-runtime open-risk truth
+  - dashboard/live freshness: disconnected, stale, recovered, polling fallback, unknown timestamp, and unavailable-source truth
+  - control-plane/live/markets unsupported values: override/emergency-family, unsupported feed-source states, and unavailable catalogue/source truth degrade to unknown or attention rather than nominal
+- exact residual current code-actionable gaps:
+  - none found in the selected current `AUDIT-UI-006` surface inventory
+- future-only follow-up, not current defect:
+  - keep extending browser/parity coverage when new operator surfaces or enum branches are introduced
 
 ## 2026-06-01 Identifier Boundary Slice
 
@@ -75,14 +106,14 @@ This slice improves identifier minimization and operator-safe correlation, but i
   - current GitHub Actions evidence still does not include a post-fix successful five-test Postgres rehearsal with zero skips
   - repository-history cleanup and any needed credential rotation remain manual actions outside this code change
 
-## 2026-06-01 CI Gate Reconciliation Slice
+## 2026-06-01 Earlier CI Gate Reconciliation Slice
 
 This slice intentionally stopped before frontend edits because the newest CI evidence still failed the backend gate that had to be reconciled first.
 
 - newest overall `Repo Audit` run: [26772490408](https://github.com/parker23b/codex-trading-app/actions/runs/26772490408)
 - exact result: `docs-audit` passed, `frontend-audit` passed, `backend-audit` failed at `Verify backend lockfiles`
 - exact skipped backend steps in that run: `Migration and drift tests`, `Postgres migration rehearsal`, and `Pytest`
-- DB honesty: CI still does not prove a five-test zero-skip Postgres rehearsal, so `AUDIT-DB-001` remains open
+- DB honesty at that earlier point: CI still did not prove a five-test zero-skip Postgres rehearsal, so `AUDIT-DB-001` remained open in that earlier slice
 - frontend closure honesty: no new Playwright scenarios were added in this slice; `AUDIT-UI-006` remains open for the same exact residual surfaces
 - local fix in this workspace:
   - added explicit `greenlet>=1.0.0,<4.0.0` to `backend/pyproject.toml` so backend runtime locks do not drift between local `arm64` and CI Linux `x86_64`

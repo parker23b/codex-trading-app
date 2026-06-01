@@ -1301,6 +1301,53 @@ export function buildScenarioRoutes(name) {
           }),
         ),
       });
+    case "control-plane-unsupported-states":
+      return mergeRoutes({
+        "GET /control-plane/summary": ok(
+          baseControlPlaneSummary({
+            effective_autonomous_control_enabled: false,
+            autonomy_override_active: true,
+            autonomy_override_value: false,
+            autonomy_override_reason: "Operator forced governed autonomy pause while unsupported family state requires review.",
+            entry_eligible: false,
+            exit_eligible: true,
+            entry_block_reason: "operator_override_active",
+            open_risk_management_state: "UNKNOWN",
+            open_risk_management_reason: "Open-risk management truth is unsupported and cannot be treated as safe.",
+            counts: {
+              EMERGENCY_STOPPED: 1,
+            },
+            families: [
+              baseFamily({
+                governance: {
+                  ...baseFamily().governance,
+                  approval_state: "BROKER_MAGIC",
+                  autonomous_operation_allowed: false,
+                  emergency_stop: true,
+                },
+                deployment: {
+                  ...baseFamily().deployment,
+                  state: "BROKER_MAGIC",
+                  degraded_reason: "Backend returned an unsupported deployment state while emergency controls remained active.",
+                  open_risk_management_state: "UNKNOWN",
+                  open_risk_management_reason: "Open-risk management truth is unsupported and cannot be treated as safe.",
+                },
+                runtime: {
+                  ...baseFamily().runtime,
+                  control_mode: "BROKER_MAGIC",
+                  runtime_mode: "BROKER_MAGIC",
+                },
+                alignment: {
+                  is_aligned: false,
+                  status: "BROKER_MAGIC",
+                  reason: "Backend returned an unsupported alignment state; family truth is degraded.",
+                  checks: [],
+                },
+              }),
+            ],
+          }),
+        ),
+      });
     case "strategies-recovered-open-risk":
       return mergeRoutes({
         "GET /strategies": ok([
@@ -1405,6 +1452,23 @@ export function buildScenarioRoutes(name) {
             entry_block_reason: "polling_fallback",
           }),
         ),
+        "GET /control-plane/summary": ok(
+          baseControlPlaneSummary({
+            feed_source_state: "POLLING_FALLBACK",
+            feed_health_state: "DEGRADED",
+            entry_eligible: false,
+            entry_block_reason: "polling_fallback",
+          }),
+        ),
+        "GET /health/stream": ok(
+          baseStreamHealth({
+            connected: false,
+            dependency_ready: false,
+            last_tick_at: null,
+            last_status: "Polling fallback active",
+            last_error: "Streaming dependency unavailable; polling fallback is active.",
+          }),
+        ),
         "GET /market-data/feed-state": ok({
           generated_at: TIMESTAMP,
           instruments: [
@@ -1461,6 +1525,69 @@ export function buildScenarioRoutes(name) {
         }),
         "GET /markets/catalogue": unavailable("Catalogue unavailable."),
         "GET /strategy-watchlist": unavailable("Strategy watchlist unavailable."),
+      });
+    case "dashboard-disconnected-truth":
+      return mergeRoutes({
+        "GET /control-plane/summary": ok(
+          baseControlPlaneSummary({
+            feed_source_state: "DISCONNECTED",
+            feed_health_state: "FAILED",
+            entry_eligible: false,
+            entry_block_reason: "stream_disconnected",
+          }),
+        ),
+        "GET /health/stream": ok(
+          baseStreamHealth({
+            connected: false,
+            dependency_ready: false,
+            last_tick_at: null,
+            last_status: "Disconnected",
+            last_error: "Live stream is unavailable.",
+          }),
+        ),
+        "GET /coverage/summary": ok(
+          baseCoverageSummary({
+            streaming: {
+              active_instruments: [],
+              desired_instruments: ["CS.D.EURUSD.MINI.IP"],
+              pinned_instruments: [],
+              capped_instruments: [],
+              asset_class_usage: {},
+              execution_readiness: [
+                {
+                  instrument: "CS.D.EURUSD.MINI.IP",
+                  is_ok: false,
+                  market_open: true,
+                  tradable: true,
+                  quote_fresh: false,
+                  spread_ok: true,
+                  session_valid: false,
+                  dealing_allowed: false,
+                  last_price_age_ms: null,
+                  spread: null,
+                  reason: "stream_disconnected",
+                },
+              ],
+            },
+          }),
+        ),
+      });
+    case "dashboard-recovered-truth":
+      return mergeRoutes({
+        "GET /control-plane/summary": ok(
+          baseControlPlaneSummary({
+            feed_source_state: "LIVE",
+            feed_health_state: "HEALTHY",
+            entry_eligible: true,
+          }),
+        ),
+        "GET /health/stream": ok(
+          baseStreamHealth({
+            connected: true,
+            last_tick_at: TIMESTAMP,
+            last_status: "Recovered after stream disconnect",
+          }),
+        ),
       });
     case "markets-watchlist-provenance":
       return mergeRoutes({
@@ -2510,6 +2637,21 @@ export function buildScenarioRoutes(name) {
             degradation_reasons: ["stream_stale", "stream_degraded"],
           }),
         ),
+        "GET /control-plane/summary": ok(
+          baseControlPlaneSummary({
+            feed_source_state: "STALE",
+            feed_health_state: "DEGRADED",
+            entry_eligible: false,
+            entry_block_reason: "stale_market_data",
+          }),
+        ),
+        "GET /health/stream": ok(
+          baseStreamHealth({
+            connected: true,
+            last_tick_at: "2026-05-17T09:58:00.000Z",
+            last_status: "Stale",
+          }),
+        ),
         "GET /market-data/feed-state": ok({
           generated_at: TIMESTAMP,
           instruments: [
@@ -2605,6 +2747,23 @@ export function buildScenarioRoutes(name) {
             degradation_reasons: ["stream_disconnected"],
           }),
         ),
+        "GET /control-plane/summary": ok(
+          baseControlPlaneSummary({
+            feed_source_state: "DISCONNECTED",
+            feed_health_state: "FAILED",
+            entry_eligible: false,
+            entry_block_reason: "stream_disconnected",
+          }),
+        ),
+        "GET /health/stream": ok(
+          baseStreamHealth({
+            connected: false,
+            dependency_ready: false,
+            last_tick_at: null,
+            last_status: "Disconnected",
+            last_error: "stream unavailable",
+          }),
+        ),
         "GET /market-data/feed-state": ok({
           generated_at: TIMESTAMP,
           instruments: [
@@ -2696,6 +2855,13 @@ export function buildScenarioRoutes(name) {
             degradation_reasons: [],
           }),
         ),
+        "GET /health/stream": ok(
+          baseStreamHealth({
+            connected: true,
+            last_tick_at: TIMESTAMP,
+            last_status: "Recovered after stream disconnect",
+          }),
+        ),
         "GET /market-data/feed-state": ok({
           generated_at: TIMESTAMP,
           instruments: [
@@ -2774,6 +2940,13 @@ export function buildScenarioRoutes(name) {
               capped_instruments: [],
               asset_class_usage: {},
             },
+          }),
+        ),
+        "GET /health/stream": ok(
+          baseStreamHealth({
+            connected: true,
+            last_tick_at: null,
+            last_status: "Tick timestamp unavailable",
           }),
         ),
         "GET /market-data/feed-state": ok({
@@ -2907,6 +3080,197 @@ export function buildScenarioRoutes(name) {
             },
           }),
         ]),
+      });
+    case "events-lifecycle-provenance":
+      return mergeRoutes({
+        "GET /events": ok([
+          baseEvent({
+            id: 401,
+            event_type: "reconciliation.position_corrected",
+            category: "risk",
+            severity: "warning",
+            title: "Recovered position attached",
+            message: "Recovered broker-confirmed open risk was reattached during startup recovery.",
+            source: "runtime_recovery",
+            strategy_name: "Breakout",
+            instrument: "CS.D.EURUSD.MINI.IP",
+            correlation_id: safeIdentifier("corr…rcv-401", "fp-corr-401"),
+            runtime_id: safeIdentifier("run…rcv-401", "fp-runtime-401"),
+            position_id: 71,
+            trade_id: 71,
+            execution_id: 171,
+            payload_json: {
+              previous_state: "SUBMITTED",
+              new_state: "RECOVERED_POSITION_ATTACHED",
+              execution_source: "BROKER_CONFIRMED",
+              open_risk_management_state: "MANAGED",
+              broker_reference: safeIdentifier("BRK…RCV-401", "fp-broker-401"),
+              client_request_id: safeIdentifier("req…RCV-401", "fp-request-401"),
+              account_id: safeIdentifier("acct…401", "fp-account-401"),
+              reason: "Recovered broker-confirmed open risk remains live after restart.",
+            },
+          }),
+          baseEvent({
+            id: 402,
+            event_type: "reconciliation.unmatched_remote_position",
+            category: "risk",
+            severity: "warning",
+            title: "External position adopted",
+            message: "Adopted external broker position remains open until local lifecycle catches up.",
+            source: "reconciliation",
+            strategy_name: "Breakout",
+            instrument: "CS.D.GBPUSD.MINI.IP",
+            correlation_id: safeIdentifier("corr…adp-402", "fp-corr-402"),
+            runtime_id: safeIdentifier("run…adp-402", "fp-runtime-402"),
+            position_id: 72,
+            trade_id: 72,
+            execution_id: 172,
+            payload_json: {
+              previous_state: "APPROVED",
+              new_state: "EXTERNAL_POSITION_ADOPTED",
+              open_risk_management_state: "UNMANAGED_OPEN_RISK",
+              broker_reference: safeIdentifier("BRK…ADP-402", "fp-broker-402"),
+              client_request_id: safeIdentifier("req…ADP-402", "fp-request-402"),
+              account_id: safeIdentifier("acct…402", "fp-account-402"),
+              reason: "Broker position was adopted during reconciliation rather than opened by normal strategy entry.",
+            },
+          }),
+        ]),
+      });
+    case "events-close-open-risk-truth":
+      return mergeRoutes({
+        "GET /events": ok([
+          baseEvent({
+            id: 411,
+            event_type: "execution.fill_received",
+            category: "execution",
+            severity: "warning",
+            title: "Partial close keeps remaining open risk live",
+            message: "Close partially filled; remaining open risk stays live until broker reconciliation completes.",
+            source: "execution",
+            strategy_name: "Breakout",
+            instrument: "CS.D.EURUSD.MINI.IP",
+            correlation_id: safeIdentifier("corr…pcl-411", "fp-corr-411"),
+            runtime_id: safeIdentifier("run…pcl-411", "fp-runtime-411"),
+            position_id: 21,
+            trade_id: 21,
+            execution_id: 321,
+            payload_json: {
+              previous_state: "CLOSE_REQUESTED",
+              new_state: "FILL_PARTIAL",
+              close_execution_source: "BROKER_CONFIRMED",
+              open_risk_management_state: "EXITS_ONLY",
+              close_broker_reference: safeIdentifier("CLS…PCL-411", "fp-close-411"),
+              client_request_id: safeIdentifier("req…PCL-411", "fp-request-411"),
+              error_message: "Close partially filled; remaining open risk stays live until broker reconciliation completes.",
+            },
+          }),
+          baseEvent({
+            id: 412,
+            event_type: "execution.order_rejected",
+            category: "execution",
+            severity: "error",
+            title: "Failed close left open risk live",
+            message: "Close rejected by broker; position remains open and requires manual review.",
+            source: "execution",
+            strategy_name: "Breakout",
+            instrument: "CS.D.EURUSD.MINI.IP",
+            correlation_id: safeIdentifier("corr…fcl-412", "fp-corr-412"),
+            runtime_id: safeIdentifier("run…fcl-412", "fp-runtime-412"),
+            position_id: 22,
+            trade_id: 22,
+            execution_id: 322,
+            payload_json: {
+              previous_state: "CLOSE_REQUESTED",
+              new_state: "FAILED",
+              close_execution_source: "BROKER_CONFIRMED",
+              open_risk_management_state: "UNMANAGED_OPEN_RISK",
+              close_broker_reference: safeIdentifier("CLS…FCL-412", "fp-close-412"),
+              client_request_id: safeIdentifier("req…FCL-412", "fp-request-412"),
+              error_message: "Close rejected by broker; position remains open and requires manual review.",
+            },
+          }),
+          baseEvent({
+            id: 413,
+            event_type: "execution.retry_suppressed",
+            category: "execution",
+            severity: "warning",
+            title: "Ambiguous close requires manual review",
+            message: "Broker close confirmation timed out; close remains ambiguous and requires manual review.",
+            source: "execution",
+            strategy_name: "Breakout",
+            instrument: "CS.D.EURUSD.MINI.IP",
+            correlation_id: safeIdentifier("corr…mrv-413", "fp-corr-413"),
+            runtime_id: safeIdentifier("run…mrv-413", "fp-runtime-413"),
+            position_id: 23,
+            trade_id: 23,
+            execution_id: 323,
+            payload_json: {
+              previous_state: "ORDER_SUBMITTED",
+              new_state: "NEEDS_MANUAL_REVIEW",
+              close_execution_source: "BROKER_CONFIRMED",
+              open_risk_management_state: "UNMANAGED_OPEN_RISK",
+              close_broker_reference: safeIdentifier("CLS…MRV-413", "fp-close-413"),
+              client_request_id: safeIdentifier("req…MRV-413", "fp-request-413"),
+              error_message: "Broker close confirmation timed out; close remains ambiguous and requires manual review.",
+            },
+          }),
+        ]),
+      });
+    case "events-runtime-stopped-open-risk":
+      return mergeRoutes({
+        "GET /events": ok([
+          baseEvent({
+            id: 421,
+            event_type: "strategy.runtime_stopped",
+            category: "strategy",
+            severity: "warning",
+            title: "Runtime stopped while open risk remained live",
+            message: "Stopping this runtime does not close broker-confirmed open risk.",
+            source: "operator",
+            strategy_name: "Breakout",
+            instrument: "CS.D.EURUSD.MINI.IP",
+            correlation_id: safeIdentifier("corr…stp-421", "fp-corr-421"),
+            runtime_id: safeIdentifier("run…stp-421", "fp-runtime-421"),
+            position_id: 24,
+            payload_json: {
+              control_mode: "MANUAL",
+              new_runtime_mode: "STOPPED",
+              new_open_risk_management_state: "EXITS_ONLY",
+              broker_reference: safeIdentifier("BRK…STP-421", "fp-broker-421"),
+              stop_context: {
+                detail: "Operator requested runtime stop while broker-confirmed open risk remained live.",
+              },
+            },
+          }),
+        ]),
+      });
+    case "live-unsupported-feed-state":
+      return mergeRoutes({
+        "GET /control-plane/summary": ok(
+          baseControlPlaneSummary({
+            feed_source_state: "BROKER_MAGIC",
+            feed_health_state: "DEGRADED",
+            entry_eligible: false,
+            entry_block_reason: "unsupported_feed_state",
+          }),
+        ),
+        "GET /system/telemetry": ok(
+          baseTelemetry({
+            status: "degraded",
+            feed_source_state: "BROKER_MAGIC",
+            feed_health_state: "DEGRADED",
+            entry_eligible: false,
+            entry_block_reason: "unsupported_feed_state",
+          }),
+        ),
+        "GET /health/stream": ok(
+          baseStreamHealth({
+            connected: true,
+            last_tick_at: TIMESTAMP,
+            last_status: "Backend returned unsupported feed state",
+          }),
+        ),
       });
     case "strategies-close-failed-open-risk":
       return mergeRoutes({

@@ -40,7 +40,11 @@ import {
   formatSignedCurrency,
   formatSignedPercent,
 } from "@/lib/format";
-import { brokerSyncStatusMeta, closeExecutionSourceMeta } from "@/lib/operator-vocabulary";
+import {
+  brokerSyncStatusMeta,
+  closeExecutionSourceMeta,
+  feedSourceStateMeta,
+} from "@/lib/operator-vocabulary";
 import {
   AllocationAlert,
   AllocationCycle,
@@ -123,45 +127,30 @@ function renderMetricOrUnavailable(
 }
 
 function dashboardStreamStatus(controlPlane: ControlPlaneSummary, streamHealth: StreamHealthStatus) {
-  if (controlPlane.feed_source_state === "STALE") {
-    return {
-      value: "Stale",
-      tone: "warning" as const,
-      meta: "Feed stale. Price freshness is below the current execution threshold.",
-    };
-  }
-  if (controlPlane.feed_source_state === "POLLING_FALLBACK") {
-    return {
-      value: "Polling",
-      tone: "warning" as const,
-      meta: "Polling fallback is active; live streaming is not the entry source.",
-    };
-  }
-  if (controlPlane.feed_source_state === "DISCONNECTED") {
-    return {
-      value: "Disconnected",
-      tone: "negative" as const,
-      meta: "Feed disconnected. Live streaming and fallback freshness are unavailable.",
-    };
-  }
-  if (streamHealth.connected) {
-    return {
-      value: "Live",
-      tone: "positive" as const,
-      meta: streamHealth.last_status ?? "Streaming market data is connected.",
-    };
-  }
-  if (streamHealth.enabled) {
+  const recovered = streamHealth.connected && /recover/i.test(streamHealth.last_status ?? "");
+  const feedState =
+    controlPlane.feed_source_state
+    ?? (streamHealth.connected ? "LIVE" : streamHealth.enabled ? "DISCONNECTED" : "UNKNOWN");
+  const feedMeta = feedSourceStateMeta(feedState, { recovered });
+
+  if (!streamHealth.connected && streamHealth.enabled && controlPlane.feed_source_state == null) {
     return {
       value: "Interrupted",
       tone: "negative" as const,
       meta: streamHealth.last_status ?? "Streaming market data is interrupted.",
     };
   }
+  if (feedMeta.label !== "Feed state unknown") {
+    return {
+      value: feedMeta.label,
+      tone: feedMeta.tone,
+      meta: recovered ? streamHealth.last_status ?? feedMeta.detail : feedMeta.detail,
+    };
+  }
   return {
-    value: "Unavailable",
-    tone: "inactive" as const,
-    meta: streamHealth.last_status ?? "Stream health is unavailable.",
+    value: feedMeta.label,
+    tone: feedMeta.tone,
+    meta: feedMeta.detail,
   };
 }
 
@@ -414,7 +403,7 @@ export function DashboardLive({
       title: `${formatInstrumentLabel(item.instrument)} blocked`,
       detail: item.reason || "Readiness gates are preventing action.",
       tone: "warning" as const,
-      meta: `${item.last_price_age_ms.toFixed(0)}ms age`,
+      meta: item.last_price_age_ms == null ? "freshness unavailable" : `${item.last_price_age_ms.toFixed(0)}ms age`,
     })),
   ].slice(0, 6);
 
@@ -425,6 +414,12 @@ export function DashboardLive({
   const openRiskState = controlPlane.open_risk_management_state;
   const openRiskUnavailable = openRiskState == null || openRiskState === "UNAVAILABLE" || openRiskState === "UNKNOWN";
   const streamStatus = dashboardStreamStatus(controlPlane, streamHealth);
+  const recoveredFeed = streamHealth.connected && /recover/i.test(streamHealth.last_status ?? "");
+  const feedMeta = feedSourceStateMeta(
+    controlPlane.feed_source_state
+      ?? (streamHealth.connected ? "LIVE" : streamHealth.enabled ? "DISCONNECTED" : "UNKNOWN"),
+    { recovered: recoveredFeed },
+  );
   const healthTone =
     errors.controlPlane || errors.brokerAuth
       ? "inactive"
@@ -608,26 +603,14 @@ export function DashboardLive({
                         tone={
                           errors.streamHealth
                             ? "inactive"
-                            : controlPlane.feed_source_state === "LIVE"
-                              ? "positive"
-                              : controlPlane.feed_source_state === "POLLING_FALLBACK" || controlPlane.feed_source_state === "STALE"
-                                ? "warning"
-                                : streamHealth.connected
-                                  ? "positive"
-                                  : "negative"
+                            : feedMeta.tone
                         }
                         title={
                           errors.streamHealth
                             ? `Feed unknown. ${errors.streamHealth}`
-                            : controlPlane.feed_source_state === "POLLING_FALLBACK"
-                              ? "Feed degraded. Polling fallback is active and new entries are blocked."
-                              : controlPlane.feed_source_state === "STALE"
-                                ? "Feed stale. Price freshness is below the current execution threshold."
-                                : controlPlane.feed_source_state === "DISCONNECTED"
-                                  ? "Feed disconnected. Live streaming and fallback freshness are unavailable."
-                                  : streamHealth.connected
-                              ? "Feed live. Streaming market data is connected."
-                              : `Feed degraded. ${streamHealth.last_status ?? "Streaming market data is interrupted."}`
+                            : recoveredFeed
+                              ? streamHealth.last_status ?? feedMeta.detail
+                              : feedMeta.detail
                         }
                       />
                       <StatusPill

@@ -1080,7 +1080,7 @@ test("AUDIT-UI-006 rendered dashboard stream strip preserves stale feed truth ov
       });
 
       assert.match(html, /Stream[\s\S]{0,240}Stale/i);
-      assert.match(html, /Feed stale/i);
+      assert.match(html, /fresh stream truth/i);
       assert.doesNotMatch(html, /Stream[\s\S]{0,240}Live/i);
     });
   } finally {

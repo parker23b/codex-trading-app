@@ -4,6 +4,14 @@ import { CompactTable, Panel, StatusPill, StickyToolbar } from "@/components/con
 import { ResetHistoryButton } from "@/components/testing/reset-history-button";
 import { getDomainEvents } from "@/lib/api";
 import { formatDateTime, formatIdentifierDisplay, formatIdentifierFingerprint } from "@/lib/format";
+import {
+  closeExecutionSourceMeta,
+  controlModeMeta,
+  executionStatusMeta,
+  openRiskManagementStateMeta,
+  runtimeModeMeta,
+  tradeIntentStateMeta,
+} from "@/lib/operator-vocabulary";
 
 const EVENT_TYPE_OPTIONS = [
   "strategy.runtime_started",
@@ -41,6 +49,8 @@ const TESTING_CONTROLS_QUERY = "testing_controls";
 type EventsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
+
+type DomainEventRecord = Awaited<ReturnType<typeof getDomainEvents>>[number];
 
 function readParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? "" : value ?? "";
@@ -98,7 +108,7 @@ function payloadPreview(payload: Record<string, unknown>) {
   return text.length > 180 ? `${text.slice(0, 180)}...` : text;
 }
 
-function hasAuditWriteDegradation(event: Awaited<ReturnType<typeof getDomainEvents>>[number]) {
+function hasAuditWriteDegradation(event: DomainEventRecord) {
   const payloadText = JSON.stringify(event.payload_json).toLowerCase();
   return (
     event.event_type === "health.audit_write_degraded"
@@ -108,7 +118,7 @@ function hasAuditWriteDegradation(event: Awaited<ReturnType<typeof getDomainEven
   );
 }
 
-function lifecycleReferences(event: Awaited<ReturnType<typeof getDomainEvents>>[number]) {
+function lifecycleReferences(event: DomainEventRecord) {
   const correlation = formatIdentifierDisplay(event.correlation_id);
   const correlationFingerprint = formatIdentifierFingerprint(event.correlation_id);
   const runtime = formatIdentifierDisplay(event.runtime_id);
@@ -124,6 +134,116 @@ function lifecycleReferences(event: Awaited<ReturnType<typeof getDomainEvents>>[
     event.trade_id != null ? `Trade · ${event.trade_id}` : null,
     event.execution_id != null ? `Execution · ${event.execution_id}` : null,
   ].filter(Boolean) as string[];
+}
+
+function payloadString(payload: Record<string, unknown>, key: string) {
+  const value = payload[key];
+  return typeof value === "string" && value ? value : null;
+}
+
+function payloadRecord(payload: Record<string, unknown>, key: string) {
+  const value = payload[key];
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function lifecycleStateMeta(event: DomainEventRecord, state: string) {
+  return event.category === "execution" ? executionStatusMeta(state) : tradeIntentStateMeta(state);
+}
+
+function lifecycleTruthLines(event: DomainEventRecord) {
+  const payload = event.payload_json ?? {};
+  const lines: Array<{ label: string; value: string; detail: string }> = [];
+  const previousState = payloadString(payload, "previous_state");
+  const nextState = payloadString(payload, "new_state");
+  const executionSource = payloadString(payload, "close_execution_source") ?? payloadString(payload, "execution_source");
+  const openRiskState =
+    payloadString(payload, "new_open_risk_management_state")
+    ?? payloadString(payload, "open_risk_management_state");
+  const controlMode = payloadString(payload, "control_mode");
+  const runtimeMode = payloadString(payload, "new_runtime_mode") ?? payloadString(payload, "runtime_mode");
+
+  if (previousState) {
+    const meta = lifecycleStateMeta(event, previousState);
+    lines.push({
+      label: "Previous lifecycle state",
+      value: meta.label,
+      detail: meta.detail,
+    });
+  }
+  if (nextState) {
+    const meta = lifecycleStateMeta(event, nextState);
+    lines.push({
+      label: "Current lifecycle state",
+      value: meta.label,
+      detail: meta.detail,
+    });
+  }
+  if (executionSource) {
+    const meta = closeExecutionSourceMeta(executionSource);
+    lines.push({
+      label: "Execution provenance",
+      value: meta.label,
+      detail: meta.detail,
+    });
+  }
+  if (openRiskState) {
+    const meta = openRiskManagementStateMeta(openRiskState);
+    lines.push({
+      label: "Open-risk state",
+      value: meta.label,
+      detail: meta.detail,
+    });
+  }
+  if (controlMode) {
+    const meta = controlModeMeta(controlMode);
+    lines.push({
+      label: "Control mode",
+      value: meta.label,
+      detail: meta.detail,
+    });
+  }
+  if (runtimeMode) {
+    const meta = runtimeModeMeta(runtimeMode);
+    lines.push({
+      label: "Runtime mode",
+      value: meta.label,
+      detail: meta.detail,
+    });
+  }
+
+  return lines;
+}
+
+function projectionLine(label: string, value: unknown) {
+  const display = formatIdentifierDisplay(value as Parameters<typeof formatIdentifierDisplay>[0]);
+  if (!display) {
+    return null;
+  }
+  const fingerprint = formatIdentifierFingerprint(
+    value as Parameters<typeof formatIdentifierFingerprint>[0],
+  );
+  return `${label} · ${display}${fingerprint ? ` (${fingerprint})` : ""}`;
+}
+
+function payloadProjectionLines(event: DomainEventRecord) {
+  const payload = event.payload_json ?? {};
+  return [
+    projectionLine("Broker reference", payload.broker_reference),
+    projectionLine("Close reference", payload.close_broker_reference),
+    projectionLine("Client request", payload.client_request_id),
+    projectionLine("Account", payload.account_id),
+  ].filter(Boolean) as string[];
+}
+
+function backendDetailLines(event: DomainEventRecord) {
+  const payload = event.payload_json ?? {};
+  const stopContext = payloadRecord(payload, "stop_context");
+  return [...new Set([
+    event.message ?? null,
+    payloadString(payload, "reason"),
+    payloadString(payload, "error_message"),
+    payloadString(stopContext ?? {}, "detail"),
+  ].filter(Boolean) as string[])];
 }
 
 export default async function EventsPage({ searchParams }: EventsPageProps) {
@@ -157,6 +277,9 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
   const selectedEvent = selectedId ? (events.find((event) => String(event.id) === selectedId) ?? null) : null;
   const attentionEvents = events.filter((event) => event.severity === "warning" || event.severity === "error");
   const auditWriteDegradedEvent = events.find(hasAuditWriteDegradation) ?? null;
+  const selectedTruthLines = selectedEvent ? lifecycleTruthLines(selectedEvent) : [];
+  const selectedProjectionLines = selectedEvent ? payloadProjectionLines(selectedEvent) : [];
+  const selectedDetailLines = selectedEvent ? backendDetailLines(selectedEvent) : [];
 
   return (
     <main className="console-page console-page--dense">
@@ -397,6 +520,32 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
                   <p>No lifecycle references were recorded for this event.</p>
                 )}
               </div>
+
+              {selectedTruthLines.length ? (
+                <div className="detail-block">
+                  <span className="console-kicker">Lifecycle Truth</span>
+                  {selectedTruthLines.map((line) => (
+                    <div key={`${line.label}-${line.value}`} className="mb-3 last:mb-0">
+                      <p><strong>{line.label}:</strong> {line.value}</p>
+                      <p className="status-note status-note--inline">{line.detail}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {selectedProjectionLines.length ? (
+                <div className="detail-block">
+                  <span className="console-kicker">Safe Identifier Projections</span>
+                  {selectedProjectionLines.map((line) => <p key={line}>{line}</p>)}
+                </div>
+              ) : null}
+
+              {selectedDetailLines.length > 1 ? (
+                <div className="detail-block">
+                  <span className="console-kicker">Backend Detail</span>
+                  {selectedDetailLines.map((line) => <p key={line}>{line}</p>)}
+                </div>
+              ) : null}
 
               <div className="detail-block">
                 <span className="console-kicker">Payload</span>

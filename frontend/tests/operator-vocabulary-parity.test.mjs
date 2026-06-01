@@ -267,6 +267,14 @@ test("AUDIT-005 browser-covered control-plane and strategy surfaces use shared o
     path.join(frontendRoot, "components", "control-plane", "control-plane-live.tsx"),
     "utf8",
   );
+  const dashboardSource = readFileSync(
+    path.join(frontendRoot, "components", "dashboard", "dashboard-live.tsx"),
+    "utf8",
+  );
+  const liveModelSource = readFileSync(
+    path.join(frontendRoot, "lib", "live-system-view.ts"),
+    "utf8",
+  );
 
   assert.match(strategySource, /controlModeMeta\(row\.control_mode\)/);
   assert.match(strategySource, /runtimeModeMeta\(row\.runtime_mode\)/);
@@ -274,6 +282,8 @@ test("AUDIT-005 browser-covered control-plane and strategy surfaces use shared o
   assert.match(controlPlaneSource, /governanceApprovalStateMeta\(selectedFamily\.governance\.approval_state\)/);
   assert.match(controlPlaneSource, /deploymentStateMeta\(selectedFamily\.deployment\?\.state/);
   assert.match(controlPlaneSource, /openRiskManagementStateMeta\(familyOpenRiskState\(family\)\)/);
+  assert.match(dashboardSource, /feedSourceStateMeta\(/);
+  assert.match(liveModelSource, /feedSourceStateMeta\(/);
 });
 
 test("UI-005 unknown backend provenance values render unknown or degraded instead of healthy truth", () => {
@@ -328,5 +338,10 @@ test("UI-005 unknown backend provenance values render unknown or degraded instea
     label: "Open-risk state unknown",
     tone: "negative",
     detail: "Open-risk management truth is unknown or unsupported and must not be treated as safe.",
+  });
+  assert.deepEqual(vocabulary.feedSourceStateMeta("BROKER_MAGIC"), {
+    label: "Feed state unknown",
+    tone: "negative",
+    detail: "Backend returned an unsupported feed-source state; do not treat it as live.",
   });
 });

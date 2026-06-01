@@ -1,5 +1,5 @@
 import { formatIdentifierDisplay, formatInstrumentLabel } from "@/lib/format";
-import { executionStatusMeta } from "@/lib/operator-vocabulary";
+import { executionStatusMeta, feedSourceStateMeta } from "@/lib/operator-vocabulary";
 import type {
   AllocationAlert,
   AllocationExposureSummary,
@@ -1046,15 +1046,19 @@ function buildTrustRail(resources: LiveDataResources, anomalies: LiveAnomalyItem
         ? "DISCONNECTED"
         : "UNAVAILABLE";
 
-  const streamValue = resources.errors.streamHealth
-    ? "UNKNOWN"
-    : !resources.streamHealth.enabled
-      ? "DISABLED"
-      : resources.streamHealth.connected
-        ? resources.controlPlane.feed_source_state === "POLLING_FALLBACK"
-          ? "POLLING"
-          : "CONNECTED"
-        : "INTERRUPTED";
+  const recoveredStream =
+    !resources.errors.streamHealth
+    && resources.streamHealth.connected
+    && /recover/i.test(resources.streamHealth.last_status ?? "");
+  const streamState = feedSourceStateMeta(
+    resources.errors.streamHealth
+      ? "UNKNOWN"
+      : !resources.streamHealth.enabled
+        ? "UNKNOWN"
+        : resources.controlPlane.feed_source_state
+          ?? (resources.streamHealth.connected ? "LIVE" : "DISCONNECTED"),
+    { recovered: recoveredStream },
+  );
 
   const actionRequired =
     systemState === "AT RISK" ||
@@ -1116,9 +1120,11 @@ function buildTrustRail(resources: LiveDataResources, anomalies: LiveAnomalyItem
     {
       id: "stream",
       label: "Stream State",
-      value: streamValue,
-      tone: streamValue === "CONNECTED" ? "positive" : streamValue === "POLLING" || streamValue === "INTERRUPTED" ? "warning" : "inactive",
-      meta: resources.errors.streamHealth ?? (resources.streamHealth.last_status || "Streaming status"),
+      value: resources.errors.streamHealth ? "Unknown" : streamState.label,
+      tone: resources.errors.streamHealth ? "inactive" : streamState.tone,
+      meta:
+        resources.errors.streamHealth
+        ?? (recoveredStream ? resources.streamHealth.last_status || streamState.detail : streamState.detail),
       source: "Backend stream health",
     },
     {

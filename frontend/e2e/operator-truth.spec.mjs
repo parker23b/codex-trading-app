@@ -53,6 +53,63 @@ test("AUDIT-UI-006 events view marks audit-write degradation as attention and ke
   await expect(page.getByRole("button", { name: "Clear Test History (Test Only)" })).toHaveCount(0);
 });
 
+test("AUDIT-UI-006 events detail keeps recovered and adopted lifecycle provenance explicit with safe identifier projections", async ({ page, request }) => {
+  await setScenario(request, "events-lifecycle-provenance");
+
+  await page.goto("/events?selected=401");
+
+  await expect(page.getByText("Current lifecycle state: Recovered position attached")).toBeVisible();
+  await expect(page.getByText("Execution provenance: Broker confirmed")).toBeVisible();
+  await expect(page.getByText("Broker reference · BRK…RCV-401 (fp-broker-401)")).toBeVisible();
+  await expect(page.getByText("Client request · req…RCV-401 (fp-request-401)")).toBeVisible();
+  await expect(page.getByText("Account · acct…401 (fp-account-401)")).toBeVisible();
+  await expect(page.getByText("Recovered broker-confirmed open risk remains live after restart.")).toBeVisible();
+
+  await setScenario(request, "events-lifecycle-provenance");
+  await page.goto("/events?selected=402");
+
+  await expect(page.getByText("Current lifecycle state: External position adopted")).toBeVisible();
+  await expect(page.getByText("Open-risk state: Unmanaged open risk")).toBeVisible();
+  await expect(page.getByText("Broker reference · BRK…ADP-402 (fp-broker-402)")).toBeVisible();
+  await expect(page.getByText("Broker position was adopted during reconciliation rather than opened by normal strategy entry.")).toBeVisible();
+});
+
+test("AUDIT-UI-006 events detail keeps partial, failed, and ambiguous close truth visibly open-risk aware", async ({ page, request }) => {
+  await setScenario(request, "events-close-open-risk-truth");
+
+  await page.goto("/events?selected=411");
+
+  await expect(page.getByText("Current lifecycle state: Partial fill")).toBeVisible();
+  await expect(page.getByText("Execution provenance: Broker confirmed")).toBeVisible();
+  await expect(page.getByText("Open-risk state: Exits-only open risk")).toBeVisible();
+  await expect(page.getByText("Close partially filled; remaining open risk stays live until broker reconciliation completes.")).toBeVisible();
+
+  await page.goto("/events?selected=412");
+
+  await expect(page.getByText("Current lifecycle state: Failed")).toBeVisible();
+  await expect(page.getByText("Open-risk state: Unmanaged open risk")).toBeVisible();
+  await expect(page.getByText("Close rejected by broker; position remains open and requires manual review.")).toBeVisible();
+
+  await page.goto("/events?selected=413");
+
+  await expect(page.getByText("Current lifecycle state: Needs manual review")).toBeVisible();
+  await expect(page.getByText("Open-risk state: Unmanaged open risk")).toBeVisible();
+  await expect(page.getByText("Broker close confirmation timed out; close remains ambiguous and requires manual review.")).toBeVisible();
+});
+
+test("AUDIT-UI-006 events detail keeps stopped runtime distinct from flat broker risk", async ({ page, request }) => {
+  await setScenario(request, "events-runtime-stopped-open-risk");
+
+  await page.goto("/events?selected=421");
+
+  await expect(page.getByText("Runtime mode: Stopped runtime")).toBeVisible();
+  await expect(page.getByText("Control mode: Manual control")).toBeVisible();
+  await expect(page.getByText("Open-risk state: Exits-only open risk")).toBeVisible();
+  await expect(page.getByText("Broker reference · BRK…STP-421 (fp-broker-421)")).toBeVisible();
+  await expect(page.getByText("Stopping this runtime does not close broker-confirmed open risk.").first()).toBeVisible();
+  await expect(page.getByText("No open risk")).toHaveCount(0);
+});
+
 test("UI-009 events reset control stays hidden until explicitly enabled and remains visibly test-only and destructive", async ({ page, request }) => {
   await setScenario(request, "events-audit-degraded");
 
@@ -87,6 +144,51 @@ test("AUDIT-UI-006 live view keeps all-source outage degraded instead of nominal
   await expect(page.getByText("Source coverage degraded", { exact: false })).toBeVisible();
   await expect(page.getByText("Unusual activity cannot be fully evaluated", { exact: false })).toBeVisible();
   await expect(page.getByText("Nominal live posture")).toHaveCount(0);
+});
+
+test("AUDIT-UI-006 dashboard summary keeps disconnected and recovered stream truth distinct from live", async ({ page, request }) => {
+  await setScenario(request, "dashboard-disconnected-truth");
+
+  await page.goto("/");
+  await expect(page.locator("section[aria-label='System status strip']")).toContainText("Disconnected");
+  await expect(page.locator("section[aria-label='System status strip']")).not.toContainText("Recovered");
+
+  await setScenario(request, "dashboard-recovered-truth");
+
+  await page.goto("/");
+  await expect(page.locator("section[aria-label='System status strip']")).toContainText("Recovered");
+  await expect(page.locator("section[aria-label='System status strip']")).not.toContainText("Disconnected");
+});
+
+test("AUDIT-UI-006 live summary distinguishes polling-fallback and stale stream states", async ({ page, request }) => {
+  await setScenario(request, "coverage-polling-fallback");
+
+  await page.goto("/live");
+  await expect(page.getByLabel("Live system trust rail")).toContainText("Polling fallback");
+
+  await setScenario(request, "coverage-stale-stream");
+
+  await page.goto("/live");
+  await expect(page.getByLabel("Live system trust rail")).toContainText("Stale");
+  await expect(page.getByLabel("Live system trust rail")).not.toContainText("Polling fallback");
+});
+
+test("AUDIT-UI-006 live summary distinguishes disconnected, recovered, and unknown-freshness truth", async ({ page, request }) => {
+  await setScenario(request, "coverage-disconnected-stream");
+
+  await page.goto("/live");
+  await expect(page.getByLabel("Live system trust rail")).toContainText("Disconnected");
+
+  await setScenario(request, "coverage-stream-recovered");
+
+  await page.goto("/live");
+  await expect(page.getByLabel("Live system trust rail")).toContainText("Recovered");
+  await expect(page.getByLabel("Live system trust rail")).not.toContainText("Disconnected");
+
+  await setScenario(request, "coverage-unknown-freshness");
+
+  await page.goto("/live");
+  await expect(page.getByLabel("Live system trust rail")).toContainText("Unknown");
 });
 
 test("AUDIT-OBS-001 live view renders audit-write, polling fallback, stale stream, stream, and runtime degradations as attention", async ({ page, request }) => {
@@ -240,6 +342,42 @@ test("FLOW-AIMEE-001 passive AIMEE refresh stays read-only until explicit adviso
 
   assert.ok(aimeeReads.length >= 1, "expected at least one passive AIMEE snapshot request");
   assert.equal(reviewMutations.length, 0, "passive AIMEE refresh should not submit advisory mutations");
+});
+
+test("AUDIT-UI-006 control-plane surfaces keep override and unsupported family states degraded", async ({ page, request }) => {
+  await setScenario(request, "control-plane-unsupported-states");
+
+  await page.goto("/control-plane");
+
+  await expect(page.getByText("Override active: Operator forced governed autonomy pause while unsupported family state requires review.").first()).toBeVisible();
+  await expect(page.getByText("Governance unknown").first()).toBeVisible();
+  await expect(page.getByText("Alignment unknown").first()).toBeVisible();
+  await expect(page.getByText("Deployment unknown").first()).toBeVisible();
+  await expect(page.getByText("Control mode unknown / Runtime mode unknown active")).toBeVisible();
+  await expect(page.getByText("Open-risk state unknown").first()).toBeVisible();
+  await expect(page.getByText("Emergency Stops")).toBeVisible();
+});
+
+test("AUDIT-UI-006 live summary keeps unsupported feed-source state unknown instead of live", async ({ page, request }) => {
+  await setScenario(request, "live-unsupported-feed-state");
+
+  await page.goto("/live");
+
+  await expect(page.getByLabel("Live system trust rail")).toContainText("Feed state unknown");
+  await expect(page.getByLabel("Live system trust rail")).not.toContainText("Live");
+});
+
+test("AUDIT-UI-006 markets surface keeps unavailable truth from collapsing into nominal market state", async ({ page, request }) => {
+  await setScenario(request, "markets-unavailable-truth");
+
+  await page.goto("/markets");
+
+  await expect(page.getByText("Market overview could not be loaded. Counts are unavailable, not zero market truth.")).toBeVisible();
+  await expect(page.getByText("Catalogue unavailable.").first()).toBeVisible();
+  await expect(page.getByText("Strategy watchlist unavailable.").first()).toBeVisible();
+  await expect(page.getByLabel("System status strip")).toContainText("Live");
+  await expect(page.getByLabel("System status strip")).toContainText("Unavailable");
+  await expect(page.getByText("Available markets")).toHaveCount(0);
 });
 
 test("AUDIT-UI-004 AIMEE advisory submission signals persistence and surfaces backend failure detail", async ({ page, request }) => {

@@ -171,6 +171,12 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
   const openRiskState = summary.open_risk_management_state;
   const openRiskUnavailable = openRiskState == null || openRiskState === "UNAVAILABLE" || openRiskState === "UNKNOWN";
   const controlPlaneOpenRiskMeta = openRiskManagementStateMeta(openRiskState);
+  const overrideActive = summary.autonomy_override_active;
+  const overrideReason =
+    summary.autonomy_override_reason
+    ?? (summary.autonomy_override_value === false
+      ? "Operator override keeps governed autonomy paused."
+      : "Operator override is active.");
 
   const handleGlobalAutonomy = async (enabled: boolean) => {
     try {
@@ -260,7 +266,7 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
               "Paused"
             ),
             tone: summaryError ? "inactive" : summary.effective_autonomous_control_enabled ? "positive" : "negative",
-            meta: summaryError ?? "permission only",
+            meta: summaryError ?? (overrideActive ? `override active: ${overrideReason}` : "permission only"),
             emphasis: "strong",
           },
           {
@@ -418,6 +424,11 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
                     ? `${exceptionFamilies.length} family${exceptionFamilies.length === 1 ? "" : "ies"} currently need intervention.`
                     : "No families currently need intervention."}
                 </div>
+                {overrideActive ? (
+                  <div className="console-alert console-alert--warning">
+                    Override active: {overrideReason}
+                  </div>
+                ) : null}
 
                 <div className="summary-bar">
                   <div className="summary-bar__item">
@@ -444,6 +455,7 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
 
                 <div className="detail-block">
                   <span className="console-kicker">Observed State</span>
+                  <p>Override: {overrideActive ? overrideReason : "No operator override active."}</p>
                   <p>Permission: {selectedFamily.governance.autonomous_operation_allowed ? "authorized for autonomous deployment" : "not authorized for autonomous deployment"}</p>
                   <p>Governance: {governanceApprovalStateMeta(selectedFamily.governance.approval_state).label}</p>
                   <p>Alignment: {alignmentStatusMeta(selectedFamily.alignment.status).label}</p>

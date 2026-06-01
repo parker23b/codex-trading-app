@@ -260,6 +260,54 @@ export function governanceApprovalStateMeta(
   }
 }
 
+export function feedSourceStateMeta(
+  state?: "LIVE" | "POLLING_FALLBACK" | "STALE" | "DISCONNECTED" | string | null,
+  options?: { recovered?: boolean },
+): VocabularyMeta {
+  if (options?.recovered && state === "LIVE") {
+    return {
+      label: "Recovered",
+      tone: "warning",
+      detail:
+        "Stream truth recovered after degradation; confirm fresh ticks continue before treating the path as stable.",
+    };
+  }
+
+  switch (state) {
+    case "LIVE":
+      return {
+        label: "Live",
+        tone: "positive",
+        detail: "Streaming market data is connected and currently acting as the live source.",
+      };
+    case "POLLING_FALLBACK":
+      return {
+        label: "Polling fallback",
+        tone: "warning",
+        detail:
+          "Fallback polling is active because live streaming is unavailable; do not treat this path as full live stream truth.",
+      };
+    case "STALE":
+      return {
+        label: "Stale",
+        tone: "warning",
+        detail: "The latest live tick is stale and should not be treated as fresh stream truth.",
+      };
+    case "DISCONNECTED":
+      return {
+        label: "Disconnected",
+        tone: "negative",
+        detail: "Live streaming is disconnected or unavailable; freshness and entry truth are degraded.",
+      };
+    default:
+      return {
+        label: "Feed state unknown",
+        tone: "negative",
+        detail: "Backend returned an unsupported feed-source state; do not treat it as live.",
+      };
+  }
+}
+
 export function deploymentStateMeta(
   state?: StrategyDeploymentState | string | null,
 ): VocabularyMeta {
