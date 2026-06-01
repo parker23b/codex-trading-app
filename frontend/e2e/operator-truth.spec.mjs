@@ -127,6 +127,17 @@ test("AUDIT-UI-006 risk alert mutation failure preserves backend detail and does
   await expect(page.getByText("Mutation confirmed after backend alert truth refreshed.")).toHaveCount(0);
 });
 
+test("AUDIT-UI-004 risk alert acknowledge confirms refreshed backend truth before success copy", async ({ page, request }) => {
+  await setScenario(request, "risk-alert-acknowledge-confirmed");
+
+  await page.goto("/risk");
+  await page.getByRole("button", { name: "Acknowledge" }).click();
+
+  await expect(page.getByRole("button", { name: "Acknowledging..." })).toBeVisible();
+  await expect(page.getByText("Mutation confirmed after backend alert truth refreshed.")).toBeVisible();
+  await expect(page.getByLabel("acknowledged")).toBeVisible();
+});
+
 test("AUDIT-UI-004 strategies start runtime preserves backend detail during pending failure", async ({ page, request }) => {
   await setScenario(request, "strategies-start-failure-detail");
 
@@ -336,6 +347,20 @@ test("AUDIT-UI-004 markets shortlist mutation failure preserves backend detail a
   await expect(page.getByText("Shortlist mutation failed: shortlist write failed because operator audit persistence is unavailable")).toHaveCount(0);
 });
 
+test("AUDIT-UI-004 markets shortlist removal failure preserves backend detail and supports retry without premature success", async ({ page, request }) => {
+  await setScenario(request, "markets-shortlist-remove-failure-retry");
+
+  await page.goto("/markets");
+  await page.getByRole("button", { name: "Remove from shortlist" }).click();
+
+  await expect(page.getByText("Shortlist mutation failed: shortlist removal failed because operator audit persistence is unavailable")).toBeVisible();
+  await page.getByRole("button", { name: "Remove from shortlist" }).click();
+
+  await expect(page.getByText("Shortlist mutation confirmed after backend truth refreshed for", { exact: false })).toBeVisible();
+  await expect(page.getByText("No shortlisted instruments yet.")).toBeVisible();
+  await expect(page.getByText("Shortlist mutation failed: shortlist removal failed because operator audit persistence is unavailable")).toHaveCount(0);
+});
+
 test("AUDIT-UI-004 markets strategy-watchlist add refresh failure avoids clean success copy", async ({ page, request }) => {
   await setScenario(request, "markets-watchlist-add-refresh-failure");
 
@@ -360,6 +385,51 @@ test("AUDIT-UI-004 markets strategy-watchlist remove confirms refreshed backend 
   await expect(page.getByText("No active strategy watchlist instruments.")).toBeVisible();
 });
 
+test("AUDIT-UI-004 markets strategy-watchlist removal failure preserves backend detail and supports retry without premature success", async ({ page, request }) => {
+  await setScenario(request, "markets-watchlist-remove-failure-retry");
+
+  await page.goto("/markets");
+  await page.getByRole("button", { name: "Remove", exact: true }).click();
+
+  await expect(page.getByText("Strategy watchlist mutation failed: strategy watchlist removal failed because operator audit persistence is unavailable")).toBeVisible();
+  await page.getByRole("button", { name: "Remove", exact: true }).click();
+
+  await expect(page.getByText("Strategy watchlist removal confirmed after backend truth refreshed for", { exact: false })).toBeVisible();
+  await expect(page.getByText("No active strategy watchlist instruments.")).toBeVisible();
+  await expect(page.getByText("Strategy watchlist mutation failed: strategy watchlist removal failed because operator audit persistence is unavailable")).toHaveCount(0);
+});
+
+test("AUDIT-UI-004 control-plane arm confirms refreshed backend truth before success copy", async ({ page, request }) => {
+  await setScenario(request, "control-plane-arm-success");
+
+  await page.goto("/control-plane");
+  await page.getByRole("button", { name: "Arm" }).click();
+
+  await expect(page.getByRole("button", { name: "Arming..." })).toBeVisible();
+  await expect(page.getByText("Operator control mutation confirmed after backend truth refreshed: governed autonomy armed.")).toBeVisible();
+});
+
+test("AUDIT-UI-004 control-plane arm failure preserves backend detail and avoids clean success copy", async ({ page, request }) => {
+  await setScenario(request, "control-plane-arm-failure");
+
+  await page.goto("/control-plane");
+  await page.getByRole("button", { name: "Arm" }).click();
+
+  await expect(page.getByRole("button", { name: "Arming..." })).toBeVisible();
+  await expect(page.getByText("Operator control mutation failed: operator control mutation audit persistence failed while arming governed autonomy")).toBeVisible();
+  await expect(page.getByText("Operator control mutation confirmed after backend truth refreshed: governed autonomy armed.")).toHaveCount(0);
+});
+
+test("AUDIT-UI-004 control-plane pause confirms refreshed backend truth before success copy", async ({ page, request }) => {
+  await setScenario(request, "control-plane-pause-success");
+
+  await page.goto("/control-plane");
+  await page.getByRole("button", { name: "Pause" }).click();
+
+  await expect(page.getByRole("button", { name: "Pausing..." })).toBeVisible();
+  await expect(page.getByText("Operator control mutation confirmed after backend truth refreshed: governed autonomy paused.")).toBeVisible();
+});
+
 test("AUDIT-UI-004 control-plane mutation refresh failure preserves backend detail and avoids clean success copy", async ({ page, request }) => {
   await setScenario(request, "control-plane-mutation-refresh-failure");
 
@@ -367,8 +437,18 @@ test("AUDIT-UI-004 control-plane mutation refresh failure preserves backend deta
   await page.getByRole("button", { name: "Pause" }).click();
 
   await expect(page.getByRole("button", { name: "Pausing..." })).toBeVisible();
-  await expect(page.getByText("control-plane refresh failed after operator control mutation")).toBeVisible();
-  await expect(page.getByText("Autonomy paused.")).toHaveCount(0);
+  await expect(page.getByText("Operator control mutation succeeded, but backend truth refresh failed: control-plane refresh failed after operator control mutation")).toBeVisible();
+  await expect(page.getByText("Operator control mutation confirmed after backend truth refreshed: governed autonomy paused.")).toHaveCount(0);
+});
+
+test("AUDIT-UI-004 control-plane governance allow confirms refreshed backend truth before success copy", async ({ page, request }) => {
+  await setScenario(request, "control-plane-governance-allow-success");
+
+  await page.goto("/control-plane");
+  await page.getByRole("button", { name: "Allow Auto Deploy" }).click();
+
+  await expect(page.getByRole("button", { name: "Updating..." }).first()).toBeVisible();
+  await expect(page.getByText("Governance mutation confirmed after backend truth refreshed: Breakout can auto deploy.")).toBeVisible();
 });
 
 test("AUDIT-UI-004 control-plane governance mutation failure preserves backend detail and avoids clean success copy", async ({ page, request }) => {
@@ -378,8 +458,29 @@ test("AUDIT-UI-004 control-plane governance mutation failure preserves backend d
   await page.getByRole("button", { name: "Disallow" }).click();
 
   await expect(page.getByRole("button", { name: "Updating..." }).first()).toBeVisible();
-  await expect(page.getByText("governance mutation audit persistence failed for Breakout")).toBeVisible();
-  await expect(page.getByText("Breakout auto deploy disallowed.")).toHaveCount(0);
+  await expect(page.getByText("Governance mutation failed: governance mutation audit persistence failed for Breakout")).toBeVisible();
+  await expect(page.getByText("Governance mutation confirmed after backend truth refreshed: Breakout auto deploy disallowed.")).toHaveCount(0);
+});
+
+test("AUDIT-UI-004 control-plane governance allow failure preserves backend detail and avoids clean success copy", async ({ page, request }) => {
+  await setScenario(request, "control-plane-governance-allow-failure");
+
+  await page.goto("/control-plane");
+  await page.getByRole("button", { name: "Allow Auto Deploy" }).click();
+
+  await expect(page.getByRole("button", { name: "Updating..." }).first()).toBeVisible();
+  await expect(page.getByText("Governance mutation failed: governance mutation audit persistence failed while allowing Breakout auto deploy")).toBeVisible();
+  await expect(page.getByText("Governance mutation confirmed after backend truth refreshed: Breakout can auto deploy.")).toHaveCount(0);
+});
+
+test("AUDIT-UI-004 control-plane governance disallow confirms refreshed backend truth before success copy", async ({ page, request }) => {
+  await setScenario(request, "control-plane-governance-disallow-success");
+
+  await page.goto("/control-plane");
+  await page.getByRole("button", { name: "Disallow" }).click();
+
+  await expect(page.getByRole("button", { name: "Updating..." }).first()).toBeVisible();
+  await expect(page.getByText("Governance mutation confirmed after backend truth refreshed: Breakout auto deploy disallowed.")).toBeVisible();
 });
 
 test("FLOW-ENTRY-001 strategies execution feed keeps blocked entry reason and no-order-attempt truth visible", async ({ page, request }) => {

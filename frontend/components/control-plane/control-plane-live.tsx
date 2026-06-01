@@ -72,35 +72,70 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
   const [selectedStrategyName, setSelectedStrategyName] = useState<string | null>(null);
   const [pendingGlobalAction, setPendingGlobalAction] = useState<"enable" | "disable" | null>(null);
   const [pendingFamily, setPendingFamily] = useState<string | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [statusNotice, setStatusNotice] = useState<{
+    tone: "neutral" | "warning";
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     setSummary(initialSummary);
     setSummaryError(initialSummaryError);
   }, [initialSummary, initialSummaryError]);
 
+  const loadSummary = async (options?: { markLoading?: boolean }) => {
+    if (options?.markLoading) {
+      setSummaryLoading(true);
+    }
+    try {
+      const nextSummary = await getControlPlaneSummary();
+      setSummary(nextSummary);
+      setSummaryError(null);
+      return {
+        failureDetail: null,
+        summary: nextSummary,
+      };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Failed to load control plane.";
+      setSummaryError(detail);
+      return {
+        failureDetail: detail,
+        summary: null,
+      };
+    } finally {
+      if (options?.markLoading) {
+        setSummaryLoading(false);
+      }
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
+      if (cancelled) {
+        return;
+      }
       setSummaryLoading(true);
+      const nextSummary = await getControlPlaneSummary();
+      if (cancelled) {
+        setSummaryLoading(false);
+        return;
+      }
+      setSummary(nextSummary);
+      setSummaryError(null);
+      setSummaryLoading(false);
+    };
+    const guardedRefresh = async () => {
       try {
-        const nextSummary = await getControlPlaneSummary();
-        if (!cancelled) {
-          setSummary(nextSummary);
-          setSummaryError(null);
-        }
+        await refresh();
       } catch (error) {
         if (!cancelled) {
           setSummaryError(error instanceof Error ? error.message : "Failed to load control plane.");
-        }
-      } finally {
-        if (!cancelled) {
           setSummaryLoading(false);
         }
       }
     };
-    void refresh();
-    const intervalId = window.setInterval(refresh, 5000);
+    void guardedRefresh();
+    const intervalId = window.setInterval(guardedRefresh, 5000);
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
@@ -130,25 +165,38 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
   const openRiskState = summary.open_risk_management_state;
   const openRiskUnavailable = openRiskState == null || openRiskState === "UNAVAILABLE" || openRiskState === "UNKNOWN";
 
-  const refreshSummary = async () => {
-    const nextSummary = await getControlPlaneSummary();
-    setSummary(nextSummary);
-    setSummaryError(null);
-  };
-
   const handleGlobalAutonomy = async (enabled: boolean) => {
     try {
       setPendingGlobalAction(enabled ? "enable" : "disable");
+      setStatusNotice(null);
       await updateOperatorControlState({
         autonomous_control_enabled: enabled,
         reason: enabled
           ? "Operator re-armed governed autonomy from the control plane."
           : "Operator paused governed autonomy from the control plane.",
       });
-      await refreshSummary();
-      setStatusMessage(enabled ? "Autonomy armed." : "Autonomy paused.");
+      const refreshed = await loadSummary();
+      if (refreshed.failureDetail) {
+        setStatusNotice({
+          tone: "warning",
+          message: `Operator control mutation succeeded, but backend truth refresh failed: ${refreshed.failureDetail}`,
+        });
+      } else if (refreshed.summary?.effective_autonomous_control_enabled !== enabled) {
+        setStatusNotice({
+          tone: "warning",
+          message: `Operator control mutation route succeeded, but refreshed backend truth still shows governed autonomy ${enabled ? "paused" : "authorized"}.`,
+        });
+      } else {
+        setStatusNotice({
+          tone: "neutral",
+          message: `Operator control mutation confirmed after backend truth refreshed: governed autonomy ${enabled ? "armed" : "paused"}.`,
+        });
+      }
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "Failed to update operator control.");
+      setStatusNotice({
+        tone: "warning",
+        message: `Operator control mutation failed: ${error instanceof Error ? error.message : "backend operator control truth could not be updated."}`,
+      });
     } finally {
       setPendingGlobalAction(null);
     }
@@ -157,13 +205,33 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
   const handleFamilyAutonomy = async (strategyName: string, enabled: boolean) => {
     try {
       setPendingFamily(strategyName);
+      setStatusNotice(null);
       await updateStrategyGovernance(strategyName, {
         autonomous_operation_allowed: enabled,
       });
-      await refreshSummary();
-      setStatusMessage(enabled ? `${strategyName} can auto deploy.` : `${strategyName} auto deploy disallowed.`);
+      const refreshed = await loadSummary();
+      const refreshedFamily = refreshed.summary?.families.find((family) => family.strategy_name === strategyName);
+      if (refreshed.failureDetail) {
+        setStatusNotice({
+          tone: "warning",
+          message: `Governance mutation succeeded, but backend truth refresh failed: ${refreshed.failureDetail}`,
+        });
+      } else if (!refreshedFamily || refreshedFamily.governance.autonomous_operation_allowed !== enabled) {
+        setStatusNotice({
+          tone: "warning",
+          message: `Governance mutation route succeeded, but refreshed backend truth still shows ${strategyName} auto deploy ${enabled ? "disallowed" : "allowed"}.`,
+        });
+      } else {
+        setStatusNotice({
+          tone: "neutral",
+          message: `Governance mutation confirmed after backend truth refreshed: ${enabled ? `${strategyName} can auto deploy.` : `${strategyName} auto deploy disallowed.`}`,
+        });
+      }
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "Failed to update strategy governance.");
+      setStatusNotice({
+        tone: "warning",
+        message: `Governance mutation failed: ${error instanceof Error ? error.message : "backend governance truth could not be updated."}`,
+      });
     } finally {
       setPendingFamily(null);
     }
@@ -406,7 +474,7 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
             )}
         </Panel>
       </section>
-      {statusMessage ? <div className="console-alert console-alert--neutral">{statusMessage}</div> : null}
+      {statusNotice ? <div className={`console-alert console-alert--${statusNotice.tone}`}>{statusNotice.message}</div> : null}
     </main>
   );
 }

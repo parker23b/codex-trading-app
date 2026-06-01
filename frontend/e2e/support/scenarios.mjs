@@ -1476,6 +1476,108 @@ export function buildScenarioRoutes(name) {
           ),
         ],
       });
+    case "markets-shortlist-remove-failure-retry":
+      return mergeRoutes({
+        "GET /markets/catalogue": [
+          ok({
+            generated_at: TIMESTAMP,
+            instruments: [
+              baseMarketCatalogueRow({
+                shortlisted: true,
+              }),
+            ],
+            summary: {
+              total_count: 1,
+              shortlisted_count: 1,
+              strategy_watchlist_count: 0,
+              streaming_count: 0,
+            },
+          }),
+          ok({
+            generated_at: TIMESTAMP,
+            instruments: [baseMarketCatalogueRow()],
+            summary: {
+              total_count: 1,
+              shortlisted_count: 0,
+              strategy_watchlist_count: 0,
+              streaming_count: 0,
+            },
+          }),
+        ],
+        "GET /strategy-watchlist": [
+          ok({
+            generated_at: TIMESTAMP,
+            limit: 8,
+            active_count: 0,
+            normal_count: 0,
+            streaming_count: 0,
+            protective_count: 0,
+            cap_exceeded_by_protective_coverage: false,
+            instruments: [],
+          }),
+          ok({
+            generated_at: TIMESTAMP,
+            limit: 8,
+            active_count: 0,
+            normal_count: 0,
+            streaming_count: 0,
+            protective_count: 0,
+            cap_exceeded_by_protective_coverage: false,
+            instruments: [],
+          }),
+        ],
+        "GET /markets/overview": [
+          ok({
+            generatedAt: TIMESTAMP,
+            summary: {
+              category: "forex",
+              label: "Forex",
+              description: "Major FX instruments.",
+              status: "OPEN",
+              headline: "Forex open",
+              detail: "Market overview available.",
+              nextTransitionAt: "2026-05-17T17:00:00.000Z",
+              nextTransitionLabel: "Close",
+              tradableCount: 1,
+              activeCount: 0,
+              totalCount: 1,
+            },
+            instruments: [],
+          }),
+          ok({
+            generatedAt: TIMESTAMP,
+            summary: {
+              category: "forex",
+              label: "Forex",
+              description: "Major FX instruments.",
+              status: "OPEN",
+              headline: "Forex open",
+              detail: "Market overview available.",
+              nextTransitionAt: "2026-05-17T17:00:00.000Z",
+              nextTransitionLabel: "Close",
+              tradableCount: 1,
+              activeCount: 0,
+              totalCount: 1,
+            },
+            instruments: [],
+          }),
+        ],
+        "DELETE /watchlist/shortlist/CS.D.EURUSD.MINI.IP": [
+          delayed(
+            response(503, {
+              detail: "shortlist removal failed because operator audit persistence is unavailable",
+            }),
+            400,
+          ),
+          delayed(
+            ok({
+              status: "removed",
+              instrument: "CS.D.EURUSD.MINI.IP",
+            }),
+            400,
+          ),
+        ],
+      });
     case "markets-watchlist-add-refresh-failure":
       return mergeRoutes({
         "GET /markets/catalogue": [
@@ -1698,6 +1800,135 @@ export function buildScenarioRoutes(name) {
           400,
         ),
       });
+    case "markets-watchlist-remove-failure-retry":
+      return mergeRoutes({
+        "GET /markets/catalogue": [
+          ok({
+            generated_at: TIMESTAMP,
+            instruments: [
+              baseMarketCatalogueRow({
+                shortlisted: true,
+                in_strategy_watchlist: true,
+              }),
+            ],
+            summary: {
+              total_count: 1,
+              shortlisted_count: 1,
+              strategy_watchlist_count: 1,
+              streaming_count: 0,
+            },
+          }),
+          ok({
+            generated_at: TIMESTAMP,
+            instruments: [
+              baseMarketCatalogueRow({
+                shortlisted: true,
+                in_strategy_watchlist: false,
+              }),
+            ],
+            summary: {
+              total_count: 1,
+              shortlisted_count: 1,
+              strategy_watchlist_count: 0,
+              streaming_count: 0,
+            },
+          }),
+        ],
+        "GET /strategy-watchlist": [
+          ok({
+            generated_at: TIMESTAMP,
+            limit: 8,
+            active_count: 1,
+            normal_count: 1,
+            streaming_count: 0,
+            protective_count: 0,
+            cap_exceeded_by_protective_coverage: false,
+            instruments: [
+              {
+                instrument: "CS.D.EURUSD.MINI.IP",
+                tier: "TIER1",
+                status: "ACTIVE",
+                asset_class: "FOREX",
+                pinned: false,
+                reason: "strategy_watchlist",
+                reason_detail: {
+                  code: "strategy_watchlist",
+                  label: "Strategy watchlist",
+                  operator_action: "Watchlisted for evaluation only; entry still depends on governance, risk, broker, and market-data gates.",
+                },
+                protective: false,
+                priority_score: 1,
+                requested_frequency: "1s",
+                promotion_expires_at: null,
+                last_streamed_at: null,
+                last_refreshed_at: TIMESTAMP,
+                streamed: false,
+              },
+            ],
+          }),
+          ok({
+            generated_at: TIMESTAMP,
+            limit: 8,
+            active_count: 0,
+            normal_count: 0,
+            streaming_count: 0,
+            protective_count: 0,
+            cap_exceeded_by_protective_coverage: false,
+            instruments: [],
+          }),
+        ],
+        "GET /markets/overview": [
+          ok({
+            generatedAt: TIMESTAMP,
+            summary: {
+              category: "forex",
+              label: "Forex",
+              description: "Major FX instruments.",
+              status: "OPEN",
+              headline: "Forex open",
+              detail: "Market overview available.",
+              nextTransitionAt: "2026-05-17T17:00:00.000Z",
+              nextTransitionLabel: "Close",
+              tradableCount: 1,
+              activeCount: 0,
+              totalCount: 1,
+            },
+            instruments: [],
+          }),
+          ok({
+            generatedAt: TIMESTAMP,
+            summary: {
+              category: "forex",
+              label: "Forex",
+              description: "Major FX instruments.",
+              status: "OPEN",
+              headline: "Forex open",
+              detail: "Market overview available.",
+              nextTransitionAt: "2026-05-17T17:00:00.000Z",
+              nextTransitionLabel: "Close",
+              tradableCount: 1,
+              activeCount: 0,
+              totalCount: 1,
+            },
+            instruments: [],
+          }),
+        ],
+        "DELETE /strategy-watchlist/CS.D.EURUSD.MINI.IP": [
+          delayed(
+            response(503, {
+              detail: "strategy watchlist removal failed because operator audit persistence is unavailable",
+            }),
+            400,
+          ),
+          delayed(
+            ok({
+              status: "removed",
+              instrument: "CS.D.EURUSD.MINI.IP",
+            }),
+            400,
+          ),
+        ],
+      });
     case "control-plane-mutation-refresh-failure":
       return mergeRoutes({
         "GET /control-plane/summary": [
@@ -1705,6 +1936,96 @@ export function buildScenarioRoutes(name) {
           ok(baseControlPlaneSummary()),
           ok(baseControlPlaneSummary()),
           unavailable("control-plane refresh failed after operator control mutation"),
+        ],
+        "PUT /control-plane/operator-state": delayed(
+          ok({
+            configured_autonomous_control_enabled: true,
+            effective_autonomous_control_enabled: false,
+            override_active: true,
+            override_value: false,
+            override_reason: "Operator paused governed autonomy from the control plane.",
+            updated_at: TIMESTAMP,
+          }),
+          400,
+        ),
+      });
+    case "control-plane-arm-success":
+      return mergeRoutes({
+        "GET /control-plane/summary": [
+          ok(
+            baseControlPlaneSummary({
+              autonomous_control_enabled: false,
+              configured_autonomous_control_enabled: false,
+              effective_autonomous_control_enabled: false,
+            }),
+          ),
+          ok(
+            baseControlPlaneSummary({
+              autonomous_control_enabled: false,
+              configured_autonomous_control_enabled: false,
+              effective_autonomous_control_enabled: false,
+            }),
+          ),
+          ok(
+            baseControlPlaneSummary({
+              autonomous_control_enabled: false,
+              configured_autonomous_control_enabled: false,
+              effective_autonomous_control_enabled: false,
+            }),
+          ),
+          ok(baseControlPlaneSummary()),
+        ],
+        "PUT /control-plane/operator-state": delayed(
+          ok({
+            configured_autonomous_control_enabled: true,
+            effective_autonomous_control_enabled: true,
+            override_active: false,
+            override_value: null,
+            override_reason: null,
+            updated_at: TIMESTAMP,
+          }),
+          400,
+        ),
+      });
+    case "control-plane-arm-failure":
+      return mergeRoutes({
+        "GET /control-plane/summary": [
+          ok(
+            baseControlPlaneSummary({
+              autonomous_control_enabled: false,
+              configured_autonomous_control_enabled: false,
+              effective_autonomous_control_enabled: false,
+            }),
+          ),
+          ok(
+            baseControlPlaneSummary({
+              autonomous_control_enabled: false,
+              configured_autonomous_control_enabled: false,
+              effective_autonomous_control_enabled: false,
+            }),
+          ),
+        ],
+        "PUT /control-plane/operator-state": delayed(
+          response(503, {
+            detail: "operator control mutation audit persistence failed while arming governed autonomy",
+          }),
+          400,
+        ),
+      });
+    case "control-plane-pause-success":
+      return mergeRoutes({
+        "GET /control-plane/summary": [
+          ok(baseControlPlaneSummary()),
+          ok(baseControlPlaneSummary()),
+          ok(baseControlPlaneSummary()),
+          ok(
+            baseControlPlaneSummary({
+              effective_autonomous_control_enabled: false,
+              autonomy_override_active: true,
+              autonomy_override_value: false,
+              autonomy_override_reason: "Operator paused governed autonomy from the control plane.",
+            }),
+          ),
         ],
         "PUT /control-plane/operator-state": delayed(
           ok({
@@ -1814,6 +2135,133 @@ export function buildScenarioRoutes(name) {
         "PUT /control-plane/governance/Breakout": delayed(
           response(503, {
             detail: "governance mutation audit persistence failed for Breakout",
+          }),
+          400,
+        ),
+      });
+    case "control-plane-governance-allow-success":
+      return mergeRoutes({
+        "GET /control-plane/summary": [
+          ok(
+            baseControlPlaneSummary({
+              families: [
+                baseFamily({
+                  governance: {
+                    ...baseFamily().governance,
+                    autonomous_operation_allowed: false,
+                  },
+                }),
+              ],
+            }),
+          ),
+          ok(
+            baseControlPlaneSummary({
+              families: [
+                baseFamily({
+                  governance: {
+                    ...baseFamily().governance,
+                    autonomous_operation_allowed: false,
+                  },
+                }),
+              ],
+            }),
+          ),
+          ok(
+            baseControlPlaneSummary({
+              families: [
+                baseFamily({
+                  governance: {
+                    ...baseFamily().governance,
+                    autonomous_operation_allowed: false,
+                  },
+                }),
+              ],
+            }),
+          ),
+          ok(baseControlPlaneSummary()),
+        ],
+        "PUT /control-plane/governance/Breakout": delayed(
+          ok({
+            strategy_name: "Breakout",
+            approval_state: "APPROVED",
+            autonomous_operation_allowed: true,
+            emergency_stop: false,
+            approved_asset_classes: ["FOREX"],
+            approved_instruments: ["CS.D.EURUSD.MINI.IP"],
+            approved_profile_names: ["default"],
+            max_concurrent_deployments: 1,
+            notes: null,
+            updated_at: TIMESTAMP,
+          }),
+          400,
+        ),
+      });
+    case "control-plane-governance-allow-failure":
+      return mergeRoutes({
+        "GET /control-plane/summary": [
+          ok(
+            baseControlPlaneSummary({
+              families: [
+                baseFamily({
+                  governance: {
+                    ...baseFamily().governance,
+                    autonomous_operation_allowed: false,
+                  },
+                }),
+              ],
+            }),
+          ),
+          ok(
+            baseControlPlaneSummary({
+              families: [
+                baseFamily({
+                  governance: {
+                    ...baseFamily().governance,
+                    autonomous_operation_allowed: false,
+                  },
+                }),
+              ],
+            }),
+          ),
+        ],
+        "PUT /control-plane/governance/Breakout": delayed(
+          response(503, {
+            detail: "governance mutation audit persistence failed while allowing Breakout auto deploy",
+          }),
+          400,
+        ),
+      });
+    case "control-plane-governance-disallow-success":
+      return mergeRoutes({
+        "GET /control-plane/summary": [
+          ok(baseControlPlaneSummary()),
+          ok(baseControlPlaneSummary()),
+          ok(baseControlPlaneSummary()),
+          ok(
+            baseControlPlaneSummary({
+              families: [
+                baseFamily({
+                  governance: {
+                    ...baseFamily().governance,
+                    autonomous_operation_allowed: false,
+                  },
+                }),
+              ],
+            }),
+          ),
+        ],
+        "PUT /control-plane/governance/Breakout": delayed(
+          ok({
+            strategy_name: "Breakout",
+            approval_state: "APPROVED",
+            autonomous_operation_allowed: false,
+            emergency_stop: false,
+            approved_asset_classes: ["FOREX"],
+            approved_instruments: ["CS.D.EURUSD.MINI.IP"],
+            approved_profile_names: ["default"],
+            max_concurrent_deployments: 1,
+            notes: null,
+            updated_at: TIMESTAMP,
           }),
           400,
         ),
@@ -2022,6 +2470,27 @@ export function buildScenarioRoutes(name) {
             },
           ],
         }),
+      });
+    case "risk-alert-acknowledge-confirmed":
+      return mergeRoutes({
+        "GET /allocation/alerts": [
+          ok([baseAlert()]),
+          ok([baseAlert()]),
+          ok([
+            baseAlert({
+              state: "ACKNOWLEDGED",
+              acknowledged_at: TIMESTAMP,
+            }),
+          ]),
+        ],
+        "POST /allocation/alerts/5/acknowledge": delayed(
+          ok({
+            id: 5,
+            state: "ACKNOWLEDGED",
+            acknowledged_at: TIMESTAMP,
+          }),
+          400,
+        ),
       });
     default:
       return mergeRoutes({});
