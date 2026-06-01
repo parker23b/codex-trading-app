@@ -20,8 +20,8 @@ The current blocking themes are:
 
 - route-inventory and frontend-contract drift are now machine-guarded for the current route set, so this is no longer a present-tense blocker category; remaining route risk is broader broker-action/operator-evidence breadth rather than hypothetical future undocumented or raw routes
 - current backend durable-audit coverage is now inventory-backed for the present mutation, broker-action, and safety-critical background path set; remaining best-effort events are intentional informational paths, and future broker-action/route risk is now handled by guard tests instead of remaining a present-tense backend blocker
-- frontend operator truth now has browser/e2e coverage for stale, degraded, manual-review, passive-vs-mutation, simulated-vs-broker-confirmed, recovery/adoption provenance, mutation-failure, events attention, test-only reset gating, telemetry degradation, strategy/runtime controls, allocation-alert/control-plane/markets mutation confirmation truth, shortlist/watchlist mutation truth, disconnected/recovered coverage freshness, and unknown freshness states across events/dashboard/live/risk/strategies/AIMEE/control-plane/coverage/markets, but broader event-detail, live/dashboard freshness, and non-covered unsupported-state browser breadth is still incomplete under `AUDIT-UI-006`
-- current CI still does not have a successful `Repo Audit` run proving backend lockfile verification, migration/drift execution, a five-test zero-skip Postgres rehearsal, and backend pytest together
+- frontend operator truth now has browser/e2e coverage for stale, degraded, manual-review, passive-vs-mutation, simulated-vs-broker-confirmed, recovery/adoption provenance, mutation-failure, events attention, test-only reset gating, telemetry degradation, strategy/runtime controls, allocation-alert/control-plane/markets mutation confirmation truth, shortlist/watchlist mutation truth, disconnected/recovered coverage freshness, and unknown freshness states across events/dashboard/live/risk/strategies/AIMEE/control-plane/coverage/markets, but broader event-detail, live/dashboard freshness, and non-covered unsupported-state browser breadth is still incomplete under `AUDIT-UI-006`; the current closure slice was deferred because the latest `Repo Audit` run still failed at the backend lockfile gate
+- current CI still does not have a successful `Repo Audit` run proving backend lockfile verification, migration/drift execution, a five-test zero-skip Postgres rehearsal, and backend pytest together; the newest run is [26772490408](https://github.com/parker23b/codex-trading-app/actions/runs/26772490408), and it failed at `Verify backend lockfiles`
 - covered backend logging/API-error/domain-event redaction is now in place, covered persisted execution/intent/allocation/reconciliation/runtime-recovery/trade/position payloads now sanitize free-text and detail fields before commit, the current operator/API/events identifier boundary now exposes masked display plus stable fingerprint projections instead of raw broker/account/request/runtime/correlation strings, repo-level secret/history scan guardrails now block common local secret/SQLite/dump/test-artifact commits, dependency lock/audit tooling is now repeatable for Python and npm, and versioned Alembic migrations now have both SQLite drift checks and a CI-wired Postgres rehearsal path. Health and telemetry now aggregate the targeted operator degradation states across workers with explicit staleness and worker identity, while keeping non-target diagnostics clearly labelled as current-process only. Broader secrets hygiene, intentional raw internal authority fields, historical cleanup, and a fresh successful CI Postgres rehearsal run remain below readiness grade
 
 The canonical blocker list is in [audit-status.md](audit-status.md).
@@ -75,6 +75,27 @@ This slice improves identifier minimization and operator-safe correlation, but i
   - current GitHub Actions evidence still does not include a post-fix successful five-test Postgres rehearsal with zero skips
   - repository-history cleanup and any needed credential rotation remain manual actions outside this code change
 
+## 2026-06-01 CI Gate Reconciliation Slice
+
+This slice intentionally stopped before frontend edits because the newest CI evidence still failed the backend gate that had to be reconciled first.
+
+- newest overall `Repo Audit` run: [26772490408](https://github.com/parker23b/codex-trading-app/actions/runs/26772490408)
+- exact result: `docs-audit` passed, `frontend-audit` passed, `backend-audit` failed at `Verify backend lockfiles`
+- exact skipped backend steps in that run: `Migration and drift tests`, `Postgres migration rehearsal`, and `Pytest`
+- DB honesty: CI still does not prove a five-test zero-skip Postgres rehearsal, so `AUDIT-DB-001` remains open
+- frontend closure honesty: no new Playwright scenarios were added in this slice; `AUDIT-UI-006` remains open for the same exact residual surfaces
+- local fix in this workspace:
+  - added explicit `greenlet>=1.0.0,<4.0.0` to `backend/pyproject.toml` so backend runtime locks do not drift between local `arm64` and CI Linux `x86_64`
+  - regenerated backend runtime/dev plain plus hashed lockfiles
+  - `./scripts/check_backend_requirements.sh` -> passed with pip-tools warning text only
+  - `backend/.venv/bin/pytest backend/tests -q` -> `540 passed, 5 skipped, 1 warning`
+  - `python3 scripts/check_spec_coverage_matrix.py` -> `PASS`
+  - `git diff --check` -> `PASS`
+- exact remaining `AUDIT-UI-006` surfaces once CI is green again:
+  - events detail recovery/adoption/manual-review lifecycle truth
+  - dashboard/live disconnected or recovered freshness summaries
+  - unsupported or unknown current values on the remaining control-plane, live, and markets summary branches
+
 ## 2026-06-01 Backend Lockfile And Lifecycle Guard Slice
 
 This slice improves backend safety posture, but it does not make the repository live-safe or demo-safe.
@@ -99,7 +120,7 @@ This slice improves backend safety posture, but it does not make the repository 
   - local backend suite result after this slice: `backend/.venv/bin/pytest backend/tests -q` -> `533 passed, 5 skipped, 1 warning`
 - CI/Postgres honesty:
   - latest successful `Repo Audit` run is [26189047732](https://github.com/parker23b/codex-trading-app/actions/runs/26189047732), but it predates the current backend lockfile verification, migration/drift, and Postgres rehearsal workflow steps
-  - latest overall `Repo Audit` run is [26764796067](https://github.com/parker23b/codex-trading-app/actions/runs/26764796067), which failed on 2026-06-01 at `Verify backend lockfiles`
+  - latest overall `Repo Audit` run is [26772490408](https://github.com/parker23b/codex-trading-app/actions/runs/26772490408), which failed on 2026-06-01 at `Verify backend lockfiles`
   - that run skipped `Migration and drift tests`, `Postgres migration rehearsal`, and `Pytest`, so `AUDIT-DB-001` remains open and this repo still cannot claim a successful current-workflow five-test CI Postgres rehearsal with zero skips
 
 ## 2026-05-21 Backend Audit Closure Slice
@@ -267,7 +288,7 @@ Commands run for this slice on 2026-06-01:
 - `git diff --check` -> passed
 - Latest CI results checked on 2026-06-01:
   - latest successful `Repo Audit` run: [26189047732](https://github.com/parker23b/codex-trading-app/actions/runs/26189047732). It predates the current backend lockfile verification, migration/drift, and Postgres rehearsal workflow steps, so it does not prove the current DB-verification path.
-  - latest overall `Repo Audit` run: [26764796067](https://github.com/parker23b/codex-trading-app/actions/runs/26764796067). It failed in `backend-audit` at `Verify backend lockfiles`, and the later `Migration and drift tests`, `Postgres migration rehearsal`, and `Pytest` steps were skipped.
+  - latest overall `Repo Audit` run: [26772490408](https://github.com/parker23b/codex-trading-app/actions/runs/26772490408). It failed in `backend-audit` at `Verify backend lockfiles`, and the later `Migration and drift tests`, `Postgres migration rehearsal`, and `Pytest` steps were skipped.
   - local current-suite result: `backend/.venv/bin/pytest backend/tests -q` -> `540 passed, 5 skipped, 1 warning`, with the five Postgres rehearsal tests skipped because `POSTGRES_REHEARSAL_ADMIN_URL` is not set in this environment.
   - The current available evidence therefore still does not include a successful current-workflow CI run in which the five Postgres rehearsal tests execute with zero skips, so this repo should not claim fresh CI verification for the DB portability slice.
 
@@ -464,7 +485,7 @@ This slice closes the remaining code-actionable frontend parity and provenance f
   - `git diff --check` -> `PASS`
 - CI and DB truth tied to the same pass:
   - latest successful `Repo Audit` run: [26189047732](https://github.com/parker23b/codex-trading-app/actions/runs/26189047732); it predates the current backend lockfile verification, migration/drift, and Postgres rehearsal workflow steps
-  - latest overall `Repo Audit` run: [26764796067](https://github.com/parker23b/codex-trading-app/actions/runs/26764796067); `backend-audit` failed at `Verify backend lockfiles`, and `Migration and drift tests`, `Postgres migration rehearsal`, and `Pytest` were skipped
+  - latest overall `Repo Audit` run: [26772490408](https://github.com/parker23b/codex-trading-app/actions/runs/26772490408); `backend-audit` failed at `Verify backend lockfiles`, and `Migration and drift tests`, `Postgres migration rehearsal`, and `Pytest` were skipped
   - local Postgres rehearsal still reports `5 skipped` here because `POSTGRES_REHEARSAL_ADMIN_URL` is not set
 - Findings fixed or narrowed:
   - `AUDIT-LIFE-005`: fixed for the current frontend/operator provenance scope

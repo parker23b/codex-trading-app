@@ -24,6 +24,8 @@ frozenlist==1.8.0
     # via
     #   aiohttp
     #   aiosignal
+greenlet==3.5.1
+    # via trading-platform-backend (pyproject.toml)
 h11==0.16.0
     # via uvicorn
 httptools==0.8.0
