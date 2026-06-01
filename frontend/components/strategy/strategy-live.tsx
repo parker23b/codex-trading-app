@@ -5,7 +5,12 @@ import { useEffect, useMemo, useState } from "react";
 import { CompactTable, DataIndicator, InspectorDrawer, Panel, StatusPill, StatusStrip } from "@/components/console/primitives";
 import { getBrokerAuthStatus, getExecutions, getStrategies, getStreamHealth, startStrategy, stopStrategy } from "@/lib/api";
 import { formatIdentifierDisplay, formatIdentifierFingerprint, formatInstrumentLabel, formatPrice, formatSignedCurrency } from "@/lib/format";
-import { closeExecutionSourceMeta, executionStatusMeta } from "@/lib/operator-vocabulary";
+import {
+  closeExecutionSourceMeta,
+  controlModeMeta,
+  executionStatusMeta,
+  runtimeModeMeta,
+} from "@/lib/operator-vocabulary";
 import { BrokerAuthStatus, Execution, SafeIdentifier, StrategyDefinition, StreamHealthStatus } from "@/lib/types";
 
 type StrategyResourceErrors = {
@@ -329,6 +334,8 @@ export function StrategyLive({
     return null;
   };
 
+  const recoveryContext = selectedStrategy?.persisted_runtimes?.find((runtime) => runtime.recovery_reason) ?? null;
+
   return (
     <main className="console-page console-page--dense">
       <StatusStrip
@@ -521,6 +528,67 @@ export function StrategyLive({
               </p>
             </div>
 
+            {selectedStrategy.open_positions?.length ? (
+              <div className="detail-block">
+                <span className="console-kicker">Open Risk Book</span>
+                {!(selectedStrategy.active_runtimes?.length ?? 0) ? (
+                  <div className="console-alert console-alert--warning">
+                    Known open risk remains visible even without an active runtime. Do not treat a stopped runtime as flat or resolved.
+                    {recoveryContext?.recovery_reason ? (
+                      <div className="status-note status-note--inline">
+                        Recovery context: {recoveryContext.recovery_reason}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                <CompactTable
+                  dense
+                  rows={selectedStrategy.open_positions}
+                  emptyLabel="No open positions."
+                  getRowTone={() => "warning"}
+                  columns={[
+                    {
+                      key: "instrument",
+                      header: "Instrument",
+                      render: (row) => (
+                        <div className="cell-stack">
+                          <strong>{formatInstrumentLabel(row.instrument)}</strong>
+                          <span className="muted">{`${row.direction} ${row.size} at ${formatPrice(row.open_price, row.instrument)}`}</span>
+                        </div>
+                      ),
+                    },
+                    {
+                      key: "broker",
+                      header: "Broker Ref",
+                      render: (row) => (
+                        <div className="cell-stack">
+                          <span>{formatIdentifierDisplay(row.broker_reference) ?? "Broker reference unavailable"}</span>
+                          {formatIdentifierFingerprint(row.broker_reference) ? (
+                            <span className="muted">{formatIdentifierFingerprint(row.broker_reference)}</span>
+                          ) : null}
+                        </div>
+                      ),
+                    },
+                    {
+                      key: "risk",
+                      header: "Open Risk",
+                      render: (row) => (
+                        <div className="cell-stack">
+                          <StatusPill label={`${row.direction} position`} tone="warning" />
+                          <span className="muted">{row.risk_percent != null ? `${row.risk_percent.toFixed(2)}% risk` : "Risk amount unavailable"}</span>
+                        </div>
+                      ),
+                    },
+                    {
+                      key: "pnl",
+                      header: "Unrealized",
+                      render: (row) => (row.unrealized_pnl != null ? formatSignedCurrency(row.unrealized_pnl) : "n/a"),
+                    },
+                  ]}
+                />
+              </div>
+            ) : null}
+
             {stopConfirmation && stopConfirmation.strategyName === selectedStrategy.name ? (
               <div className="console-alert console-alert--warning">
                 Stop only ends the selected runtime process. Broker-confirmed open risk remains live and may still need an exit-capable runtime, recovery path, or manual review.
@@ -566,13 +634,15 @@ export function StrategyLive({
                         {formatIdentifierFingerprint(row.broker_reference) ? (
                           <span className="muted">{formatIdentifierFingerprint(row.broker_reference)}</span>
                         ) : null}
-                        <span className="muted">{`${row.control_mode ?? "UNKNOWN"} / ${row.runtime_mode ?? "NORMAL"} runtime`}</span>
+                        <span className="muted">{`${controlModeMeta(row.control_mode).label} / ${runtimeModeMeta(row.runtime_mode).label}`}</span>
+                        {row.recovery_reason ? <span className="muted">{row.recovery_reason}</span> : null}
                         <span className="muted">Stopping this runtime does not close broker-confirmed open risk.</span>
                       </div>
                     ) : (
                       <div className="cell-stack">
                         <StatusPill label="watching" tone="positive" />
-                        <span className="muted">{`${row.control_mode ?? "UNKNOWN"} / ${row.runtime_mode ?? "NORMAL"} runtime`}</span>
+                        <span className="muted">{`${controlModeMeta(row.control_mode).label} / ${runtimeModeMeta(row.runtime_mode).label}`}</span>
+                        {row.recovery_reason ? <span className="muted">{row.recovery_reason}</span> : null}
                       </div>
                     ),
                 },

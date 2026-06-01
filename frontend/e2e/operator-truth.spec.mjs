@@ -117,6 +117,16 @@ test("AUDIT-UI-002 risk view keeps unavailable and provisional truth from collap
   await expect(page.getByText("Exact")).toHaveCount(0);
 });
 
+test("AUDIT-LIFE-005 risk view keeps recovered and adopted lifecycle provenance distinct from ordinary opened truth", async ({ page, request }) => {
+  await setScenario(request, "risk-recovery-adoption-truth");
+
+  await page.goto("/risk");
+
+  await expect(page.getByText("Recovered position attached")).toBeVisible();
+  await expect(page.getByText("External position adopted")).toBeVisible();
+  await expect(page.getByText("Position opened")).toHaveCount(0);
+});
+
 test("AUDIT-UI-006 risk alert mutation failure preserves backend detail and does not show clean success", async ({ page, request }) => {
   await setScenario(request, "risk-alert-mutation-failure");
 
@@ -174,7 +184,7 @@ test("FLOW-EXIT-001 strategies view keeps broker-confirmed open-risk stop truth 
 
   await page.goto("/strategies");
 
-  await expect(page.getByText("BUY position")).toBeVisible();
+  await expect(page.getByLabel("BUY position").first()).toBeVisible();
   await expect(page.locator("span.muted").filter({ hasText: "BROKER-OPEN-1" }).first()).toBeVisible();
   await expect(page.getByText("Stopping this runtime does not close broker-confirmed open risk.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Stop Runtime" })).toBeVisible();
@@ -269,12 +279,50 @@ test("FLOW-EXIT-001 strategies keep ambiguous close manual-review truth tied to 
 
   await page.goto("/strategies");
 
-  await expect(page.getByText("BUY position")).toBeVisible();
-  await expect(page.getByText("BROKER-OPEN-2")).toBeVisible();
+  await expect(page.getByLabel("BUY position").first()).toBeVisible();
+  await expect(page.getByText("BRK…OPEN-2").first()).toBeVisible();
   await expect(page.getByText("Stopping this runtime does not close broker-confirmed open risk.")).toBeVisible();
   await page.getByRole("button", { name: "Execution Feed" }).click();
   await expect(page.getByText("NEEDS MANUAL REVIEW")).toBeVisible();
   await expect(page.getByText("Broker close confirmation timed out; open risk still remains live.")).toBeVisible();
+  await expect(page.getByText("Position closed")).toHaveCount(0);
+});
+
+test("AUDIT-LIFE-005 strategies keep recovered open risk visible after runtime stop and preserve safe identifier fingerprints", async ({ page, request }) => {
+  await setScenario(request, "strategies-recovered-open-risk");
+
+  await page.goto("/strategies");
+
+  await expect(page.getByText("Known open risk remains visible even without an active runtime.")).toBeVisible();
+  await expect(page.getByText("Recovered during startup reconciliation from broker-confirmed open position truth.")).toBeVisible();
+  await expect(page.getByText("BRK…RCV-14").first()).toBeVisible();
+  await expect(page.getByText("fp-rcv-14").first()).toBeVisible();
+  await expect(page.getByText("No active runtimes.")).toBeVisible();
+});
+
+test("FLOW-EXIT-001 strategies keep partial close truth tied to remaining visible open risk", async ({ page, request }) => {
+  await setScenario(request, "strategies-partial-close-open-risk");
+
+  await page.goto("/strategies");
+  await page.getByRole("button", { name: "Execution Feed" }).click();
+
+  await expect(page.getByLabel(/Partial fill\./)).toBeVisible();
+  await expect(page.getByText("Close partially filled; remaining open risk stays live until broker reconciliation completes.")).toBeVisible();
+  await expect(page.getByText("Known open risk remains visible even without an active runtime.")).toBeVisible();
+  await expect(page.getByText("BRK…PCL-21").first()).toBeVisible();
+  await expect(page.getByText("Position closed")).toHaveCount(0);
+});
+
+test("FLOW-EXIT-001 strategies keep failed close truth tied to remaining visible open risk", async ({ page, request }) => {
+  await setScenario(request, "strategies-close-failed-open-risk");
+
+  await page.goto("/strategies");
+  await page.getByRole("button", { name: "Execution Feed" }).click();
+
+  await expect(page.getByLabel(/Failed\./)).toBeVisible();
+  await expect(page.getByText("Close rejected by broker; position remains open and requires manual review.")).toBeVisible();
+  await expect(page.getByText("Known open risk remains visible even without an active runtime.")).toBeVisible();
+  await expect(page.getByText("BRK…FCL-22").first()).toBeVisible();
   await expect(page.getByText("Position closed")).toHaveCount(0);
 });
 
@@ -284,10 +332,10 @@ test("AUDIT-UI-006 control-plane view keeps governance, deployment, runtime, and
   await page.goto("/control-plane");
 
   await expect(
-    page.getByLabel("MISALIGNED. Runtime remains on GBP/USD while deployment intends EUR/USD."),
+    page.getByLabel("Mismatch. Runtime remains on GBP/USD while deployment intends EUR/USD."),
   ).toBeVisible();
   await expect(page.getByText("Runtime remains on GBP/USD while deployment intends EUR/USD.")).toBeVisible();
-  await expect(page.getByText("Runtime: MANUAL / EXITS_ONLY active")).toBeVisible();
+  await expect(page.getByText("Runtime: Manual control / Exits-only runtime active")).toBeVisible();
   await expect(page.getByText("Open risk: Open-risk state unavailable")).toBeVisible();
   await expect(page.getByText("No families currently need intervention.")).toHaveCount(0);
 });
@@ -503,7 +551,52 @@ test("FLOW-MARKET-DATA-001 coverage view keeps stale stream distinct from pollin
 
   await expect(page.getByLabel("Stale market data")).toBeVisible();
   await expect(page.getByText("The latest live tick is stale and should not be treated as fresh stream truth.")).toBeVisible();
-  await expect(page.getByText("92.0s")).toBeVisible();
+  await expect(page.getByText("92.0s").first()).toBeVisible();
   await expect(page.getByText("Polling fallback")).toHaveCount(0);
   await expect(page.getByText("Streaming", { exact: true })).toHaveCount(0);
+});
+
+test("FLOW-MARKET-DATA-001 coverage view keeps disconnected stream distinct from stale, fallback, and healthy streaming truth", async ({ page, request }) => {
+  await setScenario(request, "coverage-disconnected-stream");
+
+  await page.goto("/coverage");
+
+  await expect(page.getByLabel("Disconnected", { exact: true })).toBeVisible();
+  await expect(page.getByText("Live stream is disconnected or unavailable for this instrument.")).toBeVisible();
+  await expect(page.getByText("Polling fallback")).toHaveCount(0);
+  await expect(page.getByText("Streaming", { exact: true })).toHaveCount(0);
+});
+
+test("FLOW-MARKET-DATA-001 coverage view keeps recovered stream provenance visible after degradation", async ({ page, request }) => {
+  await setScenario(request, "coverage-stream-recovered");
+
+  await page.goto("/coverage");
+
+  await expect(page.getByLabel("Recovered")).toBeVisible();
+  await expect(page.getByText("Recovered", { exact: true })).toHaveCount(1);
+  await expect(page.getByText("Live stream recovered after degradation; confirm fresh ticks continue before treating the path as stable.")).toBeVisible();
+});
+
+test("AUDIT-LIFE-005 dashboard positions keep unknown broker sync and unavailable broker references visibly degraded", async ({ page, request }) => {
+  await setScenario(request, "dashboard-positions-sync-unknown");
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Positions" }).click();
+
+  await expect(page.getByText("Broker reference unavailable")).toBeVisible();
+  await expect(page.getByText("Sync unavailable")).toBeVisible();
+  await expect(page.getByText("Sync unknown")).toBeVisible();
+  await expect(page.getByText("BRK…UNK-302")).toBeVisible();
+  await expect(page.getByText("fp-unk-302")).toBeVisible();
+  await expect(page.getByText("Broker synced")).toHaveCount(0);
+});
+
+test("AUDIT-LIFE-005 dashboard activity keeps simulated local close provenance distinct from broker-confirmed close truth", async ({ page, request }) => {
+  await setScenario(request, "dashboard-activity-simulated-close");
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Activity" }).click();
+
+  await expect(page.getByText("Simulated local close")).toBeVisible();
+  await expect(page.getByText("Broker confirmed")).toBeVisible();
 });

@@ -305,7 +305,7 @@ export function CoverageLive({ initialCoverage, initialTelemetry, initialOperati
                   header: "State",
                   render: (row) => <StatusPill label={row.is_ok ? "ready" : "blocked"} tone={row.is_ok ? "positive" : "warning"} />,
                 },
-                { key: "quote", header: "Quote", render: (row) => `${row.last_price_age_ms.toFixed(0)}ms` },
+                { key: "quote", header: "Quote", render: (row) => formatAge(row.last_price_age_ms) },
                 { key: "reason", header: "Reason", render: (row) => row.reason ?? "All gates clear." },
               ]}
             />

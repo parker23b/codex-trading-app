@@ -3,6 +3,38 @@ export type BrokerExecutionSource =
   | "SIMULATED_LOCAL_FILL"
   | "SIMULATED_LOCAL_CLOSE";
 
+export type ControlMode = "MANUAL" | "AUTO";
+
+export type RuntimeMode = "NORMAL" | "EXITS_ONLY" | "STOPPED";
+
+export type GovernanceApprovalState =
+  | "NOT_APPROVED"
+  | "APPROVED"
+  | "DISABLED";
+
+export type StrategyDeploymentState =
+  | "NOT_APPROVED"
+  | "APPROVED"
+  | "AUTO_DEPLOYABLE"
+  | "AUTO_DEPLOYED"
+  | "AUTO_PAUSED"
+  | "DEGRADED"
+  | "BLOCKED"
+  | "EMERGENCY_STOPPED";
+
+export type AlignmentStatus =
+  | "ALIGNED"
+  | "MISMATCH"
+  | "NO_DEPLOYMENT";
+
+export type OpenRiskManagementState =
+  | "NO_OPEN_RISK"
+  | "MANAGED"
+  | "EXITS_ONLY"
+  | "UNMANAGED_OPEN_RISK"
+  | "UNAVAILABLE"
+  | "UNKNOWN";
+
 export type BrokerSyncStatus =
   | "CONFIRMED"
   | "PENDING"
@@ -151,8 +183,8 @@ export type StrategyRuntime = {
   current_price?: number | null;
   unrealized_pnl?: number | null;
   recovery_state?: string | null;
-  runtime_mode?: "NORMAL" | "EXITS_ONLY" | "STOPPED" | string | null;
-  control_mode?: "MANUAL" | "AUTO" | string | null;
+  runtime_mode?: RuntimeMode | string | null;
+  control_mode?: ControlMode | string | null;
   deployment_id?: number | null;
   recovery_reason?: string | null;
 };
@@ -185,10 +217,10 @@ export type StrategyDefinition = {
   risk_per_trade: number;
   supported_asset_classes?: string[];
   available_profiles?: string[];
-  governance_approval_state?: string;
+  governance_approval_state?: GovernanceApprovalState | string;
   autonomous_operation_allowed?: boolean;
   emergency_stop?: boolean;
-  deployment_state?: string;
+  deployment_state?: StrategyDeploymentState | string;
   deployment_profile?: string | null;
   deployment_parameters?: Record<string, number>;
   deployment_instrument?: string | null;
@@ -215,8 +247,8 @@ export type StrategyDefinition = {
     last_heartbeat_at?: string | null;
     last_price_seen?: number | null;
     last_price_seen_at?: string | null;
-    control_mode?: "MANUAL" | "AUTO" | string | null;
-    runtime_mode?: "NORMAL" | "EXITS_ONLY" | "STOPPED" | string | null;
+    control_mode?: ControlMode | string | null;
+    runtime_mode?: RuntimeMode | string | null;
     deployment_id?: number | null;
     active_profile_name?: string | null;
     parameters: Record<string, number>;
@@ -234,7 +266,7 @@ export type StrategyMutationStatus = {
 
 export type StrategyGovernanceMutationResponse = {
   strategy_name: string;
-  approval_state: string;
+  approval_state: GovernanceApprovalState | string;
   autonomous_operation_allowed: boolean;
   emergency_stop: boolean;
   approved_asset_classes: string[];
@@ -438,7 +470,7 @@ export type ControlPlaneFamily = {
   supported_asset_classes: string[];
   available_profile_names: string[];
   governance: {
-    approval_state: string;
+    approval_state: GovernanceApprovalState | string;
     autonomous_operation_allowed: boolean;
     emergency_stop: boolean;
     approved_asset_classes: string[];
@@ -451,8 +483,8 @@ export type ControlPlaneFamily = {
     updated_at?: string | null;
   };
   deployment: {
-    state: string;
-    open_risk_management_state?: string | null;
+    state: StrategyDeploymentState | string;
+    open_risk_management_state?: OpenRiskManagementState | string | null;
     open_risk_management_reason?: string | null;
     selected_profile?: string | null;
     selected_profile_parameters: Record<string, number>;
@@ -475,16 +507,16 @@ export type ControlPlaneFamily = {
     active_instrument?: string | null;
     active_profile_name?: string | null;
     active_parameters: Record<string, number>;
-    control_mode?: string | null;
-    runtime_mode?: "NORMAL" | "EXITS_ONLY" | "STOPPED" | string | null;
+    control_mode?: ControlMode | string | null;
+    runtime_mode?: RuntimeMode | string | null;
     recovery_state?: string | null;
     updated_at?: string | null;
     persisted_runtimes: Array<{
       runtime_id: SafeIdentifier | string;
       status: string;
       instrument: string;
-      control_mode?: string | null;
-      runtime_mode?: "NORMAL" | "EXITS_ONLY" | "STOPPED" | string | null;
+      control_mode?: ControlMode | string | null;
+      runtime_mode?: RuntimeMode | string | null;
       active_profile_name?: string | null;
       parameters: Record<string, number>;
       updated_at?: string | null;
@@ -492,7 +524,7 @@ export type ControlPlaneFamily = {
   };
   alignment: {
     is_aligned: boolean | null;
-    status: string;
+    status: AlignmentStatus | string;
     reason: string;
     checks: Array<{
       code: string;
@@ -529,7 +561,7 @@ export type ControlPlaneSummary = {
   exit_eligibility_state?: string | null;
   entry_block_reason?: string | null;
   exit_block_reason?: string | null;
-  open_risk_management_state?: string;
+  open_risk_management_state?: OpenRiskManagementState | string;
   open_risk_management_reason?: string | null;
   counts: Record<string, number>;
   misaligned_count: number;
@@ -622,7 +654,7 @@ export type OperationalTelemetry = {
   exit_eligible?: boolean;
   entry_block_reason?: string | null;
   exit_block_reason?: string | null;
-  open_risk_management_state?: string;
+  open_risk_management_state?: OpenRiskManagementState | string;
   open_risk_management_reason?: string | null;
   audit_write_degraded?: boolean;
   polling_fallback_active?: boolean;

@@ -19,6 +19,13 @@ function delayed(route, delayMs) {
   };
 }
 
+function safeIdentifier(display, fingerprint) {
+  return {
+    display,
+    fingerprint,
+  };
+}
+
 function baseTelemetry(overrides = {}) {
   return {
     status: "ok",
@@ -843,6 +850,106 @@ export function buildScenarioRoutes(name) {
           detail: "backend domain-event persistence failed for alert 5",
         }),
       });
+    case "risk-recovery-adoption-truth":
+      return mergeRoutes({
+        "GET /allocation/intents": ok([
+          {
+            id: 71,
+            strategy_name: "Breakout",
+            family_name: "Breakout",
+            instrument: "CS.D.EURUSD.MINI.IP",
+            direction: "BUY",
+            state: "RECOVERED_POSITION_ATTACHED",
+            signal_time: TIMESTAMP,
+            decision_reason_code: "runtime_recovery",
+            decision_reason: "Recovered broker-confirmed open risk was reattached during startup recovery.",
+            estimated_risk_amount: 48,
+            submitted_risk_amount: 48,
+            fill_derived_risk_amount: 47,
+            risk_truth_confidence: "BROKER_CONFIRMED_AVERAGE_FILL_ESTIMATED",
+            allocation: {},
+            allocation_outcome: {},
+            risk_tracking: {},
+            risk_reconciliation: {},
+            latest_execution: baseExecution({
+              id: 171,
+              phase: "ENTRY",
+              status: "POSITION_OPENED",
+              broker_reference: safeIdentifier("BRK…OVR-71", "fp-rec-71"),
+              average_fill_price: 1.081,
+              filled_size: 1,
+              reason: "Recovered broker open risk remains live after restart.",
+            }),
+            executions: [],
+            position: {
+              id: 71,
+              broker_reference: safeIdentifier("BRK…OVR-71", "fp-rec-71"),
+              instrument: "CS.D.EURUSD.MINI.IP",
+              direction: "BUY",
+              size: 1,
+              open_price: 1.081,
+              current_price: 1.09,
+              unrealized_pnl: 32,
+              risk_percent: 1.1,
+              entry_risk_amount: 47,
+              risk_truth_confidence: "BROKER_CONFIRMED_AVERAGE_FILL_ESTIMATED",
+              open_time: "2026-05-17T08:45:00.000Z",
+              is_open: true,
+            },
+            trade: null,
+            details: {},
+            created_at: TIMESTAMP,
+            updated_at: TIMESTAMP,
+          },
+          {
+            id: 72,
+            strategy_name: "Breakout",
+            family_name: "Breakout",
+            instrument: "CS.D.GBPUSD.MINI.IP",
+            direction: "SELL",
+            state: "EXTERNAL_POSITION_ADOPTED",
+            signal_time: TIMESTAMP,
+            decision_reason_code: "broker_reconciliation_adopted",
+            decision_reason: "Broker position was adopted during reconciliation rather than opened by normal strategy entry.",
+            estimated_risk_amount: 36,
+            submitted_risk_amount: null,
+            fill_derived_risk_amount: null,
+            risk_truth_confidence: "UNKNOWN",
+            allocation: {},
+            allocation_outcome: {},
+            risk_tracking: {},
+            risk_reconciliation: {},
+            latest_execution: baseExecution({
+              id: 172,
+              phase: "ENTRY",
+              status: "NEEDS_MANUAL_REVIEW",
+              broker_reference: safeIdentifier("BRK…OPT-72", "fp-adopt-72"),
+              reason: "Adopted external broker position remains open until local lifecycle catches up.",
+              requires_manual_review: true,
+            }),
+            executions: [],
+            position: {
+              id: 72,
+              broker_reference: safeIdentifier("BRK…OPT-72", "fp-adopt-72"),
+              instrument: "CS.D.GBPUSD.MINI.IP",
+              direction: "SELL",
+              size: 0.8,
+              open_price: 1.245,
+              current_price: 1.238,
+              unrealized_pnl: 21,
+              risk_percent: 0.9,
+              entry_risk_amount: 36,
+              risk_truth_confidence: "UNKNOWN",
+              open_time: "2026-05-17T08:40:00.000Z",
+              is_open: true,
+            },
+            trade: null,
+            details: {},
+            created_at: TIMESTAMP,
+            updated_at: TIMESTAMP,
+          },
+        ]),
+      });
     case "strategies-start-failure-detail":
       return mergeRoutes({
         "GET /strategies": ok([
@@ -1119,7 +1226,7 @@ export function buildScenarioRoutes(name) {
                 instrument: "CS.D.EURUSD.MINI.IP",
                 runtime_key: "Breakout:CS.D.EURUSD.MINI.IP",
                 has_open_position: true,
-                broker_reference: "BROKER-OPEN-2",
+                broker_reference: safeIdentifier("BRK…OPEN-2", "fp-open-2"),
                 direction: "BUY",
                 current_price: 1.09,
                 unrealized_pnl: 35,
@@ -1127,7 +1234,7 @@ export function buildScenarioRoutes(name) {
             ],
             open_positions: [
               basePosition({
-                broker_reference: "BROKER-OPEN-2",
+                broker_reference: safeIdentifier("BRK…OPEN-2", "fp-open-2"),
                 reason: "Close remains under manual review until broker truth is reconciled.",
               }),
             ],
@@ -1178,7 +1285,7 @@ export function buildScenarioRoutes(name) {
                 },
                 alignment: {
                   is_aligned: false,
-                  status: "MISALIGNED",
+                  status: "MISMATCH",
                   reason: "Runtime remains on GBP/USD while deployment intends EUR/USD.",
                   checks: [
                     {
@@ -1193,6 +1300,53 @@ export function buildScenarioRoutes(name) {
             ],
           }),
         ),
+      });
+    case "strategies-recovered-open-risk":
+      return mergeRoutes({
+        "GET /strategies": ok([
+          baseStrategy({
+            status: "STOPPED",
+            current_pnl: 0,
+            last_price: 1.09,
+            price_status: "POSITION",
+            active_instruments: [],
+            active_runtime_count: 0,
+            open_position_count: 1,
+            active_runtimes: [],
+            open_positions: [
+              {
+                broker_reference: safeIdentifier("BRK…RCV-14", "fp-rcv-14"),
+                instrument: "CS.D.EURUSD.MINI.IP",
+                direction: "BUY",
+                size: 1,
+                open_price: 1.08,
+                current_price: 1.09,
+                unrealized_pnl: 28,
+                risk_percent: 1.15,
+              },
+            ],
+            persisted_runtimes: [
+              {
+                runtime_id: safeIdentifier("run…breakout-14", "fp-run-14"),
+                instrument: "CS.D.EURUSD.MINI.IP",
+                status: "STOPPED",
+                recovery_state: "PAUSED",
+                recovery_reason: "Recovered during startup reconciliation from broker-confirmed open position truth.",
+                control_mode: "MANUAL",
+                runtime_mode: "STOPPED",
+                parameters: {},
+              },
+            ],
+          }),
+        ]),
+        "GET /executions": ok([
+          baseExecution({
+            id: 141,
+            status: "POSITION_OPENED",
+            broker_reference: safeIdentifier("BRK…RCV-14", "fp-rcv-14"),
+            reason: "Recovered broker open risk remains live after runtime stop.",
+          }),
+        ]),
       });
     case "coverage-polling-fallback":
       return mergeRoutes({
@@ -2391,6 +2545,192 @@ export function buildScenarioRoutes(name) {
           ],
         }),
       });
+    case "coverage-disconnected-stream":
+      return mergeRoutes({
+        "GET /coverage/summary": ok(
+          baseCoverageSummary({
+            streaming: {
+              active_instruments: [
+                {
+                  instrument: "CS.D.EURUSD.MINI.IP",
+                  tier: "TIER1",
+                  status: "ACTIVE",
+                  asset_class: "FOREX",
+                  pinned: false,
+                  reason: "strategy_watchlist",
+                  reason_detail: null,
+                  protective: false,
+                  priority_score: 1,
+                  requested_frequency: "1s",
+                  promotion_expires_at: null,
+                  last_streamed_at: TIMESTAMP,
+                  last_refreshed_at: TIMESTAMP,
+                  streamed: true,
+                },
+              ],
+              execution_readiness: [
+                {
+                  instrument: "CS.D.EURUSD.MINI.IP",
+                  is_ok: false,
+                  market_open: true,
+                  tradable: true,
+                  quote_fresh: false,
+                  spread_ok: true,
+                  session_valid: false,
+                  dealing_allowed: false,
+                  last_price_age_ms: null,
+                  spread: null,
+                  reason: "stream_disconnected",
+                },
+              ],
+              desired_instruments: ["CS.D.EURUSD.MINI.IP"],
+              pinned_instruments: [],
+              capped_instruments: [],
+              asset_class_usage: {},
+            },
+          }),
+        ),
+        "GET /system/telemetry": ok(
+          baseTelemetry({
+            status: "degraded",
+            stream_connected: false,
+            stream_last_tick_at: null,
+            stream_last_tick_age_ms: null,
+            feed_source_state: "DISCONNECTED",
+            feed_health_state: "FAILED",
+            entry_eligible: false,
+            entry_block_reason: "stream_disconnected",
+            stale_stream_instrument_count: 0,
+            stream_degraded: true,
+            degradation_reasons: ["stream_disconnected"],
+          }),
+        ),
+        "GET /market-data/feed-state": ok({
+          generated_at: TIMESTAMP,
+          instruments: [
+            {
+              instrument: "CS.D.EURUSD.MINI.IP",
+              stream_status: "DISCONNECTED",
+              stream_connected: false,
+              stream_enabled: true,
+              streaming_now: false,
+              desired: true,
+              capped: false,
+              last_tick_at: null,
+              last_tick_age_ms: null,
+              spread: null,
+              price_source: "UNAVAILABLE",
+              stream_reason: {
+                code: "stream_disconnected",
+                label: "Disconnected",
+                operator_action: "Live stream is disconnected or unavailable for this instrument.",
+              },
+              market_status: null,
+              market_error: "stream unavailable",
+              entry_eligibility: "BLOCKED",
+              entry_eligibility_reason: {
+                code: "stream_disconnected",
+                label: "Disconnected",
+                operator_action: "Entry is blocked until stream connectivity returns.",
+              },
+              strategies_may_evaluate: false,
+              active_strategy_runtime_count: 1,
+              watchlist_entry: null,
+            },
+          ],
+        }),
+      });
+    case "coverage-stream-recovered":
+      return mergeRoutes({
+        "GET /coverage/summary": ok(
+          baseCoverageSummary({
+            streaming: {
+              active_instruments: [
+                {
+                  instrument: "CS.D.EURUSD.MINI.IP",
+                  tier: "TIER1",
+                  status: "ACTIVE",
+                  asset_class: "FOREX",
+                  pinned: false,
+                  reason: "strategy_watchlist",
+                  reason_detail: null,
+                  protective: false,
+                  priority_score: 1,
+                  requested_frequency: "1s",
+                  promotion_expires_at: null,
+                  last_streamed_at: TIMESTAMP,
+                  last_refreshed_at: TIMESTAMP,
+                  streamed: true,
+                },
+              ],
+              execution_readiness: [
+                {
+                  instrument: "CS.D.EURUSD.MINI.IP",
+                  is_ok: true,
+                  market_open: true,
+                  tradable: true,
+                  quote_fresh: true,
+                  spread_ok: true,
+                  session_valid: true,
+                  dealing_allowed: true,
+                  last_price_age_ms: 1400,
+                  spread: 0.8,
+                  reason: null,
+                },
+              ],
+              desired_instruments: ["CS.D.EURUSD.MINI.IP"],
+              pinned_instruments: [],
+              capped_instruments: [],
+              asset_class_usage: {},
+            },
+          }),
+        ),
+        "GET /system/telemetry": ok(
+          baseTelemetry({
+            status: "ok",
+            stream_connected: true,
+            stream_last_tick_at: TIMESTAMP,
+            stream_last_tick_age_ms: 1400,
+            feed_source_state: "LIVE",
+            feed_health_state: "HEALTHY",
+            degradation_reasons: [],
+          }),
+        ),
+        "GET /market-data/feed-state": ok({
+          generated_at: TIMESTAMP,
+          instruments: [
+            {
+              instrument: "CS.D.EURUSD.MINI.IP",
+              stream_status: "CONNECTED",
+              stream_connected: true,
+              stream_enabled: true,
+              streaming_now: true,
+              desired: true,
+              capped: false,
+              last_tick_at: TIMESTAMP,
+              last_tick_age_ms: 1400,
+              spread: 0.8,
+              price_source: "STREAM",
+              stream_reason: {
+                code: "stream_recovered",
+                label: "Recovered",
+                operator_action: "Live stream recovered after degradation; confirm fresh ticks continue before treating the path as stable.",
+              },
+              market_status: null,
+              market_error: null,
+              entry_eligibility: "OK",
+              entry_eligibility_reason: {
+                code: "recovered_stream",
+                label: "Recovered",
+                operator_action: "Stream truth recovered, but continue watching freshness and spread stability.",
+              },
+              strategies_may_evaluate: true,
+              active_strategy_runtime_count: 1,
+              watchlist_entry: null,
+            },
+          ],
+        }),
+      });
     case "coverage-unknown-freshness":
       return mergeRoutes({
         "GET /coverage/summary": ok(
@@ -2470,6 +2810,156 @@ export function buildScenarioRoutes(name) {
             },
           ],
         }),
+      });
+    case "dashboard-positions-sync-unknown":
+      return mergeRoutes({
+        "GET /trades/positions": ok([
+          basePosition({
+            id: 301,
+            broker_reference: null,
+            broker_sync_status: "UNAVAILABLE",
+            reason: "Broker reference is unavailable and sync truth is degraded.",
+          }),
+          basePosition({
+            id: 302,
+            instrument: "CS.D.GBPUSD.MINI.IP",
+            broker_reference: safeIdentifier("BRK…UNK-302", "fp-unk-302"),
+            broker_sync_status: "UNKNOWN",
+            risk_truth_confidence: "UNKNOWN",
+            reason: "Broker sync truth is unknown and still requires operator correlation.",
+          }),
+        ]),
+      });
+    case "dashboard-activity-simulated-close":
+      return mergeRoutes({
+        "GET /executions": ok([
+          baseExecution({
+            id: 311,
+            phase: "CLOSE",
+            status: "CLOSE_CONFIRMED",
+            broker_reference: safeIdentifier("CLS…SIM-311", "fp-sim-close-311"),
+            reason: "Local simulated close remains distinct from broker-confirmed close truth.",
+            details: {
+              close_execution_source: "SIMULATED_LOCAL_CLOSE",
+            },
+          }),
+          baseExecution({
+            id: 312,
+            phase: "CLOSE",
+            status: "CLOSE_CONFIRMED",
+            broker_reference: safeIdentifier("CLS…BRK-312", "fp-brk-close-312"),
+            reason: "Broker-confirmed close is preserved separately.",
+            details: {
+              close_execution_source: "BROKER_CONFIRMED",
+            },
+          }),
+        ]),
+      });
+    case "strategies-partial-close-open-risk":
+      return mergeRoutes({
+        "GET /strategies": ok([
+          baseStrategy({
+            status: "STOPPED",
+            current_pnl: 0,
+            last_price: 1.09,
+            price_status: "POSITION",
+            active_instruments: [],
+            active_runtime_count: 0,
+            open_position_count: 1,
+            active_runtimes: [],
+            open_positions: [
+              {
+                broker_reference: safeIdentifier("BRK…PCL-21", "fp-pcl-21"),
+                instrument: "CS.D.EURUSD.MINI.IP",
+                direction: "BUY",
+                size: 0.4,
+                open_price: 1.08,
+                current_price: 1.09,
+                unrealized_pnl: 14,
+                risk_percent: 0.45,
+              },
+            ],
+            persisted_runtimes: [
+              {
+                runtime_id: safeIdentifier("run…partial-21", "fp-run-partial-21"),
+                instrument: "CS.D.EURUSD.MINI.IP",
+                status: "STOPPED",
+                recovery_state: "PAUSED",
+                recovery_reason: "Partial close left remaining broker risk live until reconciliation completes.",
+                control_mode: "MANUAL",
+                runtime_mode: "STOPPED",
+                parameters: {},
+              },
+            ],
+          }),
+        ]),
+        "GET /executions": ok([
+          baseExecution({
+            id: 321,
+            phase: "CLOSE",
+            status: "FILL_PARTIAL",
+            requires_manual_review: true,
+            broker_reference: safeIdentifier("CLS…PCL-21", "fp-close-partial-21"),
+            reason: "Close partially filled; remaining open risk stays live until broker reconciliation completes.",
+            error_message: "Close partially filled; remaining open risk stays live until broker reconciliation completes.",
+            details: {
+              close_execution_source: "BROKER_CONFIRMED",
+            },
+          }),
+        ]),
+      });
+    case "strategies-close-failed-open-risk":
+      return mergeRoutes({
+        "GET /strategies": ok([
+          baseStrategy({
+            status: "STOPPED",
+            current_pnl: 0,
+            last_price: 1.09,
+            price_status: "POSITION",
+            active_instruments: [],
+            active_runtime_count: 0,
+            open_position_count: 1,
+            active_runtimes: [],
+            open_positions: [
+              {
+                broker_reference: safeIdentifier("BRK…FCL-22", "fp-fcl-22"),
+                instrument: "CS.D.EURUSD.MINI.IP",
+                direction: "BUY",
+                size: 1,
+                open_price: 1.08,
+                current_price: 1.09,
+                unrealized_pnl: 12,
+                risk_percent: 1.05,
+              },
+            ],
+            persisted_runtimes: [
+              {
+                runtime_id: safeIdentifier("run…failed-22", "fp-run-failed-22"),
+                instrument: "CS.D.EURUSD.MINI.IP",
+                status: "STOPPED",
+                recovery_state: "PAUSED",
+                recovery_reason: "Failed close left broker-confirmed open risk live and awaiting manual review.",
+                control_mode: "MANUAL",
+                runtime_mode: "STOPPED",
+                parameters: {},
+              },
+            ],
+          }),
+        ]),
+        "GET /executions": ok([
+          baseExecution({
+            id: 322,
+            phase: "CLOSE",
+            status: "FAILED",
+            requires_manual_review: true,
+            broker_reference: safeIdentifier("CLS…FAIL-22", "fp-close-fail-22"),
+            reason: "Close rejected by broker; position remains open and requires manual review.",
+            error_message: "Close rejected by broker; position remains open and requires manual review.",
+            details: {
+              close_execution_source: "BROKER_CONFIRMED",
+            },
+          }),
+        ]),
       });
     case "risk-alert-acknowledge-confirmed":
       return mergeRoutes({

@@ -679,6 +679,11 @@ export function RiskAllocationLive({
                     ),
                   },
                   {
+                    key: "lifecycle",
+                    header: "Lifecycle",
+                    render: (row) => tradeIntentStateMeta(row.state).label,
+                  },
+                  {
                     key: "confidence",
                     header: "Truth",
                     render: (row) => <RiskTruthConfidencePill confidence={row.position?.risk_truth_confidence ?? row.risk_truth_confidence} />,

@@ -74,15 +74,15 @@ test("ARCH-009 operator summary frontend types keep governance, deployment, runt
 
   assert.match(
     frontendSource,
-    /export type ControlPlaneFamily = \{[\s\S]*governance: \{[\s\S]*approval_state: string;[\s\S]*max_concurrent_deployments\?: number \| null;[\s\S]*notes\?: string \| null;[\s\S]*\};[\s\S]*deployment: \{[\s\S]*open_risk_management_state\?: string \| null;[\s\S]*open_risk_management_reason\?: string \| null;[\s\S]*\} \| null;[\s\S]*runtime: \{[\s\S]*control_mode\?: string \| null;[\s\S]*runtime_mode\?: "NORMAL" \| "EXITS_ONLY" \| "STOPPED" \| string \| null;[\s\S]*recovery_state\?: string \| null;/s,
+    /export type ControlPlaneFamily = \{[\s\S]*governance: \{[\s\S]*approval_state: GovernanceApprovalState \| string;[\s\S]*max_concurrent_deployments\?: number \| null;[\s\S]*notes\?: string \| null;[\s\S]*\};[\s\S]*deployment: \{[\s\S]*open_risk_management_state\?: OpenRiskManagementState \| string \| null;[\s\S]*open_risk_management_reason\?: string \| null;[\s\S]*\} \| null;[\s\S]*runtime: \{[\s\S]*control_mode\?: ControlMode \| string \| null;[\s\S]*runtime_mode\?: RuntimeMode \| string \| null;[\s\S]*recovery_state\?: string \| null;/s,
   );
   assert.match(
     frontendSource,
-    /export type StrategyRuntime = \{[\s\S]*recovery_state\?: string \| null;[\s\S]*runtime_mode\?: "NORMAL" \| "EXITS_ONLY" \| "STOPPED" \| string \| null;[\s\S]*control_mode\?: "MANUAL" \| "AUTO" \| string \| null;/s,
+    /export type StrategyRuntime = \{[\s\S]*recovery_state\?: string \| null;[\s\S]*runtime_mode\?: RuntimeMode \| string \| null;[\s\S]*control_mode\?: ControlMode \| string \| null;/s,
   );
   assert.match(
     frontendSource,
-    /export type StrategyDefinition = \{[\s\S]*governance_approval_state\?: string;[\s\S]*deployment_state\?: string;[\s\S]*persisted_runtimes\?: Array<\{[\s\S]*runtime_mode\?: "NORMAL" \| "EXITS_ONLY" \| "STOPPED" \| string \| null;[\s\S]*parameters: Record<string, number>;/s,
+    /export type StrategyDefinition = \{[\s\S]*governance_approval_state\?: GovernanceApprovalState \| string;[\s\S]*deployment_state\?: StrategyDeploymentState \| string;[\s\S]*persisted_runtimes\?: Array<\{[\s\S]*runtime_mode\?: RuntimeMode \| string \| null;[\s\S]*parameters: Record<string, number>;/s,
   );
 });
 
@@ -98,6 +98,6 @@ test("UI-001 and UI-007 control-plane UI keeps missing open-risk truth explicitl
   );
   assert.match(
     controlPlaneSource,
-    /Open-risk state unavailable; do not treat this family as having no open risk\./,
+    /openRiskManagementStateMeta\(familyOpenRiskState\(family\)\)/,
   );
 });

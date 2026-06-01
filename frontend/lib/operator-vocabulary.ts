@@ -1,8 +1,14 @@
 import type {
+  AlignmentStatus,
   BrokerExecutionSource,
   BrokerSyncStatus,
+  ControlMode,
   ExecutionStatus,
+  GovernanceApprovalState,
+  OpenRiskManagementState,
   RiskTruthConfidence,
+  RuntimeMode,
+  StrategyDeploymentState,
   TradeIntentState,
 } from "./types";
 
@@ -163,6 +169,229 @@ export function brokerSyncStatusMeta(
         label: "Sync unknown",
         tone: "negative",
         detail: "Broker sync state is unknown and must not be treated as confirmed.",
+      };
+  }
+}
+
+export function controlModeMeta(
+  mode?: ControlMode | string | null,
+): VocabularyMeta {
+  switch (mode) {
+    case "MANUAL":
+      return {
+        label: "Manual control",
+        tone: "warning",
+        detail: "Runtime ownership is manual and must not be mistaken for autonomous control.",
+      };
+    case "AUTO":
+      return {
+        label: "Autonomous control",
+        tone: "positive",
+        detail: "Runtime ownership is autonomous, subject to governance and operational gates.",
+      };
+    default:
+      return {
+        label: "Control mode unknown",
+        tone: "negative",
+        detail: "Backend did not provide a supported control mode; do not assume manual or autonomous ownership.",
+      };
+  }
+}
+
+export function runtimeModeMeta(
+  mode?: RuntimeMode | string | null,
+): VocabularyMeta {
+  switch (mode) {
+    case "NORMAL":
+      return {
+        label: "Normal runtime",
+        tone: "positive",
+        detail: "Runtime may evaluate its normal entry and exit behavior, subject to backend gates.",
+      };
+    case "EXITS_ONLY":
+      return {
+        label: "Exits-only runtime",
+        tone: "warning",
+        detail: "Runtime is restricted to protective or exit handling and must not be read as entry-capable.",
+      };
+    case "STOPPED":
+      return {
+        label: "Stopped runtime",
+        tone: "inactive",
+        detail: "Runtime process is stopped; any remaining open risk still needs separate visibility and handling.",
+      };
+    default:
+      return {
+        label: "Runtime mode unknown",
+        tone: "negative",
+        detail: "Backend did not provide a supported runtime mode; do not assume normal, exits-only, or stopped state.",
+      };
+  }
+}
+
+export function governanceApprovalStateMeta(
+  state?: GovernanceApprovalState | string | null,
+): VocabularyMeta {
+  switch (state) {
+    case "APPROVED":
+      return {
+        label: "Approved",
+        tone: "positive",
+        detail: "Governance permits this family, but approval alone does not imply deployment or running runtime truth.",
+      };
+    case "NOT_APPROVED":
+      return {
+        label: "Not approved",
+        tone: "inactive",
+        detail: "Governance has not approved autonomous operation for this family.",
+      };
+    case "DISABLED":
+      return {
+        label: "Disabled",
+        tone: "negative",
+        detail: "Governance is explicitly disabled and new autonomous entries must remain blocked.",
+      };
+    default:
+      return {
+        label: "Governance unknown",
+        tone: "negative",
+        detail: "Backend returned an unsupported governance state; do not treat it as approved.",
+      };
+  }
+}
+
+export function deploymentStateMeta(
+  state?: StrategyDeploymentState | string | null,
+): VocabularyMeta {
+  switch (state) {
+    case "NOT_APPROVED":
+      return {
+        label: "Not approved",
+        tone: "inactive",
+        detail: "Deployment is blocked by governance approval and is not deployable truth.",
+      };
+    case "APPROVED":
+      return {
+        label: "Approved",
+        tone: "neutral",
+        detail: "Deployment is approved as intent, but that alone does not imply runtime alignment.",
+      };
+    case "AUTO_DEPLOYABLE":
+      return {
+        label: "Auto deployable",
+        tone: "neutral",
+        detail: "Backend considers the family deployable, but that is not the same as already running.",
+      };
+    case "AUTO_DEPLOYED":
+      return {
+        label: "Auto deployed",
+        tone: "positive",
+        detail: "Deployment intent is active, but runtime alignment should still be checked separately.",
+      };
+    case "AUTO_PAUSED":
+      return {
+        label: "Auto paused",
+        tone: "warning",
+        detail: "Autonomous deployment is paused and should not be mistaken for active entry readiness.",
+      };
+    case "DEGRADED":
+      return {
+        label: "Degraded",
+        tone: "warning",
+        detail: "Deployment is degraded and requires operator attention before it is treated as healthy.",
+      };
+    case "BLOCKED":
+      return {
+        label: "Blocked",
+        tone: "negative",
+        detail: "Deployment is blocked and must not be read as active or ready.",
+      };
+    case "EMERGENCY_STOPPED":
+      return {
+        label: "Emergency stopped",
+        tone: "negative",
+        detail: "Emergency stop is active; new entries are blocked and open-risk handling must stay visible.",
+      };
+    default:
+      return {
+        label: "Deployment unknown",
+        tone: "negative",
+        detail: "Backend returned an unsupported deployment state; do not treat it as healthy or active.",
+      };
+  }
+}
+
+export function alignmentStatusMeta(
+  status?: AlignmentStatus | string | null,
+): VocabularyMeta {
+  switch (status) {
+    case "ALIGNED":
+      return {
+        label: "Aligned",
+        tone: "positive",
+        detail: "Runtime and deployment truth match on the checked fields.",
+      };
+    case "MISMATCH":
+      return {
+        label: "Mismatch",
+        tone: "warning",
+        detail: "Runtime and deployment truth diverge and should not be treated as aligned.",
+      };
+    case "NO_DEPLOYMENT":
+      return {
+        label: "No deployment",
+        tone: "inactive",
+        detail: "No deployment target exists, so alignment truth is unavailable for autonomous deployment.",
+      };
+    default:
+      return {
+        label: "Alignment unknown",
+        tone: "negative",
+        detail: "Backend returned an unsupported alignment state; do not treat it as aligned.",
+      };
+  }
+}
+
+export function openRiskManagementStateMeta(
+  state?: OpenRiskManagementState | string | null,
+): VocabularyMeta {
+  switch (state) {
+    case "NO_OPEN_RISK":
+      return {
+        label: "No open risk",
+        tone: "positive",
+        detail: "Backend reports no known open exposure requiring runtime or reconciliation handling.",
+      };
+    case "MANAGED":
+      return {
+        label: "Managed open risk",
+        tone: "positive",
+        detail: "Known open exposure still exists, but backend reports an active management path.",
+      };
+    case "EXITS_ONLY":
+      return {
+        label: "Exits-only open risk",
+        tone: "warning",
+        detail: "Open exposure remains live and should be managed under exits-only protection.",
+      };
+    case "UNMANAGED_OPEN_RISK":
+      return {
+        label: "Unmanaged open risk",
+        tone: "negative",
+        detail: "Known open exposure lacks a safe active management path and requires operator attention.",
+      };
+    case "UNAVAILABLE":
+      return {
+        label: "Open-risk state unavailable",
+        tone: "negative",
+        detail: "Backend did not provide open-risk management truth; do not treat the state as cleared.",
+      };
+    case "UNKNOWN":
+    default:
+      return {
+        label: "Open-risk state unknown",
+        tone: "negative",
+        detail: "Open-risk management truth is unknown or unsupported and must not be treated as safe.",
       };
   }
 }

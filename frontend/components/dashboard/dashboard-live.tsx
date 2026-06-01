@@ -901,6 +901,18 @@ export function DashboardLive({
                 render: (row) => (row.unrealized_pnl != null ? formatSignedCurrency(row.unrealized_pnl) : "n/a"),
               },
               {
+                key: "broker-ref",
+                header: "Broker Ref",
+                render: (row) => (
+                  <div className="cell-stack">
+                    <span>{formatIdentifierDisplay(row.broker_reference) ?? "Broker reference unavailable"}</span>
+                    {formatIdentifierFingerprint(row.broker_reference) ? (
+                      <span className="muted">{formatIdentifierFingerprint(row.broker_reference)}</span>
+                    ) : null}
+                  </div>
+                ),
+              },
+              {
                 key: "sync",
                 header: "Broker Sync",
                 render: (row) => {
@@ -959,6 +971,21 @@ export function DashboardLive({
               { key: "strategy", header: "Strategy", render: (row) => row.strategy_name },
               { key: "instrument", header: "Instrument", render: (row) => formatInstrumentLabel(row.instrument) },
               { key: "status", header: "Status", render: (row) => row.status.replaceAll("_", " ") },
+              {
+                key: "source",
+                header: "Source",
+                render: (row) => {
+                  const detailSource = row.details?.execution_source;
+                  if (typeof detailSource === "string") {
+                    return closeExecutionSourceMeta(detailSource).label;
+                  }
+                  const closeSource = row.details?.close_execution_source;
+                  if (typeof closeSource === "string") {
+                    return closeExecutionSourceMeta(closeSource).label;
+                  }
+                  return "n/a";
+                },
+              },
               {
                 key: "request",
                 header: "Request",

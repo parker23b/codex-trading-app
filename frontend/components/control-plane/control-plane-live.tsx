@@ -4,6 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 
 import { CompactTable, DataIndicator, Panel, StatusPill, StatusStrip } from "@/components/console/primitives";
 import { getControlPlaneSummary, updateOperatorControlState, updateStrategyGovernance } from "@/lib/api";
+import {
+  alignmentStatusMeta,
+  controlModeMeta,
+  deploymentStateMeta,
+  governanceApprovalStateMeta,
+  openRiskManagementStateMeta,
+  runtimeModeMeta,
+} from "@/lib/operator-vocabulary";
 import { ControlPlaneFamily, ControlPlaneSummary } from "@/lib/types";
 
 type ControlPlaneLiveProps = {
@@ -55,14 +63,12 @@ function familyOpenRiskUnavailable(family: ControlPlaneFamily) {
 }
 
 function familyOpenRiskReason(family: ControlPlaneFamily) {
-  if (!familyOpenRiskUnavailable(family)) {
-    return family.deployment?.open_risk_management_reason ?? null;
-  }
-  return family.deployment?.open_risk_management_reason ?? "Open-risk state unavailable; do not treat this family as having no open risk.";
+  const meta = openRiskManagementStateMeta(familyOpenRiskState(family));
+  return family.deployment?.open_risk_management_reason ?? meta.detail;
 }
 
 function familyOpenRiskLabel(family: ControlPlaneFamily) {
-  return familyOpenRiskUnavailable(family) ? "Open-risk state unavailable" : familyOpenRiskState(family);
+  return openRiskManagementStateMeta(familyOpenRiskState(family)).label;
 }
 
 export function ControlPlaneLive({ initialSummary, initialSummaryError }: ControlPlaneLiveProps) {
@@ -164,6 +170,7 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
   const selectedTone = selectedFamily ? familyTone(summary, selectedFamily) : "inactive";
   const openRiskState = summary.open_risk_management_state;
   const openRiskUnavailable = openRiskState == null || openRiskState === "UNAVAILABLE" || openRiskState === "UNKNOWN";
+  const controlPlaneOpenRiskMeta = openRiskManagementStateMeta(openRiskState);
 
   const handleGlobalAutonomy = async (enabled: boolean) => {
     try {
@@ -292,7 +299,7 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
           },
           {
             label: "Open Risk",
-            value: summaryError ? "-" : openRiskState ?? "UNAVAILABLE",
+            value: summaryError ? "-" : controlPlaneOpenRiskMeta.label,
             tone:
               summaryError
                 ? "inactive"
@@ -303,6 +310,7 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
                   : openRiskState === "EXITS_ONLY"
                     ? "warning"
                     : "positive",
+            meta: summaryError ?? controlPlaneOpenRiskMeta.detail,
           },
         ]}
       />
@@ -358,13 +366,16 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
               {
                 key: "alignment",
                 header: "Alignment",
-                render: (family) => (
-                  <StatusPill
-                    label={family.alignment.status}
-                    tone={familyTone(summary, family)}
-                    title={family.alignment.reason ?? undefined}
-                  />
-                ),
+                render: (family) => {
+                  const alignmentMeta = alignmentStatusMeta(family.alignment.status);
+                  return (
+                    <StatusPill
+                      label={alignmentMeta.label}
+                      tone={familyTone(summary, family)}
+                      title={family.alignment.reason ?? alignmentMeta.detail}
+                    />
+                  );
+                },
               },
               {
                 key: "intent",
@@ -374,15 +385,17 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
               {
                 key: "runtime",
                 header: "Runtime",
-                render: (family) =>
-                  family.runtime.is_running
-                    ? `${family.runtime.runtime_mode ?? "NORMAL"} · ${family.runtime.active_instrument ?? "n/a"}`
-                    : "not running",
+                render: (family) => {
+                  if (!family.runtime.is_running) {
+                    return runtimeModeMeta("STOPPED").label;
+                  }
+                  return `${runtimeModeMeta(family.runtime.runtime_mode).label} · ${family.runtime.active_instrument ?? "n/a"}`;
+                },
               },
               {
                 key: "state",
                 header: "Deploy",
-                render: (family) => family.deployment?.state ?? "UNASSIGNED",
+                render: (family) => deploymentStateMeta(family.deployment?.state ?? "UNKNOWN").label,
               },
               {
                 key: "open-risk",
@@ -415,7 +428,7 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
                   <div className="summary-bar__item">
                     <span>Control</span>
                     <strong>{familyOpenRiskLabel(selectedFamily)}</strong>
-                    <em>{selectedFamily.deployment?.state ?? selectedFamily.alignment.status}</em>
+                    <em>{deploymentStateMeta(selectedFamily.deployment?.state ?? "UNKNOWN").label}</em>
                   </div>
                   <div className="summary-bar__item">
                     <span>Updated</span>
@@ -432,11 +445,16 @@ export function ControlPlaneLive({ initialSummary, initialSummaryError }: Contro
                 <div className="detail-block">
                   <span className="console-kicker">Observed State</span>
                   <p>Permission: {selectedFamily.governance.autonomous_operation_allowed ? "authorized for autonomous deployment" : "not authorized for autonomous deployment"}</p>
-                  <p>Governance: {selectedFamily.governance.approval_state}</p>
-                  <p>Runtime: {selectedFamily.runtime.is_running ? `${selectedFamily.runtime.control_mode ?? "UNKNOWN"} / ${selectedFamily.runtime.runtime_mode ?? "NORMAL"} active` : "not running"}</p>
+                  <p>Governance: {governanceApprovalStateMeta(selectedFamily.governance.approval_state).label}</p>
+                  <p>Alignment: {alignmentStatusMeta(selectedFamily.alignment.status).label}</p>
+                  <p>
+                    Runtime: {selectedFamily.runtime.is_running
+                      ? `${controlModeMeta(selectedFamily.runtime.control_mode).label} / ${runtimeModeMeta(selectedFamily.runtime.runtime_mode).label} active`
+                      : runtimeModeMeta("STOPPED").label}
+                  </p>
                   <p>Instrument: {selectedFamily.runtime.active_instrument ?? selectedFamily.deployment?.selected_instrument ?? "n/a"}</p>
                   <p>Open risk: {familyOpenRiskLabel(selectedFamily)}</p>
-                  <p>Deployment: {selectedFamily.deployment?.state ?? "UNASSIGNED"}</p>
+                  <p>Deployment: {deploymentStateMeta(selectedFamily.deployment?.state ?? "UNKNOWN").label}</p>
                 </div>
 
                 <div className="console-inline-actions">

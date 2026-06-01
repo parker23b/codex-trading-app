@@ -153,6 +153,129 @@ test("AUDIT-005 backend and frontend keep trade intent state parity", () => {
   assert.deepEqual(new Set(frontendValues), new Set(backendValues));
 });
 
+test("AUDIT-005 backend and frontend keep governance approval state parity", () => {
+  const backendSource = readFileSync(
+    path.join(repoRoot, "backend", "app", "models", "strategy_governance.py"),
+    "utf8",
+  );
+  const frontendSource = readFileSync(
+    path.join(frontendRoot, "lib", "types.ts"),
+    "utf8",
+  );
+
+  const backendValues = extractPythonEnumValues(
+    backendSource,
+    /class GovernanceApprovalState[\s\S]*?class StrategyFamilyGovernance/s,
+  );
+  const frontendValues = extractQuotedValues(
+    frontendSource,
+    /export type GovernanceApprovalState =[\s\S]*?;/s,
+  );
+
+  assert.deepEqual(new Set(frontendValues), new Set(backendValues));
+});
+
+test("AUDIT-005 backend and frontend keep deployment state parity", () => {
+  const backendSource = readFileSync(
+    path.join(repoRoot, "backend", "app", "models", "strategy_deployment.py"),
+    "utf8",
+  );
+  const frontendSource = readFileSync(
+    path.join(frontendRoot, "lib", "types.ts"),
+    "utf8",
+  );
+
+  const backendValues = extractPythonEnumValues(
+    backendSource,
+    /class StrategyDeploymentState[\s\S]*?class StrategyDeployment/s,
+  );
+  const frontendValues = extractQuotedValues(
+    frontendSource,
+    /export type StrategyDeploymentState =[\s\S]*?;/s,
+  );
+
+  assert.deepEqual(new Set(frontendValues), new Set(backendValues));
+});
+
+test("AUDIT-005 frontend alignment and open-risk vocabularies match current backend read-model states", () => {
+  const controlPlaneSource = readFileSync(
+    path.join(repoRoot, "backend", "app", "services", "control_plane_service.py"),
+    "utf8",
+  );
+  const operationalStateSource = readFileSync(
+    path.join(repoRoot, "backend", "app", "services", "operational_state_service.py"),
+    "utf8",
+  );
+  const frontendSource = readFileSync(
+    path.join(frontendRoot, "lib", "types.ts"),
+    "utf8",
+  );
+
+  const backendAlignmentValues = new Set(
+    [...controlPlaneSource.matchAll(/"status": "(ALIGNED|MISMATCH|NO_DEPLOYMENT)"/g)].map((match) => match[1]),
+  );
+  const frontendAlignmentValues = new Set(
+    extractQuotedValues(frontendSource, /export type AlignmentStatus =[\s\S]*?;/s),
+  );
+
+  assert.deepEqual(frontendAlignmentValues, backendAlignmentValues);
+
+  const backendOpenRiskValues = new Set(extractPythonEnumValues(
+    operationalStateSource,
+    /class OpenRiskManagementState[\s\S]*?class OperationalStateSnapshot/s,
+  ));
+  const frontendOpenRiskValues = new Set(
+    extractQuotedValues(frontendSource, /export type OpenRiskManagementState =[\s\S]*?;/s),
+  );
+
+  assert.deepEqual(
+    frontendOpenRiskValues,
+    new Set([...backendOpenRiskValues, "UNAVAILABLE", "UNKNOWN"]),
+  );
+});
+
+test("AUDIT-005 frontend runtime and control vocabularies match documented backend states", () => {
+  const stateMachineSource = readFileSync(
+    path.join(repoRoot, "docs", "spec", "07-state-machines.md"),
+    "utf8",
+  );
+  const frontendSource = readFileSync(
+    path.join(frontendRoot, "lib", "types.ts"),
+    "utf8",
+  );
+
+  const backendRuntimeValues = new Set(
+    [...stateMachineSource.matchAll(/- `(NORMAL|EXITS_ONLY|STOPPED)`/g)].map((match) => match[1]),
+  );
+  const frontendRuntimeValues = new Set(
+    extractQuotedValues(frontendSource, /export type RuntimeMode =[\s\S]*?;/s),
+  );
+  assert.deepEqual(frontendRuntimeValues, backendRuntimeValues);
+
+  const frontendControlValues = new Set(
+    extractQuotedValues(frontendSource, /export type ControlMode =[\s\S]*?;/s),
+  );
+  assert.deepEqual(frontendControlValues, new Set(["MANUAL", "AUTO"]));
+});
+
+test("AUDIT-005 browser-covered control-plane and strategy surfaces use shared operator vocabulary helpers", () => {
+  const strategySource = readFileSync(
+    path.join(frontendRoot, "components", "strategy", "strategy-live.tsx"),
+    "utf8",
+  );
+  const controlPlaneSource = readFileSync(
+    path.join(frontendRoot, "components", "control-plane", "control-plane-live.tsx"),
+    "utf8",
+  );
+
+  assert.match(strategySource, /controlModeMeta\(row\.control_mode\)/);
+  assert.match(strategySource, /runtimeModeMeta\(row\.runtime_mode\)/);
+  assert.match(controlPlaneSource, /alignmentStatusMeta\(family\.alignment\.status\)/);
+  assert.match(controlPlaneSource, /governanceApprovalStateMeta\(selectedFamily\.governance\.approval_state\)/);
+  assert.match(controlPlaneSource, /deploymentStateMeta\(selectedFamily\.deployment\?\.state/);
+  assert.match(controlPlaneSource, /openRiskManagementStateMeta\(familyOpenRiskState\(family\)\)/);
+});
+
 test("UI-005 unknown backend provenance values render unknown or degraded instead of healthy truth", () => {
   const { vocabulary } = compileOperatorVocabularyModule();
 
@@ -175,5 +298,35 @@ test("UI-005 unknown backend provenance values render unknown or degraded instea
     label: "Broker Magic",
     tone: "negative",
     detail: "Backend returned an unsupported intent state; do not treat it as healthy or exact.",
+  });
+  assert.deepEqual(vocabulary.controlModeMeta("BROKER_MAGIC"), {
+    label: "Control mode unknown",
+    tone: "negative",
+    detail: "Backend did not provide a supported control mode; do not assume manual or autonomous ownership.",
+  });
+  assert.deepEqual(vocabulary.runtimeModeMeta("BROKER_MAGIC"), {
+    label: "Runtime mode unknown",
+    tone: "negative",
+    detail: "Backend did not provide a supported runtime mode; do not assume normal, exits-only, or stopped state.",
+  });
+  assert.deepEqual(vocabulary.governanceApprovalStateMeta("BROKER_MAGIC"), {
+    label: "Governance unknown",
+    tone: "negative",
+    detail: "Backend returned an unsupported governance state; do not treat it as approved.",
+  });
+  assert.deepEqual(vocabulary.deploymentStateMeta("BROKER_MAGIC"), {
+    label: "Deployment unknown",
+    tone: "negative",
+    detail: "Backend returned an unsupported deployment state; do not treat it as healthy or active.",
+  });
+  assert.deepEqual(vocabulary.alignmentStatusMeta("BROKER_MAGIC"), {
+    label: "Alignment unknown",
+    tone: "negative",
+    detail: "Backend returned an unsupported alignment state; do not treat it as aligned.",
+  });
+  assert.deepEqual(vocabulary.openRiskManagementStateMeta("BROKER_MAGIC"), {
+    label: "Open-risk state unknown",
+    tone: "negative",
+    detail: "Open-risk management truth is unknown or unsupported and must not be treated as safe.",
   });
 });
