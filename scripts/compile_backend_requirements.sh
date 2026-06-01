@@ -7,8 +7,19 @@ BACKEND_DIR="$ROOT_DIR/backend"
 PIP_TOOLS_CACHE_DIR="${PIP_TOOLS_CACHE_DIR:-$ROOT_DIR/.tmp/pip-tools-cache}"
 
 if [[ -z "${PYTHON_BIN:-}" ]]; then
-  if [[ -x "$BACKEND_DIR/.venv/bin/python" ]]; then
-    PYTHON_BIN="$BACKEND_DIR/.venv/bin/python"
+  VENV_PYTHON="$BACKEND_DIR/.venv/bin/python"
+  VENV_PYTHON_VERSION=""
+  if [[ -x "$VENV_PYTHON" ]]; then
+    VENV_PYTHON_VERSION="$("$VENV_PYTHON" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+  fi
+
+  if [[ "$VENV_PYTHON_VERSION" == "3.12" ]]; then
+    PYTHON_BIN="$VENV_PYTHON"
+  elif command -v python3.12 >/dev/null 2>&1; then
+    # Keep lockfile generation aligned with the Python 3.12 toolchain used in CI.
+    PYTHON_BIN="$(command -v python3.12)"
+  elif [[ -x "$VENV_PYTHON" ]]; then
+    PYTHON_BIN="$VENV_PYTHON"
   elif command -v python3 >/dev/null 2>&1; then
     PYTHON_BIN="$(command -v python3)"
   else
