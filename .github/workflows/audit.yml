@@ -18,6 +18,9 @@ jobs:
             - name: Spec coverage matrix check
               run: python3 scripts/check_spec_coverage_matrix.py
 
+            - name: Audit status consistency check
+              run: python3 scripts/check_audit_status_consistency.py
+
     backend-audit:
         name: backend-audit
         runs-on: ubuntu-latest

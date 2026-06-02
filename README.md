@@ -8,6 +8,8 @@ InvestMate is **not ready for live or demo broker dealing**.
 
 Use this repository for local development, UI review, strategy research, broker-read investigation, and smoke testing only. Keep `IG_TRADING_ENABLED=false`. Do not enable real broker dealing until the open readiness blockers in [docs/audit-status.md](docs/audit-status.md) are fixed and verified.
 
+A local UI/research demo with dealing disabled is acceptable under the posture in [docs/readiness.md](docs/readiness.md).
+
 Read the details in [docs/readiness.md](docs/readiness.md).
 
 ## What This Is
@@ -181,11 +183,11 @@ Useful backend startup checks:
 
 The short version:
 
-- backend mutation and broker-adjacent routes do not yet have a production-grade auth boundary
-- `/testing/reset-history` is destructive and not yet production-gated
-- broker confirmation ambiguity, mutation/test-route auth gaps, and duplicate runtime-loop risks still have P0 findings
-- database migrations now have SQLite drift checks plus a Postgres rehearsal path, but unversioned non-SQLite legacy databases still require manual export/import or a reviewed one-off migration and targeted index assertions remain necessary for some dialect-specific structures
-- route, frontend, full-stack, broker-fake, domain-event, migration, dependency, and observability evidence remains incomplete
+- a supervised broker-connected demo is not automatic; use a fresh versioned database and resolve the manual security posture in [docs/readiness.md](docs/readiness.md) first
+- repository-history cleanup and any required credential rotation remain manual actions
+- unversioned legacy non-SQLite databases still require manual upgrade or a reviewed one-off migration path
+- stronger supply-chain provenance and broader host/container dependency scanning remain future production hardening
+- broader evidence breadth will still need to grow as new operator surfaces and broker-connected workflows evolve
 
 The source of truth is [docs/audit-status.md](docs/audit-status.md).
 

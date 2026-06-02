@@ -89,6 +89,21 @@ Read-only verification progression:
 
 Do not enable real broker dealing from this repository state. `BROKER_MODE=DEMO` does not make broker-dealing tests safe while readiness blockers remain open.
 
+## Broker-Connected Demo Posture
+
+For any supervised broker-connected demo:
+
+1. Start with a fresh versioned database. Do not reuse an unversioned non-SQLite database unless a reviewed migration path exists.
+2. Run the final smoke test with `IG_TRADING_ENABLED=false` first.
+3. Confirm test-only controls remain gated unless you are in an explicit dev/test workflow.
+4. Only then enable broker connectivity for the supervised session you intend to observe.
+
+Manual decisions remain outside the repo:
+
+- purge historical SQLite DB blobs before broader sharing or publication
+- rotate any local/demo credentials if the repository or workstation state was shared
+- do not claim stronger supply-chain attestation than the current hash, audit, and SBOM controls actually provide
+
 ## Main Surfaces
 
 - `/` - overview dashboard for positions, executions, broker state, stream health, coverage, and control-plane summary.
