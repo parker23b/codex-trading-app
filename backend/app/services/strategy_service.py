@@ -251,7 +251,7 @@ class StrategyService:
                     "win_rate": round((win_count / trade_count) * 100, 2)
                     if trade_count
                     else 0.0,
-                    "account_type": self.settings.broker_mode,
+                    "account_type": self.settings.broker_environment.value,
                     "position_size": metadata.position_size,
                     "risk_per_trade": metadata.risk_per_trade,
                     "supported_asset_classes": list(metadata.supported_asset_classes),

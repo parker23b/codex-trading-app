@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from sqlmodel import Session
+
 from app.core.config import get_settings
 from app.core.instrument_catalog import InstrumentDefinition, list_market_instruments
 from app.services.health_service import get_health_service
@@ -22,7 +24,8 @@ class RegimeSuitabilityService:
     ACTIVITY_SCORES = {"HIGH": 0.25, "MEDIUM": 0.15, "LOW": 0.05}
     HEALTH_SCORES = {"ok": 0.25, "degraded": 0.1, "critical": 0.0}
 
-    def __init__(self) -> None:
+    def __init__(self, session: Session | None = None) -> None:
+        self.session = session
         self.settings = get_settings()
         self.market_status_service = get_market_status_service()
         self.health_service = get_health_service()
@@ -85,7 +88,9 @@ class RegimeSuitabilityService:
         approved_asset_classes: list[str],
         approved_instruments: list[str],
     ) -> DeploymentCandidate | None:
-        health_status = str(self.health_service.get_health_report()["status"])
+        health_status = str(
+            self.health_service.get_health_report(session=self.session)["status"]
+        )
         candidates = self.shortlist_candidates(
             metadata=metadata,
             approved_asset_classes=approved_asset_classes,

@@ -106,13 +106,36 @@ test("AUDIT-UI-007 backend-unavailable telemetry fallback does not assert no ope
   assert.doesNotMatch(telemetryFallback, /open_risk_management_state:\s*"NO_OPEN_RISK"/);
 });
 
-test("AUDIT-UI-007 nav does not hardcode demo environment without backend source truth", () => {
+test("AUDIT-UI-007 nav uses backend-owned broker environment truth instead of a hardcoded unknown account env card", () => {
   const navSource = readFrontendFile("components/app-nav.tsx");
 
-  assert.match(navSource, /Account Env/);
-  assert.match(navSource, /Unknown/);
-  assert.match(navSource, /Account environment is unavailable/);
-  assert.doesNotMatch(navSource, /<strong>\s*Demo\s*<\/strong>/);
+  assert.match(navSource, /Broker Env/);
+  assert.match(navSource, /getBrokerEnvironmentStatus/);
+  assert.match(navSource, /CONFIGURATION INVALID/);
+  assert.match(navSource, /ENVIRONMENT UNKNOWN/);
+  assert.doesNotMatch(navSource, /Account Env/);
+  assert.doesNotMatch(navSource, /Account environment is unavailable/);
+});
+
+test("AUDIT-UI-007 frontend does not keep a hardcoded live mode fallback or infer broker environment from URL strings", () => {
+  const apiSource = readFrontendFile("lib/api.ts");
+  const productionSources = listFrontendFiles("app")
+    .concat(listFrontendFiles("components"))
+    .concat(listFrontendFiles("lib"))
+    .filter((filePath) => /\.(tsx?|mjs)$/.test(filePath) && !filePath.startsWith("tests/"));
+
+  assert.match(apiSource, /export async function getBrokerEnvironmentStatus/);
+  assert.doesNotMatch(apiSource, /type BackendMode/);
+  assert.doesNotMatch(apiSource, /return "live";/);
+
+  const forbiddenUrlInference = productionSources.flatMap((filePath) => {
+    const source = readFrontendFile(filePath);
+    return Array.from(
+      source.matchAll(/demo-api\.ig\.com|api\.ig\.com\/gateway\/deal|environment.*url/gi),
+      (match) => `${filePath}: ${match[0]}`,
+    );
+  });
+  assert.deepEqual(forbiddenUrlInference, []);
 });
 
 test("AUDIT-UI-007 API client does not expose silent fallback helper", () => {

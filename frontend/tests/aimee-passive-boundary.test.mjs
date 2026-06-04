@@ -49,7 +49,10 @@ test("AIMEE-011 passive frontend AIMEE paths never opt into mutation-like review
 test("TEST-016 AIMEE advisory question API is an explicit POST mutation with backend detail preservation", () => {
   const apiSource = readFrontendFile("lib/api.ts");
   const askQuestion = extractFunction(apiSource, "askOperationalQuestion");
-  const requestHelper = apiSource.slice(apiSource.indexOf("async function request"), apiSource.indexOf("export async function getBackendMode"));
+  const requestHelper = apiSource.slice(
+    apiSource.indexOf("async function request"),
+    apiSource.indexOf("export async function getTrades"),
+  );
 
   assert.match(askQuestion, /request<OperationalQuestionReviewResponse>\("\/reviews\/questions"/);
   assert.match(askQuestion, /method:\s*"POST"/);

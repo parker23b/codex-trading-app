@@ -22,7 +22,7 @@ class OperationalTelemetryService:
 
     def get_summary(self) -> dict[str, object]:
         now = datetime.now(UTC)
-        health_report = self.health_service.get_health_report()
+        health_report = self.health_service.get_health_report(session=self.session)
         details = health_report["details"]
         stream_health = get_ig_streaming_service().get_health()
         operational_state = self.operational_state_service.get_summary()

@@ -1,13 +1,15 @@
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
+from sqlmodel import Session
 
 from app.api.contracts.identifiers import IdentifierProjection
 from app.core.identifier_policy import (
     identifier_matches_fingerprint,
     project_identifier,
 )
+from app.db.session import get_session
 from app.models.domain_event import DomainEvent
 from app.services.domain_event_service import domain_event_service
 
@@ -68,6 +70,7 @@ def _serialize_event(event: DomainEvent) -> DomainEventResponse:
 
 @router.get("/events", response_model=list[DomainEventResponse])
 def list_events(
+    session: Session = Depends(get_session),
     limit: int = Query(default=100, ge=1, le=500),
     event_type: str | None = Query(default=None),
     error_type: str | None = Query(default=None),
@@ -81,6 +84,7 @@ def list_events(
     until: datetime | None = Query(default=None),
 ) -> list[DomainEventResponse]:
     events = domain_event_service.list_events(
+        session=session,
         limit=limit,
         event_type=event_type,
         error_type=error_type,
@@ -104,8 +108,10 @@ def list_events(
 
 
 @router.get("/events/{event_id}", response_model=DomainEventResponse)
-def get_event(event_id: int) -> DomainEventResponse:
-    event = domain_event_service.get_event(event_id)
+def get_event(
+    event_id: int, session: Session = Depends(get_session)
+) -> DomainEventResponse:
+    event = domain_event_service.get_event(event_id, session=session)
     if event is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

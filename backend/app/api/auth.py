@@ -26,8 +26,17 @@ def requires_operator_auth(
     method: str,
     path: str,
     query_params: Mapping[str, str] | None = None,
+    settings: Settings | None = None,
 ) -> bool:
     normalized_method = method.upper()
+    active_settings = settings or get_settings()
+
+    if path.startswith("/testing/"):
+        return (
+            normalized_method in MUTATING_METHODS
+            and active_settings.testing_routes_can_register
+        )
+
     if normalized_method in MUTATING_METHODS:
         return True
     if normalized_method != "GET":

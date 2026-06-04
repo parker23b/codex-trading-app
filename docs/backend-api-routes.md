@@ -4,14 +4,14 @@ This document is rendered from the checked-in route manifest in `backend/app/api
 
 ## Current inventory
 
-- Registered route count: `60` total (`59` always-on, `1` conditional test-only).
-- Frontend-consumed route families: `43`.
+- Registered route count: `61` total (`60` always-on, `1` conditional test-only).
+- Frontend-consumed route families: `44`.
 - Query-triggered active-read variants: `6`.
 - Reviewed raw-response exceptions: `3`.
 
 ## Classification counts
 
-- `PASSIVE_READ`: `39`
+- `PASSIVE_READ`: `40`
 - `ACTIVE_READ_REFRESH`: `0`
 - `BROKER_READ`: `6`
 - `MUTATION`: `14`
@@ -62,6 +62,7 @@ This document is rendered from the checked-in route manifest in `backend/app/api
 | GET | `/reviews/trades/{trade_id}/postmortem` | `app.api.routes.ai_reviewer.get_trade_postmortem` | `PASSIVE_READ with ACTIVE_READ_REFRESH variant(s)` | `operator` | None | Explicit model: TradePostMortemReviewResponse | Default trade postmortem is a passive preview. Active-read variants: `?persist=true` -> Explicit trade-postmortem archival persists a GeneratedReviewRecord. |
 | GET | `/strategies` | `app.api.routes.strategies.list_strategies` | `PASSIVE_READ` | `operator` | `getStrategies` | Explicit model: list[StrategySummaryResponse] | Strategy-summary projection. |
 | GET | `/strategy-watchlist` | `app.api.routes.markets.get_strategy_watchlist` | `PASSIVE_READ` | `operator` | `getStrategyWatchlist` | Explicit model: StrategyWatchlistResponse | Strategy-watchlist projection with sync=false. |
+| GET | `/system/broker-environment` | `app.api.routes.health.broker_environment_status` | `PASSIVE_READ` | `internal/diagnostic` | `getBrokerEnvironmentStatus` | Explicit model: BrokerEnvironmentStatusResponse | Backend-owned broker environment and dealing status projection. |
 | GET | `/system/health` | `app.api.routes.health.system_health_check` | `PASSIVE_READ` | `internal/diagnostic` | None | Explicit model: SystemHealthResponse | Aggregated health projection. |
 | GET | `/system/limits` | `app.api.routes.system.get_system_operating_limits` | `PASSIVE_READ` | `operator` | `getSystemOperatingLimits` | Explicit model: SystemOperatingLimitsResponse | Settings and operating-limits projection. |
 | GET | `/system/telemetry` | `app.api.routes.health.operational_telemetry` | `PASSIVE_READ` | `internal/diagnostic` | `getOperationalTelemetry`, `getBrokerAuthStatus` | Explicit model: OperationalTelemetryResponse | Aggregated telemetry projection. |

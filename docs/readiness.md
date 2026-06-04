@@ -1,87 +1,73 @@
 # Readiness And Safe Usage
 
-InvestMate is **not ready for live trading** and is **not automatically ready for a supervised broker-connected demo**.
+InvestMate is **not ready for live trading**.
 
-A local UI/research demo with broker dealing disabled is currently acceptable when the safe posture below is followed.
+The current repository state is **ready for a human-supervised IG demo smoke test after sign-off**. That readiness claim is intentionally narrow:
 
-## Current CI Truth
+- it does not approve unattended autonomy
+- it does not approve live dealing
+- it does not remove manual security and operations sign-offs
 
-The newest successful GitHub Actions `Repo Audit` run is [26776683955](https://github.com/parker23b/codex-trading-app/actions/runs/26776683955).
+## Current verified supervised-demo posture
 
-- `Verify backend lockfiles`: passed
-- `Migration and drift tests`: passed
-- `Postgres migration rehearsal`: passed with exactly `5 passed` and zero skips
-- backend `Pytest`: passed
+The 2026-06-04 remediation pass closed the current code blockers for a supervised IG demo smoke test:
 
-Advisory annotations still exist in that run, including Node 20 deprecation warnings and non-blocking lint/type warnings, but they do not negate the successful required backend verification path above.
+1. `IG_API_BASE_URL` is the single source of truth for broker environment.
+2. Only these canonical gateways are accepted:
+   - demo: `https://demo-api.ig.com/gateway/deal`
+   - live: `https://api.ig.com/gateway/deal`
+3. Live dealing now fails closed unless `IG_LIVE_TRADING_ACKNOWLEDGED=true`.
+4. `/system/broker-environment` exposes backend-owned environment, endpoint classification, and dealing truth.
+5. Test-only backend routes default to disabled and cannot register in production-like or live-dealing posture.
+6. `HealthService` now uses the active injected database context instead of a hidden module-global engine.
+7. Backend lockfile regeneration and freshness checks are green again.
 
-## Current Closure Inventory
+## Local verification snapshot
 
-There is **no current code-actionable P0 or P1 defect** in the reviewed closure slice.
+The current local verification record is captured in [docs/demo-trading-readiness-audit.md](demo-trading-readiness-audit.md).
 
-The remaining items are one or more of: documented limitations, manual security actions, or future production hardening.
+Highlights from the 2026-06-04 run:
 
-| Finding | Classification | Current meaning |
-| --- | --- | --- |
-| `AUDIT-UI-006` | `CLOSED_CURRENT_SCOPE` | Closed for the reviewed events/live/dashboard/control-plane/markets surface inventory. Keep the same browser discipline for future surface growth. |
-| `AUDIT-LIFE-005` | `CLOSED_CURRENT_SCOPE` | Current simulated-vs-broker-confirmed operator-visible provenance slice is closed. |
-| `AUDIT-005` | `CLOSED_CURRENT_SCOPE` | Current backend/frontend operator-vocabulary parity slice is closed. |
-| `AUDIT-UI-002` | `CLOSED_CURRENT_SCOPE` | Current reviewed unknown/degraded enum-truth slice is closed. |
-| `AUDIT-UI-004` | `CLOSED_CURRENT_SCOPE` | Current reviewed mutation-control family slice is closed. |
-| `AUDIT-UI-005` | `CLOSED_CURRENT_SCOPE` | Current reviewed provenance/parity slice is closed. |
-| `AUDIT-DB-001` | `DOCUMENTED_LIMITATION` | CI truth is closed; the remaining limitation is the legacy unversioned non-SQLite manual-upgrade path. Use a fresh versioned database unless a reviewed legacy migration exists. |
-| `AUDIT-SEC-002` | `DOCUMENTED_LIMITATION` | The reviewed operator/API/events projection and redaction boundary is fixed for the current surface set. Raw internal authority identifiers remain acceptable internally and must stay behind the current projection/redaction boundary. |
-| `AUDIT-SEC-003` | `MANUAL_SECURITY_ACTION` | Repository-history cleanup and any needed credential rotation remain manual actions outside code changes. |
-| `AUDIT-DEP-001` | `FUTURE_PRODUCTION_HARDENING` | Stronger provenance attestation, editable-package hardening, and broader host/container dependency scanning remain future production work. |
+- `backend/.venv/bin/pytest backend/tests -q` -> `562 passed, 5 skipped`
+- `cd frontend && npm run typecheck` -> passed
+- `cd frontend && npm run test:frontend` -> `78 passed`
+- `cd frontend && npm run test:e2e -- --grep "DEMO|environment|dealing|AUDIT-|FLOW-"` -> `61 passed`
+- read-only preflight with `IG_TRADING_ENABLED=false`, `IG_STREAMING_ENABLED=false`, `AUTONOMOUS_CONTROL_ENABLED=false`, and `TESTING_ROUTES_ENABLED=false` returned `200` for `/health`, `/system/health`, `/system/telemetry`, `/system/broker-environment`, `/dashboard`, `/control-plane/summary`, `/events`, and `404` for `POST /testing/reset-history`
 
-### Local UI/research demo with dealing disabled
+## Allowed local postures
 
-This is currently acceptable if all of the following stay true:
+### Local UI, research, and read-only smoke testing
+
+This is acceptable when all of the following stay true:
 
 1. `IG_TRADING_ENABLED=false`
-2. No broker mutation is attempted.
-3. Test-only controls remain explicitly gated and disabled unless you are in an approved dev/test workflow.
-4. The session is treated as UI review, operator research, broker-read investigation, or smoke testing only.
+2. `TESTING_ROUTES_ENABLED=false` unless you are in an explicit dev/test harness
+3. No broker mutation is attempted
+4. The session is treated as UI review, operator research, broker-read investigation, or smoke testing only
 
-Recommended smoke-test order:
+### Human-supervised IG demo smoke test
 
-1. Start with `IG_TRADING_ENABLED=false`.
-2. Verify `/health`, `/system/health`, `/dashboard`, `/control-plane/summary`, and `/events`.
-3. Verify test-only controls are hidden unless explicitly enabled for dev/test.
-4. Verify degraded broker-read and freshness states remain clearly labelled when credentials or data are unavailable.
-5. Only after that review should you consider a supervised broker-connected session.
+This is acceptable only after human sign-off on these conditions:
 
-### Supervised broker-connected demo
-
-This is **not automatically approved** by the current repository state.
-
-Minimum blockers or human sign-offs still required:
-
-1. Use a **fresh versioned database** for the demo. Do not use an existing unversioned non-SQLite database unless a reviewed migration path exists.
-2. Resolve or explicitly sign off the `AUDIT-SEC-003` manual security posture:
-   - purge historical SQLite DB blobs before any broader sharing or publication;
-   - rotate any local/demo credentials if the repository or workstation state was shared.
-3. Run the final smoke test with `IG_TRADING_ENABLED=false` first, then enable broker connectivity only for the supervised session you intend to observe.
-4. Confirm test-only controls remain explicitly gated during the broker-connected session.
-
-Not a blocker at this level:
-
-- Stronger supply-chain attestation/signing is **not** a supervised-demo blocker in the current closure inventory.
-- Intentionally retained raw internal authority identifiers are acceptable with the current reviewed projection/redaction boundary and should not be treated as a current defect on their own.
+1. Use a fresh versioned database.
+2. Use the demo gateway: `IG_API_BASE_URL=https://demo-api.ig.com/gateway/deal`.
+3. Verify `/system/broker-environment` reports `DEMO` and the expected dealing state before any smoke workflow.
+4. Keep test-only controls disabled.
+5. Resolve or explicitly accept the manual security posture in `AUDIT-SEC-003`:
+   - purge historical SQLite DB blobs before broader sharing or publication
+   - rotate any local or demo credentials if repository or workstation state was shared
 
 ### Live trading
 
-Live trading is still blocked.
+Live trading remains blocked.
 
-Additional production-only hardening still required beyond the supervised-demo minimum:
+Additional production-only work is still required:
 
-1. Complete the manual history-cleanup and any required credential-rotation work with actual verification, not documentation alone.
-2. Move beyond the fresh-database-only demo posture to a production-grade reviewed migration story for legacy/non-SQLite environments.
-3. Add stronger supply-chain provenance controls, including attestation/signing and broader host/container dependency scanning.
-4. Keep expanding operator/browser evidence, operational runbooks, and production supervision controls as the surface area evolves.
+1. Verified manual history cleanup and any required credential rotation.
+2. A reviewed production migration story beyond the fresh-database demo posture.
+3. Stronger supply-chain provenance, attestation, and broader dependency/runtime hardening.
+4. Continued operator/browser evidence and runbook expansion as the surface area evolves.
 
 ## Historical Notes
 
-Historical remediation slices are preserved in [docs/audit-status.md](audit-status.md).
-
-Treat those dated entries as **historical-at-the-time evidence**, not as the current readiness snapshot.
+Historical remediation slices remain in [docs/audit-status.md](audit-status.md). Treat them as historical evidence, not the current readiness snapshot.

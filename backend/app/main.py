@@ -185,6 +185,7 @@ def create_app(
             method=request.method,
             path=request.url.path,
             query_params=request.query_params,
+            settings=app_settings,
         ):
             try:
                 require_operator_identity(request, settings=app_settings)

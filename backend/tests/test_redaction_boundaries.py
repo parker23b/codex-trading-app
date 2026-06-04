@@ -7,7 +7,7 @@ import sys
 
 from sqlmodel import select
 
-from app.core.broker import AccountType, BrokerError
+from app.core.broker import BrokerError
 from app.core.logging import DomainEventErrorHandler, StructuredFormatter
 from app.core.ig_broker import IGBroker, IGBrokerError
 from app.models.domain_event import DomainEvent
@@ -197,13 +197,13 @@ def test_audit_sec_002_broker_positions_route_redacts_broker_error_detail(
 
 def test_audit_sec_002_ig_broker_request_error_redacts_logs_and_exception(monkeypatch):
     broker = IGBroker(
-        AccountType.DEMO,
         api_key="api-key-secret",
         username="user",
         password="password-secret",
         account_id="ACC-12345",
         base_url="https://example.test/gateway/deal",
         trading_enabled=True,
+        allow_non_ig_base_url_for_testing=True,
     )
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)

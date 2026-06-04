@@ -7,6 +7,7 @@ import {
   RiskAllocationChart,
   AimeeSnapshotResponse,
   BrokerAuthStatus,
+  BrokerEnvironmentStatus,
   CoverageSummary,
   ControlPlaneSummary,
   DashboardSnapshot,
@@ -46,6 +47,17 @@ export const UNAVAILABLE_BROKER_AUTH_STATUS: BrokerAuthStatus = {
   label: "Broker Unavailable",
   detail: "Broker status could not be loaded.",
   position_count: 0,
+};
+
+export const UNAVAILABLE_BROKER_ENVIRONMENT_STATUS: BrokerEnvironmentStatus = {
+  provider: "IG",
+  environment: "UNKNOWN",
+  endpoint_classification: "UNKNOWN",
+  dealing_enabled: false,
+  streaming_enabled: false,
+  live_trading_acknowledged: false,
+  configuration_valid: false,
+  blocking_reason: "Broker environment status could not be loaded.",
 };
 
 export const UNAVAILABLE_STREAM_HEALTH_STATUS: StreamHealthStatus = {
@@ -272,8 +284,6 @@ export const UNAVAILABLE_FEED_STATE_RESPONSE: FeedStateResponse = {
   instruments: [],
 };
 
-type BackendMode = "live";
-
 export type LoadResult<T> = {
   data: T | null;
   error: string | null;
@@ -328,10 +338,6 @@ async function request<T>(path: string, init?: RequestInit & { timeoutMs?: numbe
   return response.json() as Promise<T>;
 }
 
-export async function getBackendMode(): Promise<BackendMode> {
-  return "live";
-}
-
 export async function getTrades(): Promise<Trade[]> {
   return request<Trade[]>("/trades");
 }
@@ -368,6 +374,10 @@ export async function getBrokerAuthStatus(): Promise<BrokerAuthStatus> {
       position_count: 0,
     };
   }
+}
+
+export async function getBrokerEnvironmentStatus(): Promise<BrokerEnvironmentStatus> {
+  return request<BrokerEnvironmentStatus>("/system/broker-environment");
 }
 
 export async function getStreamHealth(): Promise<StreamHealthStatus> {

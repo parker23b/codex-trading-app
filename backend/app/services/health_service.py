@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime, timedelta
 from threading import RLock
 
@@ -29,6 +31,12 @@ from app.services.trade_service import TradeService
 
 logger = get_logger(__name__)
 
+SessionFactory = Callable[[], AbstractContextManager[Session]]
+
+
+def _default_session_factory() -> AbstractContextManager[Session]:
+    return Session(engine)
+
 
 class SystemHealth(BaseModel):
     last_heartbeat: datetime
@@ -51,10 +59,14 @@ class HealthService:
     WINDOW = timedelta(minutes=5)
     STALE_PRICE_THRESHOLD = timedelta(seconds=5)
 
-    def __init__(self) -> None:
+    def __init__(self, session_factory: SessionFactory | None = None) -> None:
         self.settings = get_settings()
+        self._session_factory = session_factory or _default_session_factory
         self._lock = RLock()
         self.reset()
+
+    def set_session_factory(self, session_factory: SessionFactory) -> None:
+        self._session_factory = session_factory
 
     def reset(self) -> None:
         with self._lock:
@@ -246,9 +258,14 @@ class HealthService:
                 strategies_paused_by_health=self._strategies_paused_by_health,
             )
 
-    def get_health_report(self) -> dict[str, str | SystemHealth]:
+    def get_health_report(
+        self, session: Session | None = None
+    ) -> dict[str, str | SystemHealth]:
         details = self.get_system_health()
-        return {"status": self._classify_status(details), "details": details}
+        return {
+            "status": self._classify_status(details, session=session),
+            "details": details,
+        }
 
     def _emit_status_transition_if_needed(self) -> None:
         report = self.get_health_report()
@@ -266,10 +283,12 @@ class HealthService:
                 },
             )
 
-    def _classify_status(self, details: SystemHealth) -> str:
-        if self._is_idle():
+    def _classify_status(
+        self, details: SystemHealth, *, session: Session | None = None
+    ) -> str:
+        if self._is_idle(session=session):
             return "idle"
-        if self._is_armed():
+        if self._is_armed(session=session):
             return "armed"
         price_is_fresh = self._is_price_fresh(details.last_price_update)
         if (
@@ -286,31 +305,34 @@ class HealthService:
             return "degraded"
         return "ok"
 
-    def _is_idle(self) -> bool:
+    def _is_idle(self, *, session: Session | None = None) -> bool:
         return (
-            not self._has_live_operational_demand() and not self._has_autonomy_armed()
+            not self._has_live_operational_demand(session=session)
+            and not self._has_autonomy_armed(session=session)
         )
 
-    def _is_armed(self) -> bool:
-        return not self._has_live_operational_demand() and self._has_autonomy_armed()
+    def _is_armed(self, *, session: Session | None = None) -> bool:
+        return not self._has_live_operational_demand(
+            session=session
+        ) and self._has_autonomy_armed(session=session)
 
-    def _has_live_operational_demand(self) -> bool:
+    def _has_live_operational_demand(self, *, session: Session | None = None) -> bool:
         if runtime_manager.list_active_instruments():
             return True
-        with Session(engine) as session:
-            has_open_positions = session.exec(
+        with self._session_scope(session) as active_session:
+            has_open_positions = active_session.exec(
                 select(Position.id).where(Position.is_open.is_(True)).limit(1)
             ).first()
             if has_open_positions is not None:
                 return True
-            return TradeService(session).has_pending_trade_intents()
+            return TradeService(active_session).has_pending_trade_intents()
 
-    def _has_autonomy_armed(self) -> bool:
-        with Session(engine) as session:
-            operator_control = OperatorControlService(session)
+    def _has_autonomy_armed(self, *, session: Session | None = None) -> bool:
+        with self._session_scope(session) as active_session:
+            operator_control = OperatorControlService(active_session)
             if not operator_control.get_effective_autonomous_control_enabled():
                 return False
-            record = session.exec(
+            record = active_session.exec(
                 select(StrategyFamilyGovernance.id)
                 .where(
                     StrategyFamilyGovernance.approval_state
@@ -365,12 +387,31 @@ class HealthService:
             payload={"connected": connected},
         )
 
+    def _session_scope(
+        self, session: Session | None
+    ) -> AbstractContextManager[Session]:
+        if session is not None:
+            return nullcontext(session)
+        return self._session_factory()
+
 
 _health_service: HealthService | None = None
+_health_service_session_factory: SessionFactory = _default_session_factory
+
+
+def set_health_service_session_factory(session_factory: SessionFactory) -> None:
+    global _health_service_session_factory
+    _health_service_session_factory = session_factory
+    if _health_service is not None:
+        _health_service.set_session_factory(session_factory)
+
+
+def reset_health_service_session_factory() -> None:
+    set_health_service_session_factory(_default_session_factory)
 
 
 def get_health_service() -> HealthService:
     global _health_service
     if _health_service is None:
-        _health_service = HealthService()
+        _health_service = HealthService(session_factory=_health_service_session_factory)
     return _health_service

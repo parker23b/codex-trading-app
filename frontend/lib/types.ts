@@ -422,6 +422,17 @@ export type BrokerAuthStatus = {
   position_count: number;
 };
 
+export type BrokerEnvironmentStatus = {
+  provider: string;
+  environment: "DEMO" | "LIVE" | "UNKNOWN" | string;
+  endpoint_classification: "IG_DEMO_GATEWAY" | "IG_LIVE_GATEWAY" | "UNKNOWN" | string;
+  dealing_enabled: boolean;
+  streaming_enabled: boolean;
+  live_trading_acknowledged: boolean;
+  configuration_valid: boolean;
+  blocking_reason: string | null;
+};
+
 export type StreamHealthStatus = {
   enabled: boolean;
   connected: boolean;

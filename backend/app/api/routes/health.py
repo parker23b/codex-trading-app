@@ -1,10 +1,12 @@
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel
 from sqlmodel import Session
 
+from app.api.auth import resolve_request_settings
+from app.core.config import get_settings
 from app.db.session import get_session
 from app.services.health_service import SystemHealth, get_health_service
 from app.services.ig_streaming_service import get_ig_streaming_service
@@ -14,8 +16,10 @@ router = APIRouter()
 
 
 @router.get("/health")
-def health_check(response: Response) -> dict[str, str]:
-    current_status = str(get_health_service().get_health_report()["status"])
+def health_check(
+    response: Response, session: Session = Depends(get_session)
+) -> dict[str, str]:
+    current_status = str(get_health_service().get_health_report(session=session)["status"])
     response.status_code = (
         status.HTTP_503_SERVICE_UNAVAILABLE
         if current_status == "critical"
@@ -112,7 +116,7 @@ class SystemHealthResponse(BaseModel):
 def system_health_check(
     session: Session = Depends(get_session),
 ) -> SystemHealthResponse:
-    report = get_health_service().get_health_report()
+    report = get_health_service().get_health_report(session=session)
     telemetry = OperationalTelemetryService(session).get_summary()
     return SystemHealthResponse(
         status=str(report["status"]),
@@ -196,6 +200,34 @@ class OperationalTelemetryResponse(BaseModel):
     audit_write_failures_last_5m: int
     strategies_paused_by_health: int
     observability: OperationalTelemetryObservabilityResponse
+
+
+class BrokerEnvironmentStatusResponse(BaseModel):
+    provider: str
+    environment: str
+    endpoint_classification: str
+    dealing_enabled: bool
+    streaming_enabled: bool
+    live_trading_acknowledged: bool
+    configuration_valid: bool
+    blocking_reason: str | None
+
+
+@router.get(
+    "/system/broker-environment", response_model=BrokerEnvironmentStatusResponse
+)
+def broker_environment_status(request: Request) -> BrokerEnvironmentStatusResponse:
+    settings = resolve_request_settings(request) or get_settings()
+    return BrokerEnvironmentStatusResponse(
+        provider=settings.broker_provider,
+        environment=settings.broker_environment.value,
+        endpoint_classification=settings.broker_endpoint_classification.value,
+        dealing_enabled=settings.ig_trading_enabled,
+        streaming_enabled=settings.ig_streaming_enabled,
+        live_trading_acknowledged=settings.ig_live_trading_acknowledged,
+        configuration_valid=True,
+        blocking_reason=None,
+    )
 
 
 @router.get("/system/telemetry", response_model=OperationalTelemetryResponse)

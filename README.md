@@ -2,15 +2,19 @@
 
 InvestMate is a FastAPI and Next.js trading-operations workspace for supervised autonomous trading research. It combines strategy runtimes, bounded market-data coverage, risk allocation, IG broker integration, recovery/reconciliation, operator dashboards, and AIMEE reviewer surfaces.
 
-## Status: Not Ready For Broker Dealing
+## Status: Not Ready For Live Trading
 
-InvestMate is **not ready for live or demo broker dealing**.
+InvestMate is **not ready for live trading**.
 
-Use this repository for local development, UI review, strategy research, broker-read investigation, and smoke testing only. Keep `IG_TRADING_ENABLED=false`. Do not enable real broker dealing until the open readiness blockers in [docs/audit-status.md](docs/audit-status.md) are fixed and verified.
+The current codebase is ready only for a **human-supervised IG demo smoke test after sign-off**. That supervised-demo posture is narrower than live-trading readiness:
 
-A local UI/research demo with dealing disabled is acceptable under the posture in [docs/readiness.md](docs/readiness.md).
+- the backend now derives broker environment solely from `IG_API_BASE_URL`
+- only the canonical IG demo and live gateways are accepted
+- live dealing requires `IG_LIVE_TRADING_ACKNOWLEDGED=true`
+- `/system/broker-environment` exposes backend-owned environment and dealing truth
+- test-only backend routes are disabled by default and blocked in production-like or live-dealing posture
 
-Read the details in [docs/readiness.md](docs/readiness.md).
+Keep `IG_TRADING_ENABLED=false` for normal local use. Live trading remains blocked. Read the current posture in [docs/readiness.md](docs/readiness.md) and the verification record in [docs/demo-trading-readiness-audit.md](docs/demo-trading-readiness-audit.md).
 
 ## What This Is
 
@@ -163,6 +167,7 @@ Useful backend startup checks:
 
 - `GET /health`
 - `GET /system/health`
+- `GET /system/broker-environment`
 - `GET /control-plane/summary`
 - `GET /coverage/summary`
 - `GET /dashboard`

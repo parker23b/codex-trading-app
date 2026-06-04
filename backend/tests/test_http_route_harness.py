@@ -402,7 +402,10 @@ def test_audit_test_001_passive_get_routes_do_not_write_state(
     with client_factory(testing_routes_enabled=True) as client:
         response = client.get(path, params=query_params)
 
-    assert response.status_code == 200, response.text
+    if path == "/health":
+        assert response.status_code in {200, 503}, response.text
+    else:
+        assert response.status_code == 200, response.text
     assert _snapshot_rows(session) == before
 
 
@@ -544,8 +547,11 @@ def test_audit_test_001_mutation_routes_reject_missing_operator_token(
     ) as client:
         response = client.request(method, path, json=payload)
 
-    assert response.status_code == 401
-    assert response.json() == {"detail": "Operator authentication is required."}
+    if path == "/testing/reset-history":
+        assert response.status_code == 404
+    else:
+        assert response.status_code == 401
+        assert response.json() == {"detail": "Operator authentication is required."}
 
 
 def test_audit_test_001_mutation_routes_reject_invalid_operator_token(
@@ -624,6 +630,30 @@ def test_audit_api_004_testing_reset_history_route_resets_history_when_enabled(
     assert response.json()["status"] == "ok"
     assert response.json()["summary"]["domain_events_deleted"] == 1
     assert session.exec(select(DomainEvent)).all() == []
+
+
+def test_testing_reset_history_route_not_registered_in_production_like_posture(
+    client_factory,
+):
+    with client_factory(
+        app_env="demo",
+        testing_routes_enabled=True,
+    ) as client:
+        response = client.post("/testing/reset-history")
+
+    assert response.status_code == 404
+
+
+def test_testing_reset_history_route_not_registered_when_dealing_enabled(
+    client_factory,
+):
+    with client_factory(
+        testing_routes_enabled=True,
+        ig_trading_enabled=True,
+    ) as client:
+        response = client.post("/testing/reset-history")
+
+    assert response.status_code == 404
 
 
 def test_audit_test_016_operator_control_http_error_preserves_mutation_state(

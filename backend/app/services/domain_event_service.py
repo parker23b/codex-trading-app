@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from datetime import datetime
 from typing import Any
 from collections.abc import Callable
@@ -206,6 +207,7 @@ class DomainEventService:
     def list_events(
         self,
         *,
+        session: Session | None = None,
         limit: int = 100,
         event_type: str | None = None,
         error_type: str | None = None,
@@ -218,7 +220,7 @@ class DomainEventService:
         since: datetime | None = None,
         until: datetime | None = None,
     ) -> list[DomainEvent]:
-        with Session(engine) as session:
+        with self._session_scope(session) as active_session:
             statement = select(DomainEvent)
             if event_type:
                 statement = statement.where(DomainEvent.event_type == event_type)
@@ -243,7 +245,7 @@ class DomainEventService:
             statement = statement.order_by(
                 desc(DomainEvent.created_at), desc(DomainEvent.id)
             )
-            events = list(session.exec(statement))
+            events = list(active_session.exec(statement))
             if correlation_filter is not None:
                 events = [
                     event
@@ -252,10 +254,17 @@ class DomainEventService:
                 ]
             return events[:limit]
 
-    def get_event(self, event_id: int) -> DomainEvent | None:
-        with Session(engine) as session:
+    def get_event(
+        self, event_id: int, *, session: Session | None = None
+    ) -> DomainEvent | None:
+        with self._session_scope(session) as active_session:
             statement = select(DomainEvent).where(DomainEvent.id == event_id)
-            return session.exec(statement).first()
+            return active_session.exec(statement).first()
+
+    def _session_scope(self, session: Session | None):
+        if session is not None:
+            return nullcontext(session)
+        return Session(engine)
 
 
 domain_event_service = DomainEventService()

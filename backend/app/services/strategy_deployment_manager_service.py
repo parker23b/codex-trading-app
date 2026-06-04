@@ -43,7 +43,7 @@ class StrategyDeploymentManagerService:
         self.governance_service = StrategyGovernanceService(session)
         self.operator_control_service = OperatorControlService(session)
         self.operational_state_service = OperationalStateService(session)
-        self.suitability_service = RegimeSuitabilityService()
+        self.suitability_service = RegimeSuitabilityService(session)
         self.strategy_service = StrategyService(session)
 
     def reconcile(
@@ -291,7 +291,9 @@ class StrategyDeploymentManagerService:
     ) -> tuple[
         str, str | None, dict[str, object], str | None, str | None, str, float | None
     ]:
-        health_status = str(get_health_service().get_health_report()["status"])
+        health_status = str(
+            get_health_service().get_health_report(session=self.session)["status"]
+        )
         resolved_profile = self._select_profile(
             governance=governance, metadata=metadata
         )

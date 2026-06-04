@@ -6,7 +6,7 @@ Critical trading behavior must be proven by behavioral tests. Tests should verif
 
 The backend has broad pytest coverage under `backend/tests`, including decision lifecycle, strategy execution, control plane, runtime recovery, reconciliation, risk/allocation, market data, streaming watchlist, health, coverage, dashboard, and AIMEE read-only behavior.
 
-No frontend test suite was found in the inspected file list.
+The frontend also has active static and browser coverage through `npm run test:frontend` and `npm run test:e2e`, including operator-truth, mutation-control, degraded-state, and environment-banner scenarios.
 
 ## Testing terminology
 
@@ -53,6 +53,7 @@ P0/P1 trading invariants should not remain at `CONSTRUCTION_ONLY`.
 | TEST-014 | Test-only or destructive routes/controls MUST have tests or config review proving they are environment-gated and unavailable in production-like operation. | Tests/config review for `/testing/*` routes and frontend testing reset controls. | P0 | Medium |
 | TEST-015 | Broker and service fakes used in critical tests MUST be protected against drift from production interface semantics. | Contract tests shared across fake and adapter DTO semantics, or explicit fake capability matrix. | P1 | Medium |
 | TEST-016 | Mutation and broker-action tests MUST cover error responses and prove audit state is preserved where practical before errors are surfaced. | Route/service tests for broker failure, reconciliation failure, runtime failure, alert mutation failure, and review/advisory mutation failure. | P1 | Medium |
+| TEST-017 | Environment-boundary and health-context regressions MUST prove the backend fails closed for broker-environment selection and uses the active database context for passive health/telemetry reads. | Config/adapter tests for canonical IG gateway validation plus regression tests proving health reads use the injected or active session rather than a module-global engine. | P0 | High |
 
 ## Spec and flow evidence matrix
 
@@ -138,6 +139,7 @@ Route tests should cover:
 - response model or documented dict schema fields consumed by frontend;
 - route compatibility/deprecation behaviour where applicable;
 - environment gating for test-only routes.
+- backend-owned environment-status routes such as `/system/broker-environment`, including secret-redaction and fail-closed truth.
 
 GET routes classified as passive reads must be tested against accidental `session.add`, `session.delete`, `session.commit`, `session.flush`, default seeding, reconciliation, watchlist sync, alert refresh, review persistence, runtime mutation, broker mutation, and event creation where applicable.
 
@@ -192,6 +194,7 @@ A lower line coverage suite with strong behavioural coverage of P0/P1 invariants
 - `FLOW-MARKET-DATA-001`: stream healthy; fallback polling; stale stream; disconnected broker/feed; UI degraded display.
 - `FLOW-AIMEE-001`: passive snapshot no writes; forbidden services not called; frontend passive refresh uses only `/aimee/snapshot`.
 - `FLOW-COVERAGE-001`: watchlist/shortlist vs streaming vs entry eligibility; cap/cooldown; protective pins; stale stream display.
+- `FLOW-BROKER-ENV-001`: canonical demo/live IG gateway classification, live-dealing acknowledgement, backend-owned environment status contract, frontend banner truth, and no credentialed request before URL validation.
 
 ## Must-not-cross testing boundaries
 

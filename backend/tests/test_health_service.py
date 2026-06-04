@@ -1,19 +1,22 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 
 from fastapi import Response, status
 from app.api.routes.health import health_check, system_health_check
 from app.models.runtime import StrategyRuntimeState
 from app.models.trade import TradeIntent
-from app.services.health_service import get_health_service
+from app.services.health_service import HealthService, get_health_service
 
 
 def test_health_service_classifies_ok_when_feed_and_broker_are_healthy(monkeypatch):
     health_service = get_health_service()
     now = datetime.now(UTC)
-    monkeypatch.setattr(health_service, "_has_live_operational_demand", lambda: True)
-    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda: False)
+    monkeypatch.setattr(
+        health_service, "_has_live_operational_demand", lambda **_: True
+    )
+    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda **_: False)
 
     health_service.heartbeat(now)
     health_service.record_price_update(now, stream_connected=True)
@@ -26,8 +29,10 @@ def test_health_service_classifies_ok_when_feed_and_broker_are_healthy(monkeypat
 
 def test_health_service_classifies_idle_when_system_is_unarmed(monkeypatch):
     health_service = get_health_service()
-    monkeypatch.setattr(health_service, "_has_live_operational_demand", lambda: False)
-    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda: False)
+    monkeypatch.setattr(
+        health_service, "_has_live_operational_demand", lambda **_: False
+    )
+    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda **_: False)
 
     report = health_service.get_health_report()
 
@@ -36,8 +41,10 @@ def test_health_service_classifies_idle_when_system_is_unarmed(monkeypatch):
 
 def test_health_service_classifies_armed_when_autonomy_is_enabled(monkeypatch):
     health_service = get_health_service()
-    monkeypatch.setattr(health_service, "_has_live_operational_demand", lambda: False)
-    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda: True)
+    monkeypatch.setattr(
+        health_service, "_has_live_operational_demand", lambda **_: False
+    )
+    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda **_: True)
 
     report = health_service.get_health_report()
 
@@ -47,8 +54,10 @@ def test_health_service_classifies_armed_when_autonomy_is_enabled(monkeypatch):
 def test_health_service_classifies_degraded_when_order_failures_accumulate(monkeypatch):
     health_service = get_health_service()
     now = datetime.now(UTC)
-    monkeypatch.setattr(health_service, "_has_live_operational_demand", lambda: True)
-    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda: False)
+    monkeypatch.setattr(
+        health_service, "_has_live_operational_demand", lambda **_: True
+    )
+    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda **_: False)
 
     health_service.record_price_update(now, stream_connected=True)
     health_service.update_broker_state(connected=True, latency_ms=25.0)
@@ -64,8 +73,10 @@ def test_health_service_classifies_degraded_when_order_failures_accumulate(monke
 def test_health_service_classifies_degraded_when_audit_writes_fail(monkeypatch):
     health_service = get_health_service()
     now = datetime.now(UTC)
-    monkeypatch.setattr(health_service, "_has_live_operational_demand", lambda: True)
-    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda: False)
+    monkeypatch.setattr(
+        health_service, "_has_live_operational_demand", lambda **_: True
+    )
+    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda **_: False)
 
     health_service.record_price_update(now, stream_connected=True)
     health_service.update_broker_state(connected=True, latency_ms=25.0)
@@ -80,8 +91,10 @@ def test_health_service_classifies_degraded_when_audit_writes_fail(monkeypatch):
 def test_health_service_classifies_critical_when_broker_is_disconnected(monkeypatch):
     health_service = get_health_service()
     now = datetime.now(UTC)
-    monkeypatch.setattr(health_service, "_has_live_operational_demand", lambda: True)
-    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda: False)
+    monkeypatch.setattr(
+        health_service, "_has_live_operational_demand", lambda **_: True
+    )
+    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda **_: False)
 
     health_service.record_price_update(now, stream_connected=True)
     health_service.update_broker_state(connected=False)
@@ -90,33 +103,37 @@ def test_health_service_classifies_critical_when_broker_is_disconnected(monkeypa
     assert report["status"] == "critical"
 
 
-def test_health_check_returns_ok_when_system_is_healthy(monkeypatch):
+def test_health_check_returns_ok_when_system_is_healthy(session, monkeypatch):
     health_service = get_health_service()
     now = datetime.now(UTC)
-    monkeypatch.setattr(health_service, "_has_live_operational_demand", lambda: True)
-    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda: False)
+    monkeypatch.setattr(
+        health_service, "_has_live_operational_demand", lambda **_: True
+    )
+    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda **_: False)
 
     health_service.heartbeat(now)
     health_service.record_price_update(now, stream_connected=True)
     health_service.update_broker_state(connected=True, latency_ms=25.0)
     response = Response()
 
-    payload = health_check(response)
+    payload = health_check(response, session=session)
 
     assert response.status_code == status.HTTP_200_OK
     assert payload == {"status": "ok"}
 
 
-def test_health_check_returns_503_when_system_is_critical(monkeypatch):
+def test_health_check_returns_503_when_system_is_critical(session, monkeypatch):
     health_service = get_health_service()
     now = datetime.now(UTC)
-    monkeypatch.setattr(health_service, "_has_live_operational_demand", lambda: True)
-    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda: False)
+    monkeypatch.setattr(
+        health_service, "_has_live_operational_demand", lambda **_: True
+    )
+    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda **_: False)
     health_service.record_price_update(now, stream_connected=True)
     health_service.update_broker_state(connected=False)
     response = Response()
 
-    payload = health_check(response)
+    payload = health_check(response, session=session)
 
     assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     assert payload == {"status": "critical"}
@@ -127,8 +144,10 @@ def test_system_health_response_surfaces_audit_market_data_and_runtime_degradati
 ):
     health_service = get_health_service()
     now = datetime.now(UTC)
-    monkeypatch.setattr(health_service, "_has_live_operational_demand", lambda: True)
-    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda: False)
+    monkeypatch.setattr(
+        health_service, "_has_live_operational_demand", lambda **_: True
+    )
+    monkeypatch.setattr(health_service, "_has_autonomy_armed", lambda **_: False)
 
     health_service.heartbeat(now)
     health_service.record_price_update(now - timedelta(seconds=2))
@@ -199,9 +218,7 @@ def test_system_health_response_surfaces_audit_market_data_and_runtime_degradati
     assert "runtime_price_stale" in payload.degradations.degradation_reasons
 
 
-def test_health_service_counts_pending_trade_intents_as_live_operational_demand(
-    session, monkeypatch
-):
+def test_health_service_counts_pending_trade_intents_as_live_operational_demand(session):
     session.add(
         TradeIntent(
             strategy_name="mean_reversion",
@@ -213,7 +230,6 @@ def test_health_service_counts_pending_trade_intents_as_live_operational_demand(
     )
     session.commit()
 
-    health_service = get_health_service()
-    monkeypatch.setattr("app.services.health_service.engine", session.get_bind())
+    health_service = HealthService(session_factory=lambda: nullcontext(session))
 
     assert health_service._has_live_operational_demand() is True

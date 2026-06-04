@@ -86,6 +86,20 @@ function baseStreamHealth(overrides = {}) {
   };
 }
 
+function baseBrokerEnvironmentStatus(overrides = {}) {
+  return {
+    provider: "IG",
+    environment: "DEMO",
+    endpoint_classification: "IG_DEMO_GATEWAY",
+    dealing_enabled: false,
+    streaming_enabled: true,
+    live_trading_acknowledged: false,
+    configuration_valid: true,
+    blocking_reason: null,
+    ...overrides,
+  };
+}
+
 function baseCoverageSummary(overrides = {}) {
   return {
     streaming: {
@@ -649,6 +663,7 @@ function baseQuestionResponse(overrides = {}) {
 
 function baseRoutes() {
   return {
+    "GET /system/broker-environment": ok(baseBrokerEnvironmentStatus()),
     "GET /system/telemetry": ok(baseTelemetry()),
     "GET /health/stream": ok(baseStreamHealth()),
     "GET /coverage/summary": ok(baseCoverageSummary()),
@@ -3344,6 +3359,55 @@ export function buildScenarioRoutes(name) {
             acknowledged_at: TIMESTAMP,
           }),
           400,
+        ),
+      });
+    case "nav-demo-dealing-enabled":
+      return mergeRoutes({
+        "GET /system/broker-environment": ok(
+          baseBrokerEnvironmentStatus({
+            dealing_enabled: true,
+          }),
+        ),
+      });
+    case "nav-live-dealing-disabled":
+      return mergeRoutes({
+        "GET /system/broker-environment": ok(
+          baseBrokerEnvironmentStatus({
+            environment: "LIVE",
+            endpoint_classification: "IG_LIVE_GATEWAY",
+            dealing_enabled: false,
+            live_trading_acknowledged: false,
+          }),
+        ),
+      });
+    case "nav-live-dealing-enabled":
+      return mergeRoutes({
+        "GET /system/broker-environment": ok(
+          baseBrokerEnvironmentStatus({
+            environment: "LIVE",
+            endpoint_classification: "IG_LIVE_GATEWAY",
+            dealing_enabled: true,
+            live_trading_acknowledged: true,
+          }),
+        ),
+      });
+    case "nav-broker-environment-unavailable":
+      return mergeRoutes({
+        "GET /system/broker-environment": unavailable(
+          "Broker environment unavailable.",
+        ),
+      });
+    case "nav-broker-environment-invalid":
+      return mergeRoutes({
+        "GET /system/broker-environment": ok(
+          baseBrokerEnvironmentStatus({
+            environment: "LIVE",
+            endpoint_classification: "IG_LIVE_GATEWAY",
+            dealing_enabled: true,
+            configuration_valid: false,
+            blocking_reason:
+              "Live dealing requires explicit acknowledgement before startup.",
+          }),
         ),
       });
     default:

@@ -4,7 +4,9 @@ This document is an audit log for InvestMate findings, evidence gaps, and follow
 
 ## Current Closure Snapshot
 
-InvestMate is **not ready for live trading** and is **not automatically ready for a supervised broker-connected demo**.
+InvestMate is **not ready for live trading**.
+
+The current codebase is **ready for a human-supervised IG demo smoke test after sign-off**.
 
 A local UI/research demo with dealing disabled is acceptable under the posture in [readiness.md](readiness.md).
 
@@ -16,6 +18,16 @@ Current CI truth is anchored to the newest successful GitHub Actions `Repo Audit
 - backend `Pytest`: passed
 
 Advisory annotations remained in that run, including Node 20 action deprecation warnings and non-blocking lint/type warnings, but the required backend verification path above succeeded.
+
+Additional local verification on `2026-06-04` closed the supervised-demo remediation slice:
+
+- `./scripts/compile_backend_requirements.sh` -> passed
+- `./scripts/check_backend_requirements.sh` -> passed
+- `backend/.venv/bin/pytest backend/tests -q` -> `562 passed, 5 skipped`
+- `cd frontend && npm run typecheck` -> passed
+- `cd frontend && npm run test:frontend` -> `78 passed`
+- `cd frontend && npm run test:e2e -- --grep "DEMO|environment|dealing|AUDIT-|FLOW-"` -> `61 passed`
+- read-only backend preflight returned `200` for `/health`, `/system/health`, `/system/telemetry`, `/system/broker-environment`, `/dashboard`, `/control-plane/summary`, `/events`, and `404` for `POST /testing/reset-history`
 
 ## Current P0/P1 Inventory
 
@@ -49,7 +61,7 @@ Currently acceptable when:
 
 ### Supervised broker-connected demo
 
-Minimum blockers or sign-offs still required:
+The remaining items are sign-offs and manual controls, not current code blockers:
 
 - use a fresh versioned database; do not use an existing unversioned non-SQLite database unless a reviewed migration path exists
 - resolve or explicitly sign off the `AUDIT-SEC-003` manual security posture:
@@ -77,6 +89,38 @@ Additional production-only hardening required beyond the supervised-demo minimum
 ## Historical Remediation Slices
 
 Everything below this heading is **historical-at-the-time evidence**. These dated entries are preserved for remediation history and should not be mistaken for the current status snapshot above.
+
+## 2026-06-04 supervised IG demo readiness remediation slice
+
+- Scope: supervised-demo blockers only. No live-trading readiness claim.
+- Code changes in this slice:
+  - removed the legacy split demo/live runtime toggle and derived environment centrally from `IG_API_BASE_URL`
+  - accepted only canonical IG demo/live HTTPS gateways, normalized harmless trailing slashes, and rejected unknown or altered URLs before any credentialed request
+  - added `IG_LIVE_TRADING_ACKNOWLEDGED` guard for live dealing
+  - added backend-owned `GET /system/broker-environment` truth and frontend nav/badge rendering for `DEMO/LIVE` plus dealing state
+  - default-disabled test-only backend routes and blocked their registration in production-like or live-dealing posture
+  - removed `HealthService` module-global DB coupling by injecting the active session/session factory
+  - regenerated backend lockfiles and restored lockfile freshness
+- Targeted verification passed:
+  - `backend/.venv/bin/pytest backend/tests/test_config.py -q` -> `16 passed`
+  - `backend/.venv/bin/pytest backend/tests/test_ig_broker_sizing.py -q` -> `8 passed`
+  - `backend/.venv/bin/pytest backend/tests/test_testing_routes.py -q` -> `4 passed`
+  - `backend/.venv/bin/pytest backend/tests/test_health_routes.py -q` -> `4 passed`
+  - `backend/.venv/bin/pytest backend/tests/test_passive_read_routes.py -q` -> `8 passed`
+  - `backend/.venv/bin/pytest backend/tests/test_runtime_leadership_service.py -q` -> `4 passed`
+  - `backend/.venv/bin/pytest backend/tests/test_runtime_recovery_service.py -q` -> `14 passed`
+  - `backend/.venv/bin/pytest backend/tests/test_reconciliation_service.py -q` -> `12 passed`
+  - `backend/.venv/bin/pytest backend/tests/test_broker_action_http_authority.py -q` -> `14 passed`
+  - `backend/.venv/bin/pytest backend/tests/test_operator_auth_boundary.py -q` -> `7 passed`
+  - `backend/.venv/bin/pytest backend/tests -q` -> `562 passed, 5 skipped`
+  - `cd frontend && npm run typecheck` -> passed
+  - `cd frontend && npm run test:frontend` -> `78 passed`
+  - `cd frontend && npm run test:e2e -- --grep "DEMO|environment|dealing|AUDIT-|FLOW-"` -> `61 passed`
+- Preflight result:
+  - read-only startup on a fresh temporary SQLite database with demo gateway, `IG_TRADING_ENABLED=false`, `IG_STREAMING_ENABLED=false`, `AUTONOMOUS_CONTROL_ENABLED=false`, and `TESTING_ROUTES_ENABLED=false` passed the required endpoint checks and kept `/testing/reset-history` unavailable
+- Remaining supervised-demo blockers:
+  - none in code for the requested remediation slice
+  - human sign-off, fresh DB discipline, and manual security actions remain required
 
 ## 2026-06-01 final `AUDIT-UI-006` closure and CI truth slice
 

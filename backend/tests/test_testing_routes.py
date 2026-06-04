@@ -59,3 +59,39 @@ def test_audit_api_004_reset_history_route_available_with_explicit_test_config(
     assert response.status == "ok"
     assert response.summary["domain_events_deleted"] == 1
     assert session.exec(select(DomainEvent)).all() == []
+
+
+def test_testing_routes_do_not_register_in_production_like_posture():
+    route_paths = _testing_route_paths(enabled=True)
+
+    production_router = build_api_router(
+        type(get_settings())(
+            **{
+                **get_settings().model_dump(),
+                "testing_routes_enabled": True,
+                "app_env": "production",
+            }
+        )
+    )
+
+    assert "/testing/reset-history" in route_paths
+    assert "/testing/reset-history" not in {
+        route.path for route in production_router.routes
+    }
+
+
+def test_testing_routes_do_not_register_when_live_dealing_is_enabled():
+    live_router = build_api_router(
+        type(get_settings())(
+            **{
+                **get_settings().model_dump(),
+                "testing_routes_enabled": True,
+                "ig_api_base_url": "https://demo-api.ig.com/gateway/deal",
+                "ig_trading_enabled": True,
+            }
+        )
+    )
+
+    assert "/testing/reset-history" not in {
+        route.path for route in live_router.routes
+    }

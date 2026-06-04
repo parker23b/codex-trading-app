@@ -29,6 +29,13 @@ from app.core.broker import (
     OrderRequest,
     now_utc,
 )
+from app.core.broker_environment import (
+    BrokerEndpointClassification,
+    BrokerEnvironment,
+    IG_DEMO_BASE_URL,
+    classify_ig_api_base_url,
+    normalize_test_broker_base_url,
+)
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.redaction import sanitize_error_detail, sanitize_payload
@@ -73,7 +80,6 @@ class IGBroker(Broker):
 
     def __init__(
         self,
-        account_type: AccountType,
         *,
         api_key: str | None,
         username: str | None,
@@ -82,15 +88,39 @@ class IGBroker(Broker):
         base_url: str | None,
         request_timeout_seconds: float = 10.0,
         trading_enabled: bool = False,
+        live_trading_acknowledged: bool = False,
         verify_ssl: bool = True,
         ca_bundle_path: str | None = None,
+        allow_non_ig_base_url_for_testing: bool = False,
+        testing_environment: BrokerEnvironment = BrokerEnvironment.DEMO,
     ):
-        self._account_type = account_type
+        validated_base_url = base_url or IG_DEMO_BASE_URL
+        if allow_non_ig_base_url_for_testing:
+            self._environment = testing_environment
+            self._endpoint_classification = (
+                BrokerEndpointClassification.TEST_ONLY_CUSTOM
+            )
+            self._base_url = normalize_test_broker_base_url(validated_base_url)
+        else:
+            classified_endpoint = classify_ig_api_base_url(validated_base_url)
+            self._environment = classified_endpoint.environment
+            self._endpoint_classification = (
+                classified_endpoint.endpoint_classification
+            )
+            self._base_url = classified_endpoint.base_url
+            if (
+                self._environment is BrokerEnvironment.LIVE
+                and trading_enabled
+                and not live_trading_acknowledged
+            ):
+                raise IGBrokerError(
+                    "IG_LIVE_TRADING_ACKNOWLEDGED=true is required before enabling live dealing."
+                )
+        self._account_type = AccountType(self._environment.value)
         self._api_key = api_key
         self._username = username
         self._password = password
         self._account_id = account_id
-        self._base_url = (base_url or self._default_base_url(account_type)).rstrip("/")
         self._request_timeout_seconds = request_timeout_seconds
         self._trading_enabled = trading_enabled
         self._verify_ssl = verify_ssl
@@ -108,6 +138,14 @@ class IGBroker(Broker):
     @property
     def account_type(self) -> AccountType:
         return self._account_type
+
+    @property
+    def environment(self) -> BrokerEnvironment:
+        return self._environment
+
+    @property
+    def endpoint_classification(self) -> BrokerEndpointClassification:
+        return self._endpoint_classification
 
     def place_order(self, order: OrderRequest) -> BrokerOrderResult:
         submitted_at = now_utc()
@@ -1396,12 +1434,6 @@ class IGBroker(Broker):
             return datetime.fromisoformat(normalized.replace("Z", "+00:00"))
         except ValueError:
             return None
-
-    @staticmethod
-    def _default_base_url(account_type: AccountType) -> str:
-        if account_type is AccountType.DEMO:
-            return "https://demo-api.ig.com/gateway/deal"
-        return "https://api.ig.com/gateway/deal"
 
     def _is_cache_fresh(self, cached: CachedMarketDetails) -> bool:
         return (time.monotonic() - cached.fetched_at) <= self._market_cache_ttl_seconds

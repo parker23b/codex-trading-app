@@ -27,6 +27,7 @@ The frontend is an operator console. It must help a human supervise autonomous t
 | UI-010 | AIMEE passive refresh MUST use passive read endpoints only. Explicit advisory actions that may persist review artifacts must be visually and technically separated from passive snapshot refresh. | API-client/component tests proving passive refresh calls `/aimee/snapshot` only and advisory persistence uses explicit user action. | P1 | Medium |
 | UI-011 | Market-data, broker, stream, risk, allocation, execution, and runtime displays should show timestamp, age, or freshness state when stale data could change operator interpretation. Absence of freshness must render as unknown/degraded, not fresh. | Component tests for missing timestamp, stale timestamp, fallback timestamp, and fresh timestamp fixtures. | P1 | Low |
 | UI-012 | Safety-critical status must not rely on color alone. Badges, icons, labels, tooltips, or text must make degraded, blocked, stale, fallback, manual-review, and unmanaged-risk states clear without color dependence. | Component/a11y tests or screenshot review for safety-critical statuses. | P2 | Low |
+| UI-013 | Global environment and dealing status MUST come from backend-owned truth. The shell/navigation must not infer DEMO/LIVE from URLs, regexes, or hardcoded fallbacks, and unknown or invalid broker-environment status must render as degraded/blocking. | Frontend type/API-client tests plus browser coverage for global shell status states. | P0 | High |
 
 For UI-001, "operator-critical field" means a field that could affect operator confidence, trading permission, open-risk handling, market-data freshness, broker state, allocation/risk exposure, execution status, or governance/deployment/runtime interpretation.
 
@@ -86,6 +87,7 @@ Frontend-derived summaries are allowed for operator usability, especially on the
 
 Status badges must distinguish:
 
+- `DEMO · DEALING DISABLED`, `DEMO · DEALING ENABLED`, `LIVE · DEALING DISABLED`, `LIVE · DEALING ENABLED`, `ENVIRONMENT UNKNOWN`, and `CONFIGURATION INVALID`.
 - Healthy live stream vs polling fallback vs stale vs disconnected.
 - Broker connected vs disconnected vs unavailable.
 - `APPROVED` governance vs deployed vs running runtime.
@@ -141,6 +143,7 @@ Passive surfaces must not hide mutation controls inside auto-refresh, passive po
 | UI-BND-005 | Enum parity | Missing or unknown backend enum states must not collapse into healthy/default UI states. | Type/mapping tests. | P1 |
 | UI-BND-006 | Test-only controls | Testing/destructive controls must be environment-gated and clearly labelled. | Config/component tests. | P0 |
 | UI-BND-007 | AIMEE passive safety | AIMEE passive refresh must remain read-only and separate from advisory persistence. | API-client/component tests. | P1 |
+| UI-BND-008 | Broker environment truth | Frontend must not infer broker environment or dealing truth from URL strings, regexes, or hardcoded DEMO/LIVE defaults. | API-client/type/browser tests. | P0 |
 
 ## Known unknowns
 

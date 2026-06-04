@@ -12,6 +12,7 @@ from app.core.broker import (
     OrderDirection,
     OrderRequest,
 )
+from app.core.broker_environment import BrokerEnvironment, IG_LIVE_BASE_URL
 from app.core.ig_broker import IGBroker, IGBrokerError
 
 
@@ -48,13 +49,13 @@ def _ig_market_payload() -> dict[str, object]:
 
 def _authenticated_ig_broker(monkeypatch) -> IGBroker:
     broker = IGBroker(
-        AccountType.DEMO,
         api_key="key",
         username="user",
         password="password",
         account_id="acct-1",
         base_url="https://example.test/gateway/deal",
         trading_enabled=True,
+        allow_non_ig_base_url_for_testing=True,
     )
     monkeypatch.setattr(broker, "_ensure_authenticated", lambda: None)
     monkeypatch.setattr(broker, "_get_account_currency", lambda: "USD")
@@ -156,13 +157,13 @@ def test_audit_life_001_ig_place_order_confirmation_timeout_returns_manual_revie
 
 def test_audit_life_005_ig_simulated_order_and_close_are_not_broker_confirmed():
     broker = IGBroker(
-        AccountType.DEMO,
         api_key=None,
         username=None,
         password=None,
         account_id=None,
         base_url="https://example.test/gateway/deal",
         trading_enabled=False,
+        allow_non_ig_base_url_for_testing=True,
     )
 
     opened = broker.place_order(
@@ -189,7 +190,6 @@ def test_audit_life_005_ig_simulated_order_and_close_are_not_broker_confirmed():
 
 def test_ig_market_details_parse_sizing_semantics():
     broker = IGBroker(
-        AccountType.DEMO,
         api_key=None,
         username=None,
         password=None,
@@ -240,7 +240,6 @@ def test_ig_market_details_parse_sizing_semantics():
 
 def test_ig_quote_risk_sized_order_is_exact_when_metadata_is_complete(monkeypatch):
     broker = IGBroker(
-        AccountType.DEMO,
         api_key=None,
         username=None,
         password=None,
@@ -300,3 +299,54 @@ def test_ig_quote_risk_sized_order_is_exact_when_metadata_is_complete(monkeypatc
     assert quote.requested_size == pytest.approx(1.0)
     assert quote.account_currency == "USD"
     assert quote.details.get("account_currency") is None
+
+
+def test_ig_broker_rejects_live_trading_without_explicit_acknowledgement():
+    with pytest.raises(IGBrokerError):
+        IGBroker(
+            api_key="key",
+            username="user",
+            password="password",
+            account_id="acct-1",
+            base_url=IG_LIVE_BASE_URL,
+            trading_enabled=True,
+            live_trading_acknowledged=False,
+        )
+
+
+def test_ig_broker_does_not_use_credentials_before_url_validation_succeeds(monkeypatch):
+    network_attempted = False
+
+    def fail_if_called(*args, **kwargs):
+        nonlocal network_attempted
+        network_attempted = True
+        raise AssertionError("network should not be used before URL validation")
+
+    monkeypatch.setattr(IGBroker, "_send_https_request", fail_if_called)
+
+    with pytest.raises(ValueError):
+        IGBroker(
+            api_key="key",
+            username="user",
+            password="password",
+            account_id="acct-1",
+            base_url="https://evil.example/demo-api.ig.com/gateway/deal",
+            trading_enabled=False,
+        )
+
+    assert network_attempted is False
+
+
+def test_ig_broker_supports_explicit_test_only_base_url_override():
+    broker = IGBroker(
+        api_key=None,
+        username=None,
+        password=None,
+        account_id=None,
+        base_url="https://example.test/gateway/deal",
+        trading_enabled=False,
+        allow_non_ig_base_url_for_testing=True,
+        testing_environment=BrokerEnvironment.DEMO,
+    )
+
+    assert broker.account_type is AccountType.DEMO

@@ -33,7 +33,8 @@ def _request(
 
 
 def test_audit_sec_001_all_state_changing_routes_require_operator_auth_policy():
-    router = build_api_router(Settings(testing_routes_enabled=True))
+    settings = Settings(testing_routes_enabled=True)
+    router = build_api_router(settings)
     state_changing_routes = sorted(
         (method, route.path)
         for route in router.routes
@@ -46,7 +47,7 @@ def test_audit_sec_001_all_state_changing_routes_require_operator_auth_policy():
     assert [
         (method, path)
         for method, path in state_changing_routes
-        if not requires_operator_auth(method=method, path=path)
+        if not requires_operator_auth(method=method, path=path, settings=settings)
     ] == []
 
 

@@ -43,7 +43,7 @@ def build_api_router(settings: Settings | None = None) -> APIRouter:
     router.include_router(strategies.router, tags=["strategies"])
     router.include_router(aimee.router, tags=["aimee"])
     router.include_router(ai_reviewer.router, tags=["ai-reviewer"])
-    if active_settings.testing_routes_enabled:
+    if active_settings.testing_routes_can_register:
         router.include_router(testing.router, tags=["testing"])
     return router
 

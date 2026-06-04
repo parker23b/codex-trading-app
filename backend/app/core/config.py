@@ -2,13 +2,21 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+from app.core.broker_environment import (
+    BrokerEndpointClassification,
+    BrokerEnvironment,
+    IG_DEMO_BASE_URL,
+    classify_ig_api_base_url,
+)
 
 
 BACKEND_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 BACKEND_ROOT = BACKEND_ENV_FILE.parent
 DEFAULT_SQLITE_DB_PATH = BACKEND_ROOT / "trading_platform.db"
+LOCAL_TESTING_ROUTE_ENVS = {"development", "dev", "local", "test", "testing"}
 
 
 class Settings(BaseSettings):
@@ -19,7 +27,6 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     database_url: str = f"sqlite:///{DEFAULT_SQLITE_DB_PATH.as_posix()}"
     broker_provider: str = "IG"
-    broker_mode: str = "DEMO"
     cors_origins: Annotated[list[str], NoDecode] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
@@ -81,9 +88,10 @@ class Settings(BaseSettings):
     ig_username: str | None = None
     ig_password: str | None = None
     ig_account_id: str | None = None
-    ig_api_base_url: str | None = None
+    ig_api_base_url: str = IG_DEMO_BASE_URL
     ig_request_timeout_seconds: float = 10.0
     ig_trading_enabled: bool = False
+    ig_live_trading_acknowledged: bool = False
     ig_streaming_enabled: bool = True
     ig_streaming_watch_interval_seconds: float = 1.0
     ig_streaming_stale_after_seconds: float = 20.0
@@ -109,7 +117,7 @@ class Settings(BaseSettings):
     ig_market_cache_stale_ttl_seconds: float = 300.0
     ig_verify_ssl: bool = True
     ig_ca_bundle_path: str | None = None
-    testing_routes_enabled: bool = True
+    testing_routes_enabled: bool = False
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_ENV_FILE, case_sensitive=False, extra="ignore"
@@ -179,13 +187,10 @@ class Settings(BaseSettings):
         normalized_path = (BACKEND_ROOT / raw_path.removeprefix("./")).resolve()
         return f"sqlite:///{normalized_path.as_posix()}"
 
-    @field_validator("broker_mode")
+    @field_validator("ig_api_base_url")
     @classmethod
-    def validate_broker_mode(cls, value: str) -> str:
-        normalized = value.upper()
-        if normalized not in {"DEMO", "LIVE"}:
-            raise ValueError("BROKER_MODE must be DEMO or LIVE.")
-        return normalized
+    def validate_ig_api_base_url(cls, value: str) -> str:
+        return classify_ig_api_base_url(value).base_url
 
     @field_validator("broker_provider")
     @classmethod
@@ -312,6 +317,38 @@ class Settings(BaseSettings):
                 "IG_STREAMING_REQUESTED_FREQUENCY must be a positive number or 'unlimited'."
             )
         return value.strip()
+
+    @model_validator(mode="after")
+    def validate_live_trading_acknowledgement(self) -> "Settings":
+        if (
+            self.broker_environment is BrokerEnvironment.LIVE
+            and self.ig_trading_enabled
+            and not self.ig_live_trading_acknowledged
+        ):
+            raise ValueError(
+                "IG_LIVE_TRADING_ACKNOWLEDGED=true is required before enabling live dealing."
+            )
+        return self
+
+    @property
+    def broker_environment(self) -> BrokerEnvironment:
+        return classify_ig_api_base_url(self.ig_api_base_url).environment
+
+    @property
+    def broker_endpoint_classification(self) -> BrokerEndpointClassification:
+        return classify_ig_api_base_url(
+            self.ig_api_base_url
+        ).endpoint_classification
+
+    @property
+    def testing_routes_can_register(self) -> bool:
+        app_env = self.app_env.strip().lower()
+        return (
+            self.testing_routes_enabled
+            and app_env in LOCAL_TESTING_ROUTE_ENVS
+            and self.broker_environment is BrokerEnvironment.DEMO
+            and not self.ig_trading_enabled
+        )
 
 
 @lru_cache

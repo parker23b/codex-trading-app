@@ -154,6 +154,15 @@ ROUTE_MANIFEST: tuple[RouteManifestEntry, ...] = (
     ),
     _entry(
         "GET",
+        "/system/broker-environment",
+        "app.api.routes.health.broker_environment_status",
+        RouteClassification.PASSIVE_READ,
+        surface=RouteSurface.INTERNAL_DIAGNOSTIC,
+        frontend_consumers=("getBrokerEnvironmentStatus",),
+        notes="Backend-owned broker environment and dealing status projection.",
+    ),
+    _entry(
+        "GET",
         "/system/limits",
         "app.api.routes.system.get_system_operating_limits",
         RouteClassification.PASSIVE_READ,
@@ -652,9 +661,13 @@ def manifest_by_key(
 
 
 def discover_registered_routes(
-    *, testing_routes_enabled: bool
+    *, testing_routes_enabled: bool, **settings_overrides: object
 ) -> dict[tuple[str, str], RegisteredRoute]:
-    router = build_api_router(Settings(testing_routes_enabled=testing_routes_enabled))
+    router = build_api_router(
+        Settings(
+            testing_routes_enabled=testing_routes_enabled, **settings_overrides
+        )
+    )
     discovered: dict[tuple[str, str], RegisteredRoute] = {}
     for route in router.routes:
         if not isinstance(route, APIRoute):
@@ -835,10 +848,12 @@ def validate_route_inventory(
                 "is missing rationale."
             )
 
+        auth_settings = Settings(testing_routes_enabled=entry.testing_route)
         auth_required_for_base = requires_operator_auth(
             method=entry.method,
             path=entry.path,
             query_params={},
+            settings=auth_settings,
         )
         if (
             entry.classification
@@ -871,6 +886,7 @@ def validate_route_inventory(
                 method=entry.method,
                 path=entry.path,
                 query_params=variant.query_params_mapping(),
+                settings=auth_settings,
             ):
                 errors.append(
                     f"{entry.method} {entry.path}?{variant.query_string()} is an active-read "

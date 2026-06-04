@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from app.core.broker_environment import IG_DEMO_BASE_URL, IG_LIVE_BASE_URL
 from app.services.health_service import get_health_service
 from app.services.observability_state_service import (
     OBSERVABILITY_MODE_LOCAL_ONLY_FALLBACK,
@@ -146,3 +147,56 @@ def test_system_health_route_labels_local_only_fallback_when_aggregation_unavail
     assert payload["observability"]["mode"] == OBSERVABILITY_MODE_LOCAL_ONLY_FALLBACK
     assert payload["observability"]["aggregation_available"] is False
     assert payload["observability"]["local_details_scope"] == "CURRENT_PROCESS"
+
+
+def test_broker_environment_route_exposes_safe_classified_truth(client_factory):
+    with client_factory(
+        ig_api_base_url=IG_DEMO_BASE_URL,
+        ig_trading_enabled=False,
+        ig_streaming_enabled=False,
+    ) as client:
+        response = client.get("/system/broker-environment")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "provider": "IG",
+        "environment": "DEMO",
+        "endpoint_classification": "IG_DEMO_GATEWAY",
+        "dealing_enabled": False,
+        "streaming_enabled": False,
+        "live_trading_acknowledged": False,
+        "configuration_valid": True,
+        "blocking_reason": None,
+    }
+
+
+def test_broker_environment_route_does_not_expose_secret_fields(client_factory):
+    with client_factory(
+        ig_api_base_url=IG_LIVE_BASE_URL,
+        ig_trading_enabled=False,
+        ig_live_trading_acknowledged=False,
+        ig_api_key="secret-api-key",
+        ig_username="secret-user",
+        ig_password="secret-password",
+        ig_account_id="secret-account-id",
+    ) as client:
+        response = client.get("/system/broker-environment")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["environment"] == "LIVE"
+    assert payload["endpoint_classification"] == "IG_LIVE_GATEWAY"
+    for forbidden_field in {
+        "api_key",
+        "username",
+        "password",
+        "account_id",
+        "ig_api_key",
+        "ig_username",
+        "ig_password",
+        "ig_account_id",
+        "cst",
+        "x-security-token",
+        "base_url",
+    }:
+        assert forbidden_field not in payload

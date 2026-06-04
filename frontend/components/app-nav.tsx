@@ -6,12 +6,15 @@ import { usePathname } from "next/navigation";
 
 import {
   UNAVAILABLE_BROKER_AUTH_STATUS,
+  UNAVAILABLE_BROKER_ENVIRONMENT_STATUS,
   UNAVAILABLE_CONTROL_PLANE_SUMMARY,
   UNAVAILABLE_STREAM_HEALTH_STATUS,
   getBrokerAuthStatus,
+  getBrokerEnvironmentStatus,
   getControlPlaneSummary,
   getStreamHealth,
 } from "@/lib/api";
+import type { BrokerEnvironmentStatus } from "@/lib/types";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 const links = [
@@ -60,8 +63,14 @@ function activeNavLinkStyle(isActive: boolean): CSSProperties | undefined {
 export function AppNav() {
   const pathname = usePathname();
   const [broker, setBroker] = useState(UNAVAILABLE_BROKER_AUTH_STATUS);
+  const [brokerEnvironment, setBrokerEnvironment] = useState<BrokerEnvironmentStatus>(
+    UNAVAILABLE_BROKER_ENVIRONMENT_STATUS,
+  );
   const [streamHealth, setStreamHealth] = useState(UNAVAILABLE_STREAM_HEALTH_STATUS);
   const [controlPlane, setControlPlane] = useState(UNAVAILABLE_CONTROL_PLANE_SUMMARY);
+  const [brokerEnvironmentLoadError, setBrokerEnvironmentLoadError] = useState<string | null>(
+    "Broker environment has not loaded yet.",
+  );
   const [streamLoadError, setStreamLoadError] = useState<string | null>("Stream health has not loaded yet.");
   const [controlPlaneLoadError, setControlPlaneLoadError] = useState<string | null>("Control-plane health has not loaded yet.");
 
@@ -69,8 +78,9 @@ export function AppNav() {
     let cancelled = false;
 
     const refresh = async () => {
-      const [nextBroker, nextStreamHealth, nextControlPlane] = await Promise.allSettled([
+      const [nextBroker, nextBrokerEnvironment, nextStreamHealth, nextControlPlane] = await Promise.allSettled([
         getBrokerAuthStatus(),
+        getBrokerEnvironmentStatus(),
         getStreamHealth(),
         getControlPlaneSummary(),
       ]);
@@ -86,6 +96,19 @@ export function AppNav() {
           ...UNAVAILABLE_BROKER_AUTH_STATUS,
           detail: errorMessage(nextBroker.reason, "Broker telemetry could not be loaded."),
         });
+      }
+
+      if (nextBrokerEnvironment.status === "fulfilled") {
+        setBrokerEnvironment(nextBrokerEnvironment.value);
+        setBrokerEnvironmentLoadError(null);
+      } else {
+        setBrokerEnvironment({
+          ...UNAVAILABLE_BROKER_ENVIRONMENT_STATUS,
+          blocking_reason: errorMessage(nextBrokerEnvironment.reason, "Broker environment could not be loaded."),
+        });
+        setBrokerEnvironmentLoadError(
+          errorMessage(nextBrokerEnvironment.reason, "Broker environment could not be loaded."),
+        );
       }
 
       if (nextStreamHealth.status === "fulfilled") {
@@ -141,6 +164,27 @@ export function AppNav() {
     : broker.state === "unavailable" || !streamHealth.connected
       ? "negative"
       : "positive";
+  const brokerEnvironmentLabel = brokerEnvironmentLoadError
+    ? "ENVIRONMENT UNKNOWN"
+    : !brokerEnvironment.configuration_valid
+      ? "CONFIGURATION INVALID"
+      : `${brokerEnvironment.environment} \u00b7 ${brokerEnvironment.dealing_enabled ? "DEALING ENABLED" : "DEALING DISABLED"}`;
+  const brokerEnvironmentDetail = brokerEnvironmentLoadError
+    ? `Broker environment unavailable: ${brokerEnvironmentLoadError}`
+    : !brokerEnvironment.configuration_valid
+      ? brokerEnvironment.blocking_reason ?? "Broker environment configuration is invalid."
+      : [
+          `${brokerEnvironment.provider} ${brokerEnvironment.endpoint_classification}`,
+          brokerEnvironment.streaming_enabled ? "streaming enabled" : "streaming disabled",
+          brokerEnvironment.live_trading_acknowledged ? "live dealing acknowledged" : "live dealing not acknowledged",
+        ].join(" \u00b7 ");
+  const brokerEnvironmentTone = brokerEnvironmentLoadError || !brokerEnvironment.configuration_valid
+    ? "negative"
+    : brokerEnvironment.environment === "LIVE" && brokerEnvironment.dealing_enabled
+      ? "negative"
+      : brokerEnvironment.environment === "LIVE" || brokerEnvironment.dealing_enabled
+        ? "warning"
+        : "positive";
 
   return (
     <div className="grid h-full grid-cols-[240px_minmax(0,1fr)_auto] items-center gap-3 px-[14px] max-[720px]:grid-cols-1 max-[720px]:items-start max-[720px]:gap-2 max-[720px]:px-3 max-[720px]:py-3">
@@ -213,11 +257,12 @@ export function AppNav() {
           <strong>{streamLabel}</strong>
         </div>
         <div
-          className="flex min-w-0 min-w-[82px] flex-col gap-[2px] rounded-[12px] border border-[color:var(--glass-stroke)] bg-[image:var(--glass-surface-soft)] px-2 py-[7px] shadow-[var(--shadow-soft)]"
-          title="Account environment is unavailable; no backend account source is loaded in this nav summary."
+          className={indicatorTone(brokerEnvironmentTone).className}
+          style={indicatorTone(brokerEnvironmentTone).style}
+          title={brokerEnvironmentDetail}
         >
-          <span className="text-[0.68rem] uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">Account Env</span>
-          <strong>Unknown</strong>
+          <span className="text-[0.68rem] uppercase tracking-[0.08em] text-[color:var(--text-tertiary)]">Broker Env</span>
+          <strong>{brokerEnvironmentLabel}</strong>
         </div>
         <ThemeToggle variant="nav" />
       </div>

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 
 import pytest
@@ -16,7 +16,11 @@ from app.db.migrations import ensure_database_schema_current
 from app.db.session import get_session
 from app.main import create_app
 from app.services.domain_event_service import domain_event_service
-from app.services.health_service import get_health_service
+from app.services.health_service import (
+    get_health_service,
+    reset_health_service_session_factory,
+    set_health_service_session_factory,
+)
 from app.services.market_status_service import get_market_status_service
 from app.services.watchlist_service import get_watchlist_service
 from tests.fakes import FakeBroker
@@ -156,6 +160,13 @@ def patch_observability_engine(
     monkeypatch.setattr(
         "app.services.observability_state_service.engine", session.get_bind()
     )
+
+
+@pytest.fixture(autouse=True)
+def patch_health_service_session_factory(session: Session) -> Iterator[None]:
+    set_health_service_session_factory(lambda: nullcontext(session))
+    yield
+    reset_health_service_session_factory()
 
 
 @pytest.fixture

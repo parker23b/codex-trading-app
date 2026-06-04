@@ -1,6 +1,6 @@
 # Operator Guide
 
-This guide covers local development setup and operator-facing surfaces. It is not a production runbook; InvestMate is not ready for live or demo broker dealing.
+This guide covers local development setup and operator-facing surfaces. It is not a production runbook; InvestMate is not ready for live trading, and any broker-connected demo must remain human-supervised.
 
 ## Prerequisites
 
@@ -27,9 +27,11 @@ Default backend behavior:
 - uses SQLite at `backend/trading_platform.db`
 - applies Alembic migrations automatically on startup
 - upgrades existing unversioned SQLite dev databases through a legacy compatibility bridge before stamping the baseline revision
-- uses the IG broker adapter in `DEMO` mode
+- uses the IG broker adapter with `IG_API_BASE_URL=https://demo-api.ig.com/gateway/deal`
 - keeps `IG_TRADING_ENABLED=false`
 - enables IG streaming by default
+- keeps `IG_LIVE_TRADING_ACKNOWLEDGED=false`
+- keeps test-only backend routes disabled by default
 - keeps AIMEE/AI reviewer LLM augmentation disabled by default
 
 Backend URL: [http://localhost:8000](http://localhost:8000)
@@ -38,6 +40,7 @@ Useful startup checks without IG credentials:
 
 - [http://localhost:8000/health](http://localhost:8000/health)
 - [http://localhost:8000/system/health](http://localhost:8000/system/health)
+- [http://localhost:8000/system/broker-environment](http://localhost:8000/system/broker-environment)
 - [http://localhost:8000/control-plane/summary](http://localhost:8000/control-plane/summary)
 - [http://localhost:8000/coverage/summary](http://localhost:8000/coverage/summary)
 - [http://localhost:8000/dashboard](http://localhost:8000/dashboard)
@@ -68,26 +71,42 @@ Update `backend/.env` with demo credentials only when you want broker-read check
 
 ```env
 BROKER_PROVIDER=IG
-BROKER_MODE=DEMO
 IG_API_KEY=your-demo-api-key
 IG_USERNAME=your-demo-username
 IG_PASSWORD=your-demo-password
 IG_ACCOUNT_ID=your-demo-account-id
 IG_API_BASE_URL=https://demo-api.ig.com/gateway/deal
 IG_TRADING_ENABLED=false
+IG_LIVE_TRADING_ACKNOWLEDGED=false
 IG_VERIFY_SSL=true
 IG_CA_BUNDLE_PATH=
+TESTING_ROUTES_ENABLED=false
 ```
 
 Read-only verification progression:
 
 1. Keep `IG_TRADING_ENABLED=false`.
 2. Start the backend.
-3. Verify auth via `GET /broker/positions`.
-4. Verify stream or market health via `GET /health/stream` and `GET /system/health`.
-5. Verify market inspection via `GET /markets/overview?category=forex`.
+3. Verify `GET /system/broker-environment` returns `DEMO`, `IG_DEMO_GATEWAY`, and the expected dealing state.
+4. Verify auth via `GET /broker/positions`.
+5. Verify stream or market health via `GET /health/stream` and `GET /system/health`.
+6. Verify market inspection via `GET /markets/overview?category=forex`.
+7. Verify `POST /testing/reset-history` returns `404`.
 
-Do not enable real broker dealing from this repository state. `BROKER_MODE=DEMO` does not make broker-dealing tests safe while readiness blockers remain open.
+Allowed broker gateway values:
+
+- demo: `https://demo-api.ig.com/gateway/deal`
+- live: `https://api.ig.com/gateway/deal`
+
+Any other host, path, or non-HTTPS URL is rejected during backend configuration. The frontend must not infer environment from URL strings.
+
+Live-dealing guard:
+
+- `IG_API_BASE_URL=https://api.ig.com/gateway/deal` with `IG_TRADING_ENABLED=false` is allowed for read-only posture.
+- `IG_API_BASE_URL=https://api.ig.com/gateway/deal` with `IG_TRADING_ENABLED=true` requires `IG_LIVE_TRADING_ACKNOWLEDGED=true`.
+- This acknowledgement only permits startup. It does not imply live-trading readiness.
+
+Do not enable real broker dealing from this repository state.
 
 ## Broker-Connected Demo Posture
 
@@ -95,8 +114,9 @@ For any supervised broker-connected demo:
 
 1. Start with a fresh versioned database. Do not reuse an unversioned non-SQLite database unless a reviewed migration path exists.
 2. Run the final smoke test with `IG_TRADING_ENABLED=false` first.
-3. Confirm test-only controls remain gated unless you are in an explicit dev/test workflow.
-4. Only then enable broker connectivity for the supervised session you intend to observe.
+3. Confirm `/system/broker-environment` shows the expected demo environment and dealing state.
+4. Confirm test-only controls remain gated unless you are in an explicit dev/test workflow.
+5. Only then enable broker connectivity for the supervised session you intend to observe.
 
 Manual decisions remain outside the repo:
 
@@ -146,9 +166,11 @@ Most important backend variables:
 - `DATABASE_URL` - SQLModel connection string. Relative SQLite paths are normalized against `backend/`.
   Supported posture today: clean SQLite development remains the default, versioned Postgres creation/rehearsal is supported for migration proof, and existing unversioned non-SQLite databases are intentionally refused at startup until they are migrated manually.
 - `BROKER_PROVIDER` - current allowed value is `IG`.
-- `BROKER_MODE` - `DEMO` or `LIVE`.
+- `IG_API_BASE_URL` - canonical broker gateway and the single source of truth for environment selection. Allowed values are `https://demo-api.ig.com/gateway/deal` and `https://api.ig.com/gateway/deal`.
 - `IG_TRADING_ENABLED` - safety switch for broker dealing. Keep this `false`.
+- `IG_LIVE_TRADING_ACKNOWLEDGED` - required before any live gateway plus live dealing configuration may start.
 - `IG_STREAMING_ENABLED` - starts the streaming loop when enabled.
+- `TESTING_ROUTES_ENABLED` - keep this `false` outside explicit dev/test harnesses.
 - `MARKET_DATA_POLL_INTERVAL_SECONDS` - market-data loop cadence.
 - `AI_REVIEWER_LLM_ENABLED` - keeps reviewer output deterministic when `false`.
 - `STARTING_ACCOUNT_VALUE` - dashboard baseline value.

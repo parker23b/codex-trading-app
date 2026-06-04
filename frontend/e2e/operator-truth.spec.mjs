@@ -219,6 +219,52 @@ test("AUDIT-UI-002 risk view keeps unavailable and provisional truth from collap
   await expect(page.getByText("Exact")).toHaveCount(0);
 });
 
+test("AUDIT-UI-007 nav shows DEMO dealing disabled from backend-owned broker environment truth", async ({ page, request }) => {
+  await setScenario(request, "default");
+
+  await page.goto("/");
+
+  await expect(page.getByText("DEMO · DEALING DISABLED")).toBeVisible();
+});
+
+test("AUDIT-UI-007 nav shows DEMO dealing enabled from backend-owned broker environment truth", async ({ page, request }) => {
+  await setScenario(request, "nav-demo-dealing-enabled");
+
+  await page.goto("/");
+
+  await expect(page.getByText("DEMO · DEALING ENABLED")).toBeVisible();
+});
+
+test("AUDIT-UI-007 nav shows LIVE dealing disabled from backend-owned broker environment truth", async ({ page, request }) => {
+  await setScenario(request, "nav-live-dealing-disabled");
+
+  await page.goto("/");
+
+  await expect(page.getByText("LIVE · DEALING DISABLED")).toBeVisible();
+});
+
+test("AUDIT-UI-007 nav shows LIVE dealing enabled unmistakably", async ({ page, request }) => {
+  await setScenario(request, "nav-live-dealing-enabled");
+
+  await page.goto("/");
+
+  await expect(page.getByText("LIVE · DEALING ENABLED")).toBeVisible();
+});
+
+test("AUDIT-UI-007 nav fails closed when broker environment status is unavailable or invalid", async ({ page, request }) => {
+  await setScenario(request, "nav-broker-environment-unavailable");
+
+  await page.goto("/");
+
+  await expect(page.getByText("ENVIRONMENT UNKNOWN")).toBeVisible();
+
+  await setScenario(request, "nav-broker-environment-invalid");
+
+  await page.goto("/");
+
+  await expect(page.getByText("CONFIGURATION INVALID")).toBeVisible();
+});
+
 test("AUDIT-LIFE-005 risk view keeps recovered and adopted lifecycle provenance distinct from ordinary opened truth", async ({ page, request }) => {
   await setScenario(request, "risk-recovery-adoption-truth");
 

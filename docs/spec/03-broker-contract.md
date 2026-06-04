@@ -41,6 +41,7 @@ The broker contract isolates broker-specific market reads, sizing semantics, ses
 | BROKER-013 | Broker-mutating requests should use stable `client_request_id` values where supported so retries and reconciliation can correlate local attempts with broker-side outcomes. Reuse, regeneration, and missing client request ids must be intentional and auditable. | Tests or code review proving client request ids are generated, persisted, passed to broker calls, and surfaced in execution/reconciliation evidence. | P1 | Medium |
 | BROKER-014 | Simulated fills/closes when `trading_enabled` is false must remain clearly marked as simulated/local and must not be presented as broker-confirmed truth. Simulated behavior should exercise the same lifecycle/audit paths as live broker behavior wherever practical. | Tests proving simulated order/close results carry distinguishable provenance and still create/update expected lifecycle/audit records. | P1 | Medium |
 | BROKER-015 | Broker reads used for entry admission, risk sizing, market status, or operator-critical UI must expose enough provenance, timestamp/freshness, and failure information for downstream services and UI to distinguish fresh broker truth from stale, fallback, simulated, unavailable, or estimated data. | DTO/read-model tests and frontend rendering tests for stale/fallback/unavailable broker data. | P1 | Medium |
+| BROKER-016 | IG environment selection MUST be derived from canonical HTTPS `IG_API_BASE_URL` values only. Unknown hosts, altered paths, malformed URLs, or non-HTTPS URLs must fail closed before any credentialed request is attempted. Live dealing requires explicit acknowledgement beyond merely selecting the live gateway. | Config and adapter tests covering canonical demo/live acceptance, malformed/HTTP/lookalike host rejection, no-credential-use-before-validation, and live-dealing acknowledgement. | P0 | High |
 
 ## Broker-neutral interface expectations
 
@@ -138,6 +139,7 @@ Expected behavior:
 
 The IG adapter owns:
 
+- Base-URL validation and environment classification before auth or request use.
 - Session/auth flow and token storage.
 - REST request timeout and response parsing.
 - Market details parsing into `BrokerMarketDetails`.
@@ -153,6 +155,9 @@ The IG adapter owns:
 
 IG isolation rules:
 
+- The accepted IG REST base URLs are exactly `https://demo-api.ig.com/gateway/deal` and `https://api.ig.com/gateway/deal`.
+- Unknown hosts, altered paths, non-HTTPS URLs, and lookalike hosts must be rejected before API keys, credentials, or session tokens are used.
+- Live dealing requires an additional explicit acknowledgement beyond selecting the live gateway.
 - IG REST payload shape, API versioning, session headers, token names, account switching, and Lightstreamer credentials belong inside IG adapter/streaming code.
 - IG pip, point, minimum size, step size, stop-distance, contract risk, and market-order preference semantics must be normalized into broker-neutral sizing/market DTOs before app services consume them.
 - App services may inspect normalized DTO fields and generic `metadata`, but must not branch on raw IG payload paths or raw Lightstreamer fields.

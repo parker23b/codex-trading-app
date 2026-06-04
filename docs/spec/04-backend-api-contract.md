@@ -30,6 +30,7 @@ Routes currently labelled with softer terms such as `Read/projection`, `Read by 
 | API-009 | Test-only mutation routes must be environment-gated and unavailable in production-like operation. | Tests/config review proving test routes are only registered or usable in approved test/dev environments. | P0 | Medium |
 | API-010 | Mutation and broker-action failures must preserve durable audit state before returning operator-facing errors where practical. The API must not return a clean failure while losing execution/reconciliation/manual-review evidence. | Route/service tests for broker failure, reconciliation failure, runtime failure, and alert/review mutation failure paths. | P1 | Medium |
 | API-011 | Routes with unknown frontend consumers must be marked `Needs confirmation` and audited as used, compatibility-only, dev-only, stale, or removable. Unknown consumer status must not be treated as evidence that the route is unused. | Frontend API client/code search and route usage audit. | P2 | Medium |
+| API-012 | Operator-visible broker environment and dealing status MUST come from a backend-owned typed contract. Frontend code must not infer environment from URLs, regexes, or fallback literals. Invalid or unavailable broker-environment truth must fail closed visibly. | Typed response model, route tests, frontend type/client tests, and browser coverage for the primary shell status. | P0 | High |
 
 ## Route documentation standards
 
@@ -58,6 +59,7 @@ This inventory was discovered from `backend/app/api/router.py` and `backend/app/
 | GET | `/health/stream` | `routes/health.py:stream_health_check` | `PASSIVE_READ` | Stream health projection; no writes known | `getStreamHealth` | Pydantic model | High |
 | GET | `/system/health` | `routes/health.py:system_health_check` | `PASSIVE_READ` | System health projection; needs write audit | Needs confirmation | Pydantic model | Medium |
 | GET | `/system/telemetry` | `routes/health.py:operational_telemetry` | `PASSIVE_READ` | Telemetry projection; needs write audit | `getOperationalTelemetry`, broker status | Pydantic model | Medium |
+| GET | `/system/broker-environment` | `routes/health.py:broker_environment_status` | `PASSIVE_READ` | Backend-owned broker environment and dealing-status projection; must not expose credentials, account ids, or raw secrets | `getBrokerEnvironmentStatus` | Pydantic model | High |
 | GET | `/system/limits` | `routes/system.py:get_system_operating_limits` | `PASSIVE_READ` | Settings projection | Dashboard/coverage | Pydantic model | High |
 | GET | `/broker/positions` | `routes/broker.py:list_broker_positions` | `BROKER_READ` | Reads broker positions; freshness/provenance needs audit | Needs confirmation | Pydantic list model | Medium |
 | GET | `/control-plane/summary` | `routes/control_plane.py:get_control_plane_summary` | `PASSIVE_READ` | Projection; default governance/deployment seeding removed and regression-tested; broader indirect write audit still needed | Control plane, dashboard | Pydantic model | Medium |
@@ -161,7 +163,7 @@ Frontend-consumed route fields must be treated as part of the API contract.
 
 Routes under `/testing/*` are mutation-capable and must be treated as `TEST_ONLY_MUTATION`.
 
-They must be unavailable in production-like operation unless explicitly protected by environment configuration, authentication, or other safeguards. The current `/testing/reset-history` route is not registered unless `TESTING_ROUTES_ENABLED=true`, and the frontend reset control/API helper are gated by `NEXT_PUBLIC_TESTING_CONTROLS_ENABLED=true`. Test-only route use in frontend development tools must not normalize unsafe reset/destructive actions as operator features.
+They must be unavailable in production-like operation unless explicitly protected by environment configuration, authentication, or other safeguards. The current `/testing/reset-history` route is not registered unless `TESTING_ROUTES_ENABLED=true`, the app is in a local/test posture, and live dealing is not enabled. The frontend reset control/API helper are separately gated by `NEXT_PUBLIC_TESTING_CONTROLS_ENABLED=true`. Test-only route use in frontend development tools must not normalize unsafe reset/destructive actions as operator features.
 
 ## Known unknowns
 
