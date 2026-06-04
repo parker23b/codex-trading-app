@@ -336,9 +336,7 @@ class Settings(BaseSettings):
 
     @property
     def broker_endpoint_classification(self) -> BrokerEndpointClassification:
-        return classify_ig_api_base_url(
-            self.ig_api_base_url
-        ).endpoint_classification
+        return classify_ig_api_base_url(self.ig_api_base_url).endpoint_classification
 
     @property
     def testing_routes_can_register(self) -> bool:

@@ -306,10 +306,9 @@ class HealthService:
         return "ok"
 
     def _is_idle(self, *, session: Session | None = None) -> bool:
-        return (
-            not self._has_live_operational_demand(session=session)
-            and not self._has_autonomy_armed(session=session)
-        )
+        return not self._has_live_operational_demand(
+            session=session
+        ) and not self._has_autonomy_armed(session=session)
 
     def _is_armed(self, *, session: Session | None = None) -> bool:
         return not self._has_live_operational_demand(

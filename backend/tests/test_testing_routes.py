@@ -92,6 +92,4 @@ def test_testing_routes_do_not_register_when_live_dealing_is_enabled():
         )
     )
 
-    assert "/testing/reset-history" not in {
-        route.path for route in live_router.routes
-    }
+    assert "/testing/reset-history" not in {route.path for route in live_router.routes}

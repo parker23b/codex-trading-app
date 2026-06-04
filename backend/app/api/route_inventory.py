@@ -664,9 +664,7 @@ def discover_registered_routes(
     *, testing_routes_enabled: bool, **settings_overrides: object
 ) -> dict[tuple[str, str], RegisteredRoute]:
     router = build_api_router(
-        Settings(
-            testing_routes_enabled=testing_routes_enabled, **settings_overrides
-        )
+        Settings(testing_routes_enabled=testing_routes_enabled, **settings_overrides)
     )
     discovered: dict[tuple[str, str], RegisteredRoute] = {}
     for route in router.routes:

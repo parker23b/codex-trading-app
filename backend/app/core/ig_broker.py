@@ -104,9 +104,7 @@ class IGBroker(Broker):
         else:
             classified_endpoint = classify_ig_api_base_url(validated_base_url)
             self._environment = classified_endpoint.environment
-            self._endpoint_classification = (
-                classified_endpoint.endpoint_classification
-            )
+            self._endpoint_classification = classified_endpoint.endpoint_classification
             self._base_url = classified_endpoint.base_url
             if (
                 self._environment is BrokerEnvironment.LIVE

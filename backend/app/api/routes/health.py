@@ -19,7 +19,9 @@ router = APIRouter()
 def health_check(
     response: Response, session: Session = Depends(get_session)
 ) -> dict[str, str]:
-    current_status = str(get_health_service().get_health_report(session=session)["status"])
+    current_status = str(
+        get_health_service().get_health_report(session=session)["status"]
+    )
     response.status_code = (
         status.HTTP_503_SERVICE_UNAVAILABLE
         if current_status == "critical"
