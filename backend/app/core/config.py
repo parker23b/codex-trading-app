@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     starting_account_value: float = 100_000.0
     dashboard_recent_trade_window: int = 30
     market_data_poll_interval_seconds: float = 2.0
+    broker_reconciliation_interval_seconds: float = 60.0
     max_price_age_ms: float = 5_000.0
     max_spread_pips: float = 2.0
     market_status_cache_ttl_ms: float = 250.0
@@ -115,6 +116,8 @@ class Settings(BaseSettings):
     tier2_promotion_ttl_seconds: int = 300
     ig_market_cache_ttl_seconds: float = 30.0
     ig_market_cache_stale_ttl_seconds: float = 300.0
+    ig_non_trading_account_allowance_per_minute: int = 24
+    ig_allowance_circuit_breaker_seconds: float = 60.0
     ig_verify_ssl: bool = True
     ig_ca_bundle_path: str | None = None
     testing_routes_enabled: bool = False
@@ -202,6 +205,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "market_data_poll_interval_seconds",
+        "broker_reconciliation_interval_seconds",
         "ig_streaming_watch_interval_seconds",
         "ig_streaming_stale_after_seconds",
         "ig_streaming_transition_debounce_seconds",
@@ -303,6 +307,24 @@ class Settings(BaseSettings):
     def validate_positive_ig_market_cache_ttls(cls, value: float) -> float:
         if value <= 0:
             raise ValueError("IG market cache TTL settings must be greater than 0.")
+        return value
+
+    @field_validator("ig_allowance_circuit_breaker_seconds")
+    @classmethod
+    def validate_positive_ig_allowance_circuit_breaker_seconds(
+        cls, value: float
+    ) -> float:
+        if value <= 0:
+            raise ValueError(
+                "IG allowance circuit-breaker settings must be greater than 0."
+            )
+        return value
+
+    @field_validator("ig_non_trading_account_allowance_per_minute")
+    @classmethod
+    def validate_positive_ig_allowance_limit(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("IG non-trading account allowance must be greater than 0.")
         return value
 
     @field_validator("ig_streaming_requested_frequency")

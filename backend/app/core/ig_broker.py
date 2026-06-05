@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import ssl
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http.client import HTTPSConnection
 from math import floor
+from threading import Lock
 from typing import Any
 from urllib.parse import urlencode, urlsplit
 from uuid import uuid4
@@ -127,9 +129,18 @@ class IGBroker(Broker):
         self._market_cache_stale_ttl_seconds = (
             get_settings().ig_market_cache_stale_ttl_seconds
         )
+        self._non_trading_allowance_per_minute = (
+            get_settings().ig_non_trading_account_allowance_per_minute
+        )
+        self._allowance_circuit_breaker_seconds = (
+            get_settings().ig_allowance_circuit_breaker_seconds
+        )
         self._positions: dict[str, BrokerPosition] = {}
         self._last_prices: dict[str, float] = {}
         self._market_details_cache: dict[str, CachedMarketDetails] = {}
+        self._non_trading_request_times: deque[float] = deque()
+        self._non_trading_allowance_blocked_until: float | None = None
+        self._allowance_lock = Lock()
         self._account_currency: str | None = None
         self._session: IGSession | None = None
 
@@ -516,6 +527,55 @@ class IGBroker(Broker):
     def get_market_details(self, instrument: str) -> BrokerMarketDetails:
         return self._load_market_details(instrument, use_cache=True)
 
+    def get_market_details_many(
+        self, instruments: list[str]
+    ) -> dict[str, BrokerMarketDetails]:
+        requested_instruments = list(dict.fromkeys(instruments))
+        if not requested_instruments:
+            return {}
+
+        results: dict[str, BrokerMarketDetails] = {}
+        instruments_to_fetch: list[str] = []
+        for instrument in requested_instruments:
+            cached = self._market_details_cache.get(instrument)
+            if cached is not None and self._is_cache_fresh(cached):
+                results[instrument] = cached.details
+                continue
+            instruments_to_fetch.append(instrument)
+
+        for chunk in self._market_detail_chunks(instruments_to_fetch):
+            try:
+                results.update(self._load_market_details_batch(chunk))
+            except IGBrokerError as exc:
+                if self._can_fallback_batch_to_stale_market_details(chunk, exc):
+                    logger.warning(
+                        "Using stale IG market cache for batch after upstream error",
+                        extra={
+                            "instrument_count": len(chunk),
+                            "error": sanitize_error_detail(
+                                exc,
+                                default_detail="Upstream error details redacted.",
+                            ),
+                        },
+                    )
+                    for instrument in chunk:
+                        cached = self._market_details_cache[instrument]
+                        results[instrument] = cached.details
+                    continue
+                raise
+
+        missing = [
+            instrument
+            for instrument in requested_instruments
+            if instrument not in results
+        ]
+        if missing:
+            raise IGBrokerError(
+                "IG market batch response did not include details for: "
+                + ", ".join(missing)
+            )
+        return {instrument: results[instrument] for instrument in requested_instruments}
+
     def get_historical_candles(
         self,
         instrument: str,
@@ -619,6 +679,34 @@ class IGBroker(Broker):
             details=details, fetched_at=time.monotonic()
         )
         return details
+
+    def _load_market_details_batch(
+        self, instruments: list[str]
+    ) -> dict[str, BrokerMarketDetails]:
+        if not instruments:
+            return {}
+        self._ensure_authenticated()
+        query = urlencode({"epics": ",".join(instruments), "filter": "ALL"})
+        payload = self._request("GET", f"/markets?{query}", version="2")
+        details_by_instrument: dict[str, BrokerMarketDetails] = {}
+        fetched_at = time.monotonic()
+        market_details = payload.get("marketDetails")
+        if not isinstance(market_details, list):
+            raise IGBrokerError(
+                "IG market batch response did not include marketDetails."
+            )
+        for market_payload in market_details:
+            if not isinstance(market_payload, dict):
+                continue
+            instrument = self._resolve_market_payload_epic(market_payload)
+            if instrument not in instruments:
+                continue
+            details = self._parse_market_details(instrument, market_payload)
+            self._market_details_cache[instrument] = CachedMarketDetails(
+                details=details, fetched_at=fetched_at
+            )
+            details_by_instrument[instrument] = details
+        return details_by_instrument
 
     def get_account_summary(self) -> BrokerAccountSummary:
         self._ensure_authenticated()
@@ -998,8 +1086,34 @@ class IGBroker(Broker):
         response_body, _ = self._raw_request(method, path, version=version, body=body)
         return response_body
 
+    @staticmethod
+    def _market_detail_chunks(instruments: list[str]) -> list[list[str]]:
+        return [
+            instruments[index : index + 50] for index in range(0, len(instruments), 50)
+        ]
+
+    @staticmethod
+    def _resolve_market_payload_epic(payload: dict[str, Any]) -> str | None:
+        instrument_data = payload.get("instrument")
+        if isinstance(instrument_data, dict):
+            epic = instrument_data.get("epic")
+            if isinstance(epic, str) and epic:
+                return epic
+        epic = payload.get("epic")
+        return epic if isinstance(epic, str) and epic else None
+
+    def _can_fallback_batch_to_stale_market_details(
+        self, instruments: list[str], error: IGBrokerError
+    ) -> bool:
+        if not self._should_fallback_to_stale_market_details(error):
+            return False
+        return all(
+            (cached := self._market_details_cache.get(instrument)) is not None
+            and self._is_cache_still_usable(cached)
+            for instrument in instruments
+        )
+
     def _wait_for_deal_confirmation(self, deal_reference: str) -> dict[str, Any]:
-        last_response: dict[str, Any] | None = None
         for _ in range(10):
             try:
                 response = self._request(
@@ -1010,7 +1124,6 @@ class IGBroker(Broker):
                     time.sleep(0.4)
                     continue
                 raise
-            last_response = response
             deal_status = response.get("dealStatus")
             if deal_status == "ACCEPTED":
                 return response
@@ -1272,6 +1385,7 @@ class IGBroker(Broker):
         body: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
     ) -> tuple[dict[str, Any], dict[str, str]]:
+        self._apply_non_trading_account_budget(method=method, path=path)
         request_headers = {
             "Accept": "application/json; charset=UTF-8",
             "Content-Type": "application/json; charset=UTF-8",
@@ -1301,6 +1415,7 @@ class IGBroker(Broker):
             )
             if status_code >= 400:
                 parsed_error_code = self._extract_error_code(response_text)
+                self._record_allowance_error(parsed_error_code)
                 logger.error(
                     "IG request failed",
                     extra={
@@ -1330,6 +1445,76 @@ class IGBroker(Broker):
                 },
             )
             raise IGBrokerError("Unable to reach IG API.") from exc
+
+    def _apply_non_trading_account_budget(self, *, method: str, path: str) -> None:
+        if not self._is_account_non_trading_request(method=method, path=path):
+            return
+
+        now = time.monotonic()
+        window_seconds = 60.0
+        with self._allowance_lock:
+            if (
+                self._non_trading_allowance_blocked_until is not None
+                and now < self._non_trading_allowance_blocked_until
+            ):
+                retry_after = self._non_trading_allowance_blocked_until - now
+                raise IGBrokerError(
+                    "IG local non-trading account allowance budget is paused; "
+                    f"retry after {retry_after:.1f}s."
+                )
+
+            while (
+                self._non_trading_request_times
+                and now - self._non_trading_request_times[0] >= window_seconds
+            ):
+                self._non_trading_request_times.popleft()
+
+            if (
+                len(self._non_trading_request_times)
+                >= self._non_trading_allowance_per_minute
+            ):
+                oldest = self._non_trading_request_times[0]
+                blocked_until = max(
+                    oldest + window_seconds,
+                    now + min(self._allowance_circuit_breaker_seconds, window_seconds),
+                )
+                self._non_trading_allowance_blocked_until = blocked_until
+                retry_after = blocked_until - now
+                raise IGBrokerError(
+                    "IG local non-trading account allowance budget exhausted; "
+                    f"retry after {retry_after:.1f}s."
+                )
+
+            self._non_trading_request_times.append(now)
+
+    @staticmethod
+    def _is_account_non_trading_request(*, method: str, path: str) -> bool:
+        normalized_method = method.upper()
+        normalized_path = path.split("?", 1)[0]
+        if normalized_method != "GET":
+            return False
+        return normalized_path.startswith(
+            (
+                "/accounts",
+                "/market-navigation",
+                "/markets",
+                "/operations/application",
+                "/positions",
+                "/prices",
+                "/working-orders",
+            )
+        )
+
+    def _record_allowance_error(self, error_code: str | None) -> None:
+        if error_code not in {
+            "error.public-api.exceeded-account-allowance",
+            "error.public-api.exceeded-api-key-allowance",
+        }:
+            return
+        with self._allowance_lock:
+            self._non_trading_allowance_blocked_until = (
+                time.monotonic() + self._allowance_circuit_breaker_seconds
+            )
 
     def _send_https_request(
         self,
@@ -1445,7 +1630,9 @@ class IGBroker(Broker):
     def _should_fallback_to_stale_market_details(error: IGBrokerError) -> bool:
         message = str(error)
         return (
-            "error.public-api.exceeded-api-key-allowance" in message
+            "error.public-api.exceeded-account-allowance" in message
+            or "error.public-api.exceeded-api-key-allowance" in message
+            or "IG local non-trading account allowance budget" in message
             or "Unable to reach IG API" in message
             or "status 5" in message
         )

@@ -196,6 +196,14 @@ class Broker(ABC):
     def get_market_details(self, instrument: str) -> BrokerMarketDetails:
         raise NotImplementedError
 
+    def get_market_details_many(
+        self, instruments: list[str]
+    ) -> dict[str, BrokerMarketDetails]:
+        return {
+            instrument: self.get_market_details(instrument)
+            for instrument in dict.fromkeys(instruments)
+        }
+
     @abstractmethod
     def quote_risk_sized_order(
         self,

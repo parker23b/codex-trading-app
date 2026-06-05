@@ -47,6 +47,14 @@ def _ig_market_payload() -> dict[str, object]:
     }
 
 
+def _ig_market_payload_for_epic(epic: str) -> dict[str, object]:
+    payload = _ig_market_payload()
+    instrument = dict(payload["instrument"])  # type: ignore[arg-type]
+    instrument["epic"] = epic
+    instrument["name"] = epic
+    return {**payload, "instrument": instrument}
+
+
 def _authenticated_ig_broker(monkeypatch) -> IGBroker:
     broker = IGBroker(
         api_key="key",
@@ -236,6 +244,85 @@ def test_ig_market_details_parse_sizing_semantics():
     assert details.metadata["ig_sizing"]["scaling_factor"] == 10_000.0
     assert details.metadata["ig_sizing"]["price_increment"] == 0.0001
     assert details.metadata["ig_sizing"]["instrument_type"] == "CURRENCIES"
+
+
+def test_ig_market_details_many_batches_uncached_epics(monkeypatch):
+    broker = _authenticated_ig_broker(monkeypatch)
+    requested_paths: list[str] = []
+    epics = ["CS.D.EURUSD.CFD.IP", "CS.D.GBPUSD.CFD.IP"]
+
+    def fake_request(method, path, *, version, body=None):
+        requested_paths.append(path)
+        assert method == "GET"
+        assert version == "2"
+        assert body is None
+        return {"marketDetails": [_ig_market_payload_for_epic(epic) for epic in epics]}
+
+    monkeypatch.setattr(broker, "_request", fake_request)
+
+    details = broker.get_market_details_many(epics)
+
+    assert requested_paths == [
+        "/markets?epics=CS.D.EURUSD.CFD.IP%2CCS.D.GBPUSD.CFD.IP&filter=ALL"
+    ]
+    assert set(details) == set(epics)
+    assert details["CS.D.EURUSD.CFD.IP"].name == "CS.D.EURUSD.CFD.IP"
+
+
+def test_ig_market_details_many_uses_stale_cache_for_account_allowance(
+    monkeypatch,
+):
+    broker = _authenticated_ig_broker(monkeypatch)
+    broker._market_cache_ttl_seconds = 0
+    broker._market_cache_stale_ttl_seconds = 300
+    epic = "CS.D.EURUSD.CFD.IP"
+    calls = 0
+
+    def fake_request(method, path, *, version, body=None):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return {"marketDetails": [_ig_market_payload_for_epic(epic)]}
+        raise IGBrokerError(
+            "IG request failed with status 403 "
+            "(error.public-api.exceeded-account-allowance)"
+        )
+
+    monkeypatch.setattr(broker, "_request", fake_request)
+
+    first = broker.get_market_details_many([epic])
+    second = broker.get_market_details_many([epic])
+
+    assert first[epic].name == epic
+    assert second[epic].name == epic
+    assert calls == 2
+
+
+def test_ig_local_non_trading_allowance_gate_fails_fast(monkeypatch):
+    broker = IGBroker(
+        api_key="key",
+        username="user",
+        password="password",
+        account_id="acct-1",
+        base_url="https://example.test/gateway/deal",
+        trading_enabled=False,
+        allow_non_ig_base_url_for_testing=True,
+    )
+    broker._non_trading_allowance_per_minute = 1
+    outbound_calls = 0
+
+    def fake_send_request(**kwargs):
+        nonlocal outbound_calls
+        outbound_calls += 1
+        return 200, "{}", {}
+
+    monkeypatch.setattr(broker, "_send_https_request", fake_send_request)
+
+    broker._raw_request("GET", "/positions", version="2")
+    with pytest.raises(IGBrokerError, match="local non-trading account allowance"):
+        broker._raw_request("GET", "/markets/CS.D.EURUSD.CFD.IP", version="4")
+
+    assert outbound_calls == 1
 
 
 def test_ig_quote_risk_sized_order_is_exact_when_metadata_is_complete(monkeypatch):

@@ -516,6 +516,9 @@ export function StrategyLive({
                 }
                 disabled={pending}
               >
+                <option value="" disabled>
+                  Select instrument
+                </option>
                 {(selectedStrategy.instrument_options ?? []).map((option) => (
                   <option key={option.epic} value={option.epic}>
                     {option.label}

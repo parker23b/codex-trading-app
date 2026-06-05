@@ -63,6 +63,7 @@ class _StubStreamingService:
 def test_polling_fallback_reason_uses_per_instrument_tick(monkeypatch):
     now = datetime(2026, 4, 8, 18, 0, tzinfo=UTC)
     service = MarketDataService(poll_prices=False)
+    service.settings.market_data_poll_interval_seconds = 2
     service._now = lambda: now  # type: ignore[method-assign]
     instrument = "CS.D.EURUSD.CFD.IP"
     other_instrument = "CS.D.GBPUSD.CFD.IP"
@@ -88,6 +89,7 @@ def test_polling_fallback_reason_marks_instrument_stale_only_after_relaxed_thres
 ):
     now = datetime(2026, 4, 8, 18, 0, tzinfo=UTC)
     service = MarketDataService(poll_prices=False)
+    service.settings.market_data_poll_interval_seconds = 2
     service._now = lambda: now  # type: ignore[method-assign]
     instrument = "CS.D.EURUSD.CFD.IP"
 
@@ -359,6 +361,33 @@ def test_successful_polling_fallback_does_not_mark_stream_as_connected(monkeypat
 
     assert processed == [instrument]
     assert get_health_service().get_system_health().stream_connected is False
+
+
+def test_broker_reconciliation_uses_slow_cadence(session, monkeypatch):
+    service = MarketDataService(poll_prices=False)
+    service.settings.broker_reconciliation_interval_seconds = 60
+    now = datetime(2026, 4, 8, 18, 0, tzinfo=UTC)
+    service._now = lambda: now  # type: ignore[method-assign]
+    calls = 0
+
+    def fake_reconcile(self, active_session):
+        nonlocal calls
+        calls += 1
+        assert active_session is session
+        return []
+
+    monkeypatch.setattr(
+        "app.services.market_data_service.BrokerService.reconcile_positions",
+        fake_reconcile,
+    )
+
+    service._reconcile_positions_if_due(session=session)
+    service._now = lambda: now + timedelta(seconds=10)  # type: ignore[method-assign]
+    service._reconcile_positions_if_due(session=session)
+    service._now = lambda: now + timedelta(seconds=61)  # type: ignore[method-assign]
+    service._reconcile_positions_if_due(session=session)
+
+    assert calls == 2
 
 
 def test_tier2_refresh_creates_promotion_request_for_high_scoring_candidate(

@@ -64,12 +64,17 @@ class MarketOverviewService:
             positions_by_instrument.setdefault(position.instrument, []).append(position)
         trades = self.trade_service.list_trades()
         rows: list[dict[str, object]] = []
+        definitions = [
+            definition
+            for definition in list_market_instruments()
+            if definition.category.lower() == category
+        ]
+        details_by_instrument = self.broker.get_market_details_many(
+            [definition.epic for definition in definitions]
+        )
 
-        for definition in list_market_instruments():
-            definition_category = definition.category.lower()
-            if definition_category != category:
-                continue
-            details = self.broker.get_market_details(definition.epic)
+        for definition in definitions:
+            details = details_by_instrument[definition.epic]
             rows.append(
                 self._build_instrument_row(
                     definition=definition,

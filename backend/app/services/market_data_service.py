@@ -51,6 +51,7 @@ class MarketDataService:
         self._stale_stream_instruments: set[str] = set()
         self._fallback_reason_first_seen_at: dict[str, datetime] = {}
         self._healthy_first_seen_at: dict[str, datetime] = {}
+        self._last_broker_reconciliation_at: datetime | None = None
         self._last_tier2_refresh_at: datetime | None = None
         self._screeners = strategy_registry.create_screeners()
 
@@ -83,7 +84,7 @@ class MarketDataService:
             return
 
         with Session(engine) as session:
-            BrokerService().reconcile_positions(session)
+            self._reconcile_positions_if_due(session=session)
             strategy_service = StrategyService(session)
             for instrument in active_instruments:
                 self._update_polling_health_transition(instrument, session=session)
@@ -304,6 +305,15 @@ class MarketDataService:
                 )
 
         self._last_tier2_refresh_at = now
+
+    def _reconcile_positions_if_due(self, *, session: Session) -> None:
+        now = self._now()
+        if self._last_broker_reconciliation_at is not None:
+            elapsed = (now - self._last_broker_reconciliation_at).total_seconds()
+            if elapsed < self.settings.broker_reconciliation_interval_seconds:
+                return
+        BrokerService().reconcile_positions(session)
+        self._last_broker_reconciliation_at = now
 
     def _should_poll_instrument(self, instrument: str) -> bool:
         return self._polling_fallback_reason(instrument) is not None
