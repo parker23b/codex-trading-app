@@ -21,6 +21,9 @@ class _StubStreamingService:
     def get_health(self) -> StreamHealthState:
         return self._health
 
+    def get_last_tick_at(self, instrument: str):
+        return (self._health.last_tick_at_by_instrument or {}).get(instrument)
+
 
 def _seed_market_contract_state(session) -> WatchlistEntry:
     shortlist = OperatorShortlistEntry(

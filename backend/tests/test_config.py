@@ -62,7 +62,7 @@ def test_settings_accept_canonical_ig_demo_url():
 
 
 def test_settings_accept_canonical_ig_live_url():
-    settings = Settings(ig_api_base_url=IG_LIVE_BASE_URL)
+    settings = Settings(ig_api_base_url=IG_LIVE_BASE_URL, ig_trading_enabled=False)
 
     assert settings.ig_api_base_url == IG_LIVE_BASE_URL
     assert settings.broker_environment is BrokerEnvironment.LIVE

@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, create_engine
 
+from app.core.broker_environment import IG_DEMO_BASE_URL
 from app.core.config import Settings, get_settings
 from app.core.runtime import runtime_manager
 from app.db.migrations import ensure_database_schema_current
@@ -141,7 +142,15 @@ def fixed_now() -> datetime:
 @pytest.fixture
 def app_factory(session: Session):
     def _build_app(**setting_overrides):
-        settings = Settings(**{**get_settings().model_dump(), **setting_overrides})
+        settings = Settings(
+            **{
+                **get_settings().model_dump(),
+                "ig_api_base_url": IG_DEMO_BASE_URL,
+                "ig_trading_enabled": False,
+                "ig_live_trading_acknowledged": False,
+                **setting_overrides,
+            }
+        )
         app = create_app(active_settings=settings, enable_lifespan=False)
 
         def override_get_session():

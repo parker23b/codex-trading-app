@@ -4,15 +4,19 @@ from sqlmodel import select
 
 from app.api.router import build_api_router
 from app.api.routes.testing import reset_history
-from app.core.config import get_settings
+from app.core.broker_environment import IG_DEMO_BASE_URL
+from app.core.config import Settings, get_settings
 from app.models.domain_event import DomainEvent
 
 
 def _testing_route_paths(*, enabled: bool) -> set[str]:
-    settings = get_settings()
-    settings.testing_routes_enabled = enabled
-
-    router = build_api_router()
+    router = build_api_router(
+        Settings(
+            ig_api_base_url=IG_DEMO_BASE_URL,
+            ig_trading_enabled=False,
+            testing_routes_enabled=enabled,
+        )
+    )
     return {route.path for route in router.routes}
 
 

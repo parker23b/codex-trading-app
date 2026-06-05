@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from app.api.auth import requires_operator_auth
 from app.api.router import build_api_router
+from app.core.broker_environment import IG_DEMO_BASE_URL
 from app.core.config import Settings
 
 
@@ -664,7 +665,13 @@ def discover_registered_routes(
     *, testing_routes_enabled: bool, **settings_overrides: object
 ) -> dict[tuple[str, str], RegisteredRoute]:
     router = build_api_router(
-        Settings(testing_routes_enabled=testing_routes_enabled, **settings_overrides)
+        Settings(
+            ig_api_base_url=IG_DEMO_BASE_URL,
+            ig_trading_enabled=False,
+            ig_live_trading_acknowledged=False,
+            testing_routes_enabled=testing_routes_enabled,
+            **settings_overrides,
+        )
     )
     discovered: dict[tuple[str, str], RegisteredRoute] = {}
     for route in router.routes:
@@ -846,7 +853,12 @@ def validate_route_inventory(
                 "is missing rationale."
             )
 
-        auth_settings = Settings(testing_routes_enabled=entry.testing_route)
+        auth_settings = Settings(
+            ig_api_base_url=IG_DEMO_BASE_URL,
+            ig_trading_enabled=False,
+            ig_live_trading_acknowledged=False,
+            testing_routes_enabled=entry.testing_route,
+        )
         auth_required_for_base = requires_operator_auth(
             method=entry.method,
             path=entry.path,
