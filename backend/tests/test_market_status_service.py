@@ -92,6 +92,36 @@ def test_market_status_blocks_missing_broker_update_time_even_with_price(
     assert "no price" in (status.reason or "").lower()
 
 
+def test_market_status_accepts_fresh_stream_tick_without_runtime_price(
+    broker, fixed_now, monkeypatch: pytest.MonkeyPatch
+):
+    broker.market_details_by_instrument[INSTRUMENT] = _market_details(
+        market_status="TRADEABLE",
+        update_time=None,
+        tradable=True,
+    )
+
+    class StubStreamingService:
+        @staticmethod
+        def get_last_tick_at(instrument: str):
+            assert instrument == INSTRUMENT
+            return fixed_now
+
+    monkeypatch.setattr(
+        "app.services.market_status_service.get_market_status_streaming_service",
+        lambda: StubStreamingService(),
+    )
+
+    status = get_market_status_service().get_status(
+        INSTRUMENT, broker=broker, now=fixed_now
+    )
+
+    assert status.is_ok is True
+    assert status.quote_fresh is True
+    assert status.last_price_age_ms == 0.0
+    assert status.reason is None
+
+
 def test_market_status_blocks_stale_broker_update_time(broker, fixed_now):
     broker.market_details_by_instrument[INSTRUMENT] = _market_details(
         market_status="TRADEABLE",

@@ -163,6 +163,8 @@ class StrategyService:
         for metadata in runtime_manager.list_registered_strategies():
             active_engines = runtime_manager.get_engines_for_strategy(metadata.name)
             primary_engine = active_engines[0][1] if active_engines else None
+            governance = governance_by_name.get(metadata.name)
+            deployment = deployment_by_name.get(metadata.name)
             strategy_positions = open_positions_by_strategy.get(metadata.name, [])
             strategy_pnls = trades_by_strategy.get(metadata.name, [])
             trade_count = len(strategy_pnls)
@@ -174,6 +176,8 @@ class StrategyService:
             primary_instrument = (
                 primary_engine.instrument
                 if primary_engine
+                else deployment.selected_instrument
+                if deployment is not None and deployment.selected_instrument
                 else metadata.default_instrument
             )
             primary_warning = latest_execution_warning_by_key.get(
@@ -192,8 +196,6 @@ class StrategyService:
             elif primary_decision_warning is not None:
                 primary_warning_message = primary_decision_warning.decision_reason
                 primary_warning_status = primary_decision_warning.state
-            governance = governance_by_name.get(metadata.name)
-            deployment = deployment_by_name.get(metadata.name)
             primary_runtime = runtimes_by_key.get((metadata.name, primary_instrument))
             strategy_today_intents = today_intents_by_strategy.get(metadata.name, [])
             promoted_today_count = len(
@@ -428,7 +430,12 @@ class StrategyService:
                         for key, runtime in runtimes_by_key.items()
                         if key[0] == metadata.name
                     ],
-                    "instrument_options": list_instruments(),
+                    "instrument_options": [
+                        instrument
+                        for instrument in list_instruments()
+                        if not metadata.supported_asset_classes
+                        or instrument["category"] in metadata.supported_asset_classes
+                    ],
                     "parameters": [
                         {
                             "key": parameter.key,

@@ -58,9 +58,12 @@ class RegimeSuitabilityService:
                     and definition.category.upper() in family_asset_classes
                 )
             ]
-        if not explicit and metadata.default_instrument not in {
-            candidate.epic for candidate in candidates
-        }:
+        if (
+            not explicit
+            and metadata.default_instrument
+            and metadata.default_instrument
+            not in {candidate.epic for candidate in candidates}
+        ):
             default_candidate = next(
                 (
                     definition
@@ -75,7 +78,9 @@ class RegimeSuitabilityService:
             {candidate.epic: candidate for candidate in candidates}.values(),
             key=lambda definition: (
                 -self.ACTIVITY_SCORES.get(definition.activity_level.upper(), 0.0),
-                definition.epic != metadata.default_instrument,
+                definition.epic != metadata.default_instrument
+                if metadata.default_instrument
+                else False,
                 definition.epic,
             ),
         )
@@ -127,6 +132,7 @@ class RegimeSuitabilityService:
             scored,
             key=lambda candidate: (
                 candidate.score,
-                candidate.instrument == metadata.default_instrument,
+                bool(metadata.default_instrument)
+                and candidate.instrument == metadata.default_instrument,
             ),
         )

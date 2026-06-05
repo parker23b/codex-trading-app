@@ -299,41 +299,83 @@ strategy_registry.register(
 strategy_registry.register(
     metadata=StrategyMetadata(
         name=VolatilityAdjustedPullbackContinuationStrategy.name,
-        description="Trades FX pullback continuation only when higher-timeframe trend, structure, and volatility re-acceleration align.",
-        default_instrument="CS.D.EURUSD.MINI.IP",
+        description="Runs an all-day forex pullback scalper across governed FX instruments when trend, pullback, volatility, and spread gates align.",
+        default_instrument="",
         position_size=0.4,
-        risk_per_trade=0.5,
+        risk_per_trade=0.1,
         family_name="fx_pullback",
         parameters=(
             StrategyParameterDefinition(
-                key="htf_fast_window", label="HTF Fast SMA", value=20, step=1
+                key="regime_fast_window", label="15m Fast EMA", value=20, step=1
             ),
             StrategyParameterDefinition(
-                key="htf_slow_window", label="HTF Slow SMA", value=50, step=1
+                key="regime_slow_window", label="15m Slow EMA", value=50, step=1
             ),
             StrategyParameterDefinition(
-                key="pullback_threshold",
-                label="Pullback Depth",
-                value=0.0015,
-                step=0.0001,
+                key="atr_min_percentile",
+                label="ATR Min Percentile",
+                value=30,
+                step=1,
             ),
             StrategyParameterDefinition(
-                key="max_spread_threshold",
-                label="Max Spread",
-                value=0.00012,
-                step=0.00001,
+                key="atr_max_percentile",
+                label="ATR Max Percentile",
+                value=85,
+                step=1,
+            ),
+            StrategyParameterDefinition(
+                key="max_spread_pips",
+                label="Max Spread Pips",
+                value=1.0,
+                step=0.1,
+            ),
+            StrategyParameterDefinition(
+                key="min_stop_pips",
+                label="Min Stop Pips",
+                value=3.0,
+                step=0.5,
+            ),
+            StrategyParameterDefinition(
+                key="max_stop_pips",
+                label="Max Stop Pips",
+                value=8.0,
+                step=0.5,
+            ),
+            StrategyParameterDefinition(
+                key="take_profit_r_multiple",
+                label="Take Profit R",
+                value=1.25,
+                step=0.05,
+            ),
+            StrategyParameterDefinition(
+                key="breakeven_r_multiple",
+                label="Breakeven R",
+                value=0.8,
+                step=0.05,
+            ),
+            StrategyParameterDefinition(
+                key="time_stop_minutes",
+                label="Time Stop Minutes",
+                value=20,
+                step=1,
             ),
         ),
         supported_asset_classes=("FOREX",),
         parameter_profiles=(
             StrategyParameterProfile(
                 name="default",
-                description="Baseline production profile.",
+                description="All-day forex pullback profile with conservative scalper risk hints.",
                 parameter_values={
-                    "htf_fast_window": 20,
-                    "htf_slow_window": 50,
-                    "pullback_threshold": 0.0015,
-                    "max_spread_threshold": 0.00012,
+                    "regime_fast_window": 20,
+                    "regime_slow_window": 50,
+                    "atr_min_percentile": 30,
+                    "atr_max_percentile": 85,
+                    "max_spread_pips": 1.0,
+                    "min_stop_pips": 3.0,
+                    "max_stop_pips": 8.0,
+                    "take_profit_r_multiple": 1.25,
+                    "breakeven_r_multiple": 0.8,
+                    "time_stop_minutes": 20,
                 },
             ),
         ),

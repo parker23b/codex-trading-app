@@ -91,6 +91,9 @@ class MarketStatusService:
 
         current_time = now.astimezone(UTC) if now is not None else datetime.now(UTC)
         quote_timestamp = self._resolve_quote_timestamp(
+            stream_timestamp=get_market_status_streaming_service().get_last_tick_at(
+                instrument
+            ),
             runtime_timestamp=runtime_manager.get_last_price_updated_at(instrument),
             broker_timestamp=market_details.update_time,
         )
@@ -141,17 +144,25 @@ class MarketStatusService:
 
     @staticmethod
     def _resolve_quote_timestamp(
-        *, runtime_timestamp: datetime | None, broker_timestamp: str | None
+        *,
+        stream_timestamp: datetime | None,
+        runtime_timestamp: datetime | None,
+        broker_timestamp: str | None,
     ) -> datetime | None:
+        candidates: list[datetime] = []
         if broker_timestamp:
             normalized = broker_timestamp.replace("Z", "+00:00")
             try:
-                return datetime.fromisoformat(normalized).astimezone(UTC)
+                candidates.append(datetime.fromisoformat(normalized).astimezone(UTC))
             except ValueError:
                 pass
-        if runtime_timestamp is None:
+        if stream_timestamp is not None:
+            candidates.append(stream_timestamp.astimezone(UTC))
+        if runtime_timestamp is not None:
+            candidates.append(runtime_timestamp.astimezone(UTC))
+        if not candidates:
             return None
-        return runtime_timestamp.astimezone(UTC)
+        return max(candidates)
 
     @staticmethod
     def _get_spread(details: BrokerMarketDetails) -> float | None:
@@ -217,3 +228,9 @@ def get_market_status_service() -> MarketStatusService:
     if _market_status_service is None:
         _market_status_service = MarketStatusService()
     return _market_status_service
+
+
+def get_market_status_streaming_service():
+    from app.services.ig_streaming_service import get_ig_streaming_service
+
+    return get_ig_streaming_service()
