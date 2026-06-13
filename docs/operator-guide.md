@@ -167,10 +167,13 @@ Most important backend variables:
 - `DATABASE_URL` - SQLModel connection string. Relative SQLite paths are normalized against `backend/`.
   Supported posture today: clean SQLite development remains the default, versioned Postgres creation/rehearsal is supported for migration proof, and existing unversioned non-SQLite databases are intentionally refused at startup until they are migrated manually.
 - `BROKER_PROVIDER` - current allowed value is `IG`.
+- `OPERATOR_API_CREDENTIALS` - server-side JSON registry of named operator credentials, scopes, and enabled/revoked state. Production-like environments require this instead of the shared legacy token.
+- `OPERATOR_API_TOKEN` - local-development compatibility token only; production-like startup/auth rejects it as the sole operator credential.
 - `IG_API_BASE_URL` - canonical broker gateway and the single source of truth for environment selection. Allowed values are `https://demo-api.ig.com/gateway/deal` and `https://api.ig.com/gateway/deal`.
 - `IG_TRADING_ENABLED` - safety switch for broker dealing. Keep this `false`.
 - `IG_LIVE_TRADING_ACKNOWLEDGED` - required before any live gateway plus live dealing configuration may start.
 - `IG_STREAMING_ENABLED` - starts the streaming loop when enabled.
+- `BROKER_READ_MAX_ATTEMPTS`, `BROKER_READ_BACKOFF_BASE_SECONDS`, `BROKER_READ_BACKOFF_MAX_SECONDS`, `BROKER_READ_CIRCUIT_FAILURE_THRESHOLD`, and `BROKER_READ_CIRCUIT_COOLDOWN_SECONDS` - operation-aware retry/circuit limits for broker reads. They never enable automatic order/close retries.
 - `TESTING_ROUTES_ENABLED` - keep this `false` outside explicit dev/test harnesses.
 - `MARKET_DATA_POLL_INTERVAL_SECONDS` - market-data loop cadence.
 - `AI_REVIEWER_LLM_ENABLED` - keeps reviewer output deterministic when `false`.
@@ -213,3 +216,54 @@ npm run audit
 ```
 
 Current evidence gaps are tracked in [audit-status.md](audit-status.md).
+# Historical data and backtests
+
+## Optional credentials
+
+- Binance spot klines require no credentials.
+- CSV import requires no credentials.
+- OANDA imports require `OANDA_PRACTICE_TOKEN` from a free practice account. This token is separate from IG credentials.
+- IG validation imports reuse `IG_API_KEY`, `IG_USERNAME`, `IG_PASSWORD`, and optional `IG_ACCOUNT_ID`.
+
+The application remains usable when OANDA or IG credentials are absent. Provider cards show the missing optional configuration.
+
+## Import data
+
+Open `/backtests`.
+
+For CSV, choose a file with:
+
+```csv
+timestamp,instrument,timeframe,bid_open,bid_high,bid_low,bid_close,ask_open,ask_high,ask_low,ask_close,mid_open,mid_high,mid_low,mid_close,trade_open,trade_high,trade_low,trade_close,volume
+```
+
+Only one instrument and one timeframe may appear in a CSV. Timestamps must contain `Z` or an explicit offset. Generic `open,high,low,close` columns are accepted as trade-price OHLC.
+
+For provider import, choose a configured provider, enter internal instrument IDs, timeframe, and UTC date range. Imports are synchronous in this phase. Completed snapshots cannot be modified.
+
+## Inspect coverage
+
+The dataset panel shows:
+
+- provider, venue, market type, and asset class;
+- earliest/latest timestamps and candle count;
+- bid, ask, midpoint, or trade components;
+- gaps and warnings;
+- immutable checksum and storage format.
+
+## Run a backtest
+
+Choose exactly one registered strategy, one immutable dataset, one or more dataset instruments, timeframe, range, starting capital, sizing, spread, slippage, fees, and end-of-run treatment. Runs are bounded by `BACKTEST_MAX_CANDLES_PER_RUN`.
+
+Use `DATASET` spread only when both bid and ask are present. For midpoint or trade-price data, choose an explicit fixed-price or basis-point spread. A zero synthetic spread is allowed only when intentionally configured and remains visible in the run assumptions.
+
+## Interpret results
+
+- Signals use the completed candle and fill at the next candle open.
+- Equity and drawdown use candle-resolution marks.
+- A stop and target inside the same candle resolves to the stop unless higher-resolution data establishes ordering.
+- Binance spot data is venue-specific and does not reproduce an IG crypto CFD.
+- One-minute OHLC is not tick or quote replay and cannot prove exact intraminute fill order.
+- Backtest trades are isolated simulation records, never broker-confirmed executions.
+
+Failed runs retain the failure reason and configuration for diagnosis.

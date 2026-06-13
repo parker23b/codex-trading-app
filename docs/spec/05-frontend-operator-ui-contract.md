@@ -190,3 +190,16 @@ Passive surfaces must not hide mutation controls inside auto-refresh, passive po
 - Does AIMEE passive refresh call only `/aimee/snapshot`, and are review/advisory persistence calls isolated behind explicit user action?
 - Does any component imply shortlist, watchlist, tradability, price availability, streaming coverage, governance approval, or risk admission are equivalent?
 - Does any component communicate safety-critical state by color alone?
+# Backtesting operator truth
+
+`/backtests` is a simulation surface, not a live trading surface. It must display:
+
+- immutable dataset ID, provider, venue, market type, checksum, coverage, gaps, and components;
+- provider credential availability without treating optional credentials as system failure;
+- run status and persisted failure reason;
+- evaluation boundary, pricing mode, sizing, spread, slippage, fees, and end treatment;
+- synthetic-spread and conservative-intracandle warnings;
+- Binance spot venue specificity;
+- explicit one-minute candle and non-tick-level limitations.
+
+Backtest trades must never be styled or labelled as broker-confirmed executions.

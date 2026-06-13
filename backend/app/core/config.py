@@ -1,6 +1,7 @@
 from functools import lru_cache
+import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -26,6 +27,8 @@ class Settings(BaseSettings):
     app_port: int = 8000
     log_level: str = "INFO"
     database_url: str = f"sqlite:///{DEFAULT_SQLITE_DB_PATH.as_posix()}"
+    historical_data_dir: str = str(BACKEND_ROOT / "historical_data")
+    backtest_max_candles_per_run: int = 250_000
     broker_provider: str = "IG"
     cors_origins: Annotated[list[str], NoDecode] = [
         "http://localhost:3000",
@@ -85,12 +88,18 @@ class Settings(BaseSettings):
     ai_reviewer_llm_provider: str = "disabled"
     ai_reviewer_llm_model: str = "unconfigured"
     operator_api_token: str | None = None
+    operator_api_credentials: Annotated[dict[str, dict[str, Any]], NoDecode] = {}
     ig_api_key: str | None = None
     ig_username: str | None = None
     ig_password: str | None = None
     ig_account_id: str | None = None
     ig_api_base_url: str = IG_DEMO_BASE_URL
     ig_request_timeout_seconds: float = 10.0
+    broker_read_max_attempts: int = 3
+    broker_read_backoff_base_seconds: float = 0.1
+    broker_read_backoff_max_seconds: float = 1.0
+    broker_read_circuit_failure_threshold: int = 3
+    broker_read_circuit_cooldown_seconds: float = 30.0
     ig_trading_enabled: bool = False
     ig_live_trading_acknowledged: bool = False
     ig_streaming_enabled: bool = True
@@ -120,6 +129,9 @@ class Settings(BaseSettings):
     ig_allowance_circuit_breaker_seconds: float = 60.0
     ig_verify_ssl: bool = True
     ig_ca_bundle_path: str | None = None
+    oanda_practice_token: str | None = None
+    oanda_api_base_url: str = "https://api-fxpractice.oanda.com"
+    binance_api_base_url: str = "https://api.binance.com"
     testing_routes_enabled: bool = False
 
     model_config = SettingsConfigDict(
@@ -132,6 +144,55 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
+
+    @field_validator("operator_api_credentials", mode="before")
+    @classmethod
+    def parse_operator_api_credentials(
+        cls, value: str | dict[str, dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        if isinstance(value, str):
+            if not value.strip():
+                return {}
+            parsed = json.loads(value)
+            if not isinstance(parsed, dict):
+                raise ValueError("OPERATOR_API_CREDENTIALS must be a JSON object.")
+            return parsed
+        return value
+
+    @field_validator("operator_api_credentials")
+    @classmethod
+    def validate_operator_api_credentials(
+        cls, value: dict[str, dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        allowed_scopes = {"operate", "deal", "admin"}
+        seen_tokens: set[str] = set()
+        normalized: dict[str, dict[str, Any]] = {}
+        for actor_id, raw_record in value.items():
+            if not actor_id.strip() or not isinstance(raw_record, dict):
+                raise ValueError("Each operator credential requires a named record.")
+            token = str(raw_record.get("token") or "").strip()
+            scopes = {
+                str(scope).strip().lower()
+                for scope in raw_record.get("scopes", [])
+                if str(scope).strip()
+            }
+            if not token:
+                raise ValueError(
+                    f"Operator credential '{actor_id}' requires a non-empty token."
+                )
+            if token in seen_tokens:
+                raise ValueError("Operator credential tokens must be unique.")
+            if not scopes or not scopes.issubset(allowed_scopes):
+                raise ValueError(
+                    f"Operator credential '{actor_id}' has invalid or empty scopes."
+                )
+            seen_tokens.add(token)
+            normalized[actor_id.strip()] = {
+                "token": token,
+                "scopes": sorted(scopes),
+                "enabled": bool(raw_record.get("enabled", True)),
+            }
+        return normalized
 
     @field_validator("ig_streaming_seed_instruments", mode="before")
     @classmethod
@@ -238,6 +299,9 @@ class Settings(BaseSettings):
         "trade_allocator_max_open_positions_per_instrument",
         "autonomous_candidate_instruments_per_family",
         "allocation_max_new_positions_per_cycle",
+        "broker_read_max_attempts",
+        "broker_read_circuit_failure_threshold",
+        "backtest_max_candles_per_run",
         mode="after",
     )
     @classmethod
@@ -273,6 +337,9 @@ class Settings(BaseSettings):
         "ig_streaming_promotion_score_threshold",
         "ig_streaming_eviction_score_threshold",
         "tier2_promotion_score_threshold",
+        "broker_read_backoff_base_seconds",
+        "broker_read_backoff_max_seconds",
+        "broker_read_circuit_cooldown_seconds",
         mode="after",
     )
     @classmethod

@@ -17,6 +17,7 @@ Before implementing, reviewing, or auditing behaviour, read:
 - docs/spec/08-risk-allocation-invariants.md
 - docs/spec/09-aimee-read-only-contract.md
 - docs/spec/10-testing-contract.md
+- docs/spec/11-backtesting-contract.md
 - docs/spec/99-spec-coverage-matrix.md
 
 ## Review guidelines

@@ -53,11 +53,11 @@ Live trading remains blocked.
 
 Additional production-only work is still required:
 
-1. Define one authoritative open-risk management model (`AUDIT-ARCH-002`).
-2. Introduce production-grade operator identity and authorization (`AUDIT-SEC-004`).
-3. Complete the broker capability/resilience contract (`AUDIT-BROKER-006`).
-4. Establish deterministic replay/live parity (`AUDIT-ARCH-003`).
-5. Complete history, migration, supply-chain, and operations hardening.
+1. Establish deterministic replay/live parity (`AUDIT-ARCH-003`).
+2. Complete history, migration, supply-chain, and operations hardening.
+3. For internet-facing deployments, replace static named operator credentials with an external OIDC authorization-code flow, short-lived sessions, and step-up/MFA policy. The current server-derived identity and scope boundary removes shared/caller-supplied identity but is not a substitute for an enterprise identity provider.
+
+The current code now has a versioned open-risk authority (`AUDIT-ARCH-002`), named server-derived operator identity and scopes (`AUDIT-SEC-004`), and broker-neutral capability, retry, and circuit policy (`AUDIT-BROKER-006`).
 
 ## Historical Notes
 

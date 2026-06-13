@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 import secrets
 from typing import Any
 
@@ -19,6 +20,17 @@ ACTIVE_READ_REFRESH_GET_PATHS = {
     "/reviews/runtime-health",
 }
 REQUEST_CORRELATION_HEADER_NAMES = ("x-request-id", "x-correlation-id")
+PRIVILEGED_ADMIN_PATHS = {
+    "/control-plane/operator-state",
+    "/control-plane/reconcile",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class OperatorPrincipal:
+    actor_id: str
+    scopes: frozenset[str]
+    authentication_method: str
 
 
 def requires_operator_auth(
@@ -52,16 +64,32 @@ def requires_operator_auth(
 def require_operator_identity(
     request: Request, *, settings: Settings | None = None
 ) -> str:
-    active_settings = settings or get_settings()
-    configured_token = _configured_operator_token(active_settings)
+    return require_operator_principal(request, settings=settings).actor_id
 
-    if configured_token is None:
+
+def require_operator_principal(
+    request: Request, *, settings: Settings | None = None
+) -> OperatorPrincipal:
+    active_settings = settings or get_settings()
+    existing = getattr(request.state, "operator_principal", None)
+    if isinstance(existing, OperatorPrincipal):
+        return existing
+
+    configured_credentials = active_settings.operator_api_credentials
+    configured_token = _configured_operator_token(active_settings)
+    if not configured_credentials and configured_token is None:
         if _is_production_like(active_settings):
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Operator authentication is not configured.",
             )
-        return "local-operator"
+        principal = OperatorPrincipal(
+            actor_id="local-operator",
+            scopes=frozenset({"operate", "deal", "admin"}),
+            authentication_method="local-development",
+        )
+        request.state.operator_principal = principal
+        return principal
 
     supplied_token = _extract_operator_token(request)
     if supplied_token is None:
@@ -70,21 +98,79 @@ def require_operator_identity(
             detail="Operator authentication is required.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    if not secrets.compare_digest(supplied_token, configured_token):
+    for actor_id, record in configured_credentials.items():
+        if not bool(record.get("enabled", True)):
+            continue
+        candidate = str(record.get("token") or "")
+        if candidate and secrets.compare_digest(supplied_token, candidate):
+            principal = OperatorPrincipal(
+                actor_id=actor_id,
+                scopes=frozenset(str(scope) for scope in record.get("scopes", [])),
+                authentication_method="named-api-credential",
+            )
+            request.state.operator_principal = principal
+            return principal
+
+    if configured_token is not None and not _is_production_like(active_settings):
+        if secrets.compare_digest(supplied_token, configured_token):
+            principal = OperatorPrincipal(
+                actor_id="operator",
+                scopes=frozenset({"operate", "deal", "admin"}),
+                authentication_method="legacy-local-token",
+            )
+            request.state.operator_principal = principal
+            return principal
+
+    if configured_token is not None and _is_production_like(active_settings):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Named operator credentials are required in production-like environments.",
+        )
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Operator authentication failed.",
+    )
+
+
+def require_operator_scope(
+    request: Request,
+    *,
+    required_scope: str,
+    settings: Settings | None = None,
+) -> OperatorPrincipal:
+    principal = require_operator_principal(request, settings=settings)
+    if required_scope not in principal.scopes and "admin" not in principal.scopes:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Operator authentication failed.",
+            detail=f"Operator authorization requires the '{required_scope}' scope.",
         )
-    return "operator"
+    return principal
+
+
+def required_operator_scope(*, method: str, path: str) -> str:
+    if method.upper() not in MUTATING_METHODS:
+        return "operate"
+    if path.startswith("/testing/"):
+        return "admin"
+    if path in PRIVILEGED_ADMIN_PATHS or path.startswith("/control-plane/governance/"):
+        return "admin"
+    if path in {"/strategy/start"} or (
+        path.startswith("/strategies/") and path.endswith("/start")
+    ):
+        return "deal"
+    return "operate"
 
 
 def build_operator_audit_context(
     request: Request, *, settings: Settings | None = None
 ) -> dict[str, Any]:
     active_settings = settings or resolve_request_settings(request) or get_settings()
+    principal = require_operator_principal(request, settings=active_settings)
     return {
         "actor_type": "operator",
-        "actor_id": require_operator_identity(request, settings=active_settings),
+        "actor_id": principal.actor_id,
+        "operator_scopes": sorted(principal.scopes),
+        "authentication_method": principal.authentication_method,
         "correlation_id": extract_request_correlation_id(request),
         "request_path": request.url.path,
     }

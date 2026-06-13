@@ -146,16 +146,15 @@ Every broker adapter should also pass one shared conformance suite. Adapter-spec
 
 ## Retry And Circuit Policy
 
-The current repository does not yet have one centralized broker policy for retry, backoff, and circuit state (`AUDIT-BROKER-006`).
+`ResilientBroker` is the centralized broker-neutral resilience boundary.
 
-Required design:
+- Retry-safe reads use bounded exponential backoff with jitter.
+- Position, account, market-data, and sizing reads have separate circuit state.
+- Circuit state is exposed through operational telemetry without turning passive reads into broker calls.
+- `place_order` and `close_position` are always delegated exactly once. Transport loss or timeout is treated as potentially side-effecting and is resolved through stable client request IDs, broker confirmation, reconciliation, and manual review.
+- The wrapper preserves adapter capabilities, and the fake and IG adapter both run through the shared capability-conformance suite.
 
-- Retry only operations that are explicitly safe and idempotent.
-- Use bounded exponential backoff with jitter for retry-safe reads.
-- Surface circuit state and the last successful broker/reconciliation timestamps to operators.
-- Do not blindly retry an order or close after timeout, transport loss, or ambiguous confirmation.
-- Resolve ambiguous mutations through stable client request IDs, broker confirmation lookup, reconciliation, and manual review.
-- Keep entry and close policies separate: entry failures may block new risk, while close failures must preserve visible open-risk and an exit/recovery path.
+This follows the distributed-systems rule that side-effecting calls are unsafe to retry without proven idempotency, while retry-safe reads can use backoff and jitter. See the [AWS Builders Library guidance](https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/) and [Azure Circuit Breaker pattern](https://learn.microsoft.com/en-us/azure/architecture/patterns/circuit-breaker).
 
 ## IG-Specific Notes
 

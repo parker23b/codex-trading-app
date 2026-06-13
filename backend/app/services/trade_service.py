@@ -681,6 +681,10 @@ class TradeService:
         self.session.add(execution)
         self.session.commit()
         self.session.refresh(execution)
+        if execution.local_position_id is not None:
+            self._refresh_open_risk_authority(
+                source="trade_service.transition_execution"
+            )
         self._record_execution_domain_event(execution, previous_status=previous_status)
         return execution
 
@@ -756,11 +760,13 @@ class TradeService:
             self.session.add(existing)
             self.session.commit()
             self.session.refresh(existing)
+            self._refresh_open_risk_authority(source="trade_service.upsert_position")
             return existing
 
         self.session.add(position)
         self.session.commit()
         self.session.refresh(position)
+        self._refresh_open_risk_authority(source="trade_service.upsert_position")
         return position
 
     def close_position(
@@ -803,7 +809,15 @@ class TradeService:
         self.session.add(position)
         self.session.commit()
         self.session.refresh(position)
+        self._refresh_open_risk_authority(source="trade_service.close_position")
         return position
+
+    def _refresh_open_risk_authority(self, *, source: str) -> None:
+        from app.services.open_risk_authority_service import (
+            OpenRiskAuthorityService,
+        )
+
+        OpenRiskAuthorityService(self.session).refresh(source=source)
 
     def record_reconciliation_event(
         self,

@@ -295,9 +295,9 @@ Required tests:
 
 | Field | Value |
 | --- | --- |
-| Owner service/model | `OperationalStateService`, `StrategyDeploymentManagerService`, `RuntimeRecoveryService`, `ReconciliationService`, `StrategyService` where applicable. |
-| Source of truth | No single authoritative aggregate exists yet. `StrategyDeployment` persists a management state while operational views derive state from positions, deployments, and runtimes. This is tracked under `AUDIT-ARCH-002`. |
-| Current verification confidence | Medium; state is safety-critical and should be audited across runtime/deployment/recovery flows. |
+| Owner service/model | `OpenRiskAuthorityService` / `OpenRiskAuthority`. Position, runtime, deployment, recovery, reconciliation, and execution writers trigger refreshes after durable transitions. |
+| Source of truth | One versioned `primary` risk-book aggregate containing per-position runtime/deployment ownership, broker sync, manual-review state, and reconciliation freshness. `StrategyDeployment.open_risk_management_state` remains a family-level compatibility projection. |
+| Current verification confidence | High for persisted ownership and backend visibility; production-dialect concurrency evidence remains part of the broader Postgres readiness gate. |
 
 Known states:
 
@@ -476,7 +476,6 @@ P0 transitions must not rely only on logs where durable domain/event evidence is
 - Transition authority is not centrally enforced for every state machine.
 - Some lifecycle transitions may happen through direct field assignment in services rather than explicit transition helpers.
 - Broker ambiguity states may not be represented centrally across `TradeIntent`, `Execution`, `Position`, and reconciliation records.
-- Open-risk management state does not yet have a single versioned persistence source of truth (`AUDIT-ARCH-002`).
 - Frontend enum coverage may be incomplete beyond `Execution.SUBMISSION_PENDING`.
 - `AUTO_DEPLOYABLE` transition semantics need confirmation.
 - Manual-review and reconciliation-needed states may not be consistently represented across execution, runtime, deployment, and UI.
@@ -515,3 +514,12 @@ P0 transitions must not rely only on logs where durable domain/event evidence is
 - Can simulated fills/closes be displayed as broker-confirmed truth?
 - Are all backend states represented in frontend types and labels, including `SUBMISSION_PENDING`?
 - What happens in the UI when an unknown backend state is returned?
+# Backtest run state machine
+
+```text
+PENDING -> RUNNING -> COMPLETED
+                   -> FAILED
+PENDING ----------> FAILED
+```
+
+`COMPLETED` and `FAILED` are terminal for an immutable run record. Rerunning the same configuration creates another run with its own ID while retaining the dataset checksum and configuration snapshot.

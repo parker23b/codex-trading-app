@@ -60,6 +60,7 @@ broker-dumps/
 broker-payloads/
 broker-responses/
 captures/
+backend/historical_data/
 *.har
 *.trace
 *.trace.zip

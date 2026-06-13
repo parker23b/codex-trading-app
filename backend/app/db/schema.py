@@ -3,8 +3,19 @@ from __future__ import annotations
 from sqlmodel import SQLModel
 
 from app.models.allocation_alert import AllocationAlert
+from app.models.backtest import (
+    BacktestEquityPoint,
+    BacktestMetric,
+    BacktestRun,
+    BacktestRunInstrument,
+    BacktestTrade,
+    BacktestWarning,
+    HistoricalDataset,
+    HistoricalDatasetPartition,
+)
 from app.models.domain_event import DomainEvent
 from app.models.observability import ObservabilityState
+from app.models.open_risk_authority import OpenRiskAuthority
 from app.models.operator_control import OperatorControlState
 from app.models.promotion_request import PromotionRequest
 from app.models.review import GeneratedReviewRecord
@@ -25,10 +36,19 @@ from app.models.watchlist import OperatorShortlistEntry, WatchlistEntry
 MODEL_TYPES = (
     AllocationAlert,
     AllocationCycle,
+    BacktestEquityPoint,
+    BacktestMetric,
+    BacktestRun,
+    BacktestRunInstrument,
+    BacktestTrade,
+    BacktestWarning,
     DomainEvent,
     Execution,
     GeneratedReviewRecord,
+    HistoricalDataset,
+    HistoricalDatasetPartition,
     ObservabilityState,
+    OpenRiskAuthority,
     OperatorControlState,
     OperatorShortlistEntry,
     Position,
@@ -43,8 +63,26 @@ MODEL_TYPES = (
     WatchlistEntry,
 )
 
+BACKTEST_MODEL_TYPES = {
+    BacktestEquityPoint,
+    BacktestMetric,
+    BacktestRun,
+    BacktestRunInstrument,
+    BacktestTrade,
+    BacktestWarning,
+    HistoricalDataset,
+    HistoricalDatasetPartition,
+}
+
 BASELINE_MODEL_TYPES = tuple(
-    model_type for model_type in MODEL_TYPES if model_type is not ObservabilityState
+    model_type
+    for model_type in MODEL_TYPES
+    if model_type
+    not in {
+        ObservabilityState,
+        OpenRiskAuthority,
+        *BACKTEST_MODEL_TYPES,
+    }
 )
 
 

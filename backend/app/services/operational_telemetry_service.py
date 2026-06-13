@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from sqlmodel import Session
 
 from app.core.config import get_settings
+from app.core.resilient_broker import get_broker_resilience_snapshot
 from app.services.health_service import get_health_service
 from app.services.ig_streaming_service import get_ig_streaming_service
 from app.services.observability_state_service import ObservabilityStateService
@@ -72,6 +73,7 @@ class OperationalTelemetryService:
         stream_degraded = bool(observability["stream_degraded"])
         runtime_degraded = bool(observability["runtime_degraded"])
         last_audit_write_failure = observability["last_audit_write_failure"]
+        resilience_snapshot = get_broker_resilience_snapshot()
         return {
             "status": str(health_report["status"]),
             "last_heartbeat": details.last_heartbeat,
@@ -102,6 +104,10 @@ class OperationalTelemetryService:
             "exit_block_reason": operational_state.exit_block_reason,
             "open_risk_management_state": operational_state.open_risk_management_state.value,
             "open_risk_management_reason": operational_state.open_risk_management_reason,
+            "open_risk_authority_version": operational_state.open_risk_authority_version,
+            "open_risk_authority_updated_at": operational_state.open_risk_authority_updated_at,
+            "open_risk_reconciliation_status": operational_state.open_risk_reconciliation_status,
+            "broker_resilience": resilience_snapshot,
             "audit_write_degraded": audit_write_degraded,
             "polling_fallback_active": polling_fallback_active,
             "polling_fallback_active_instrument_count": int(

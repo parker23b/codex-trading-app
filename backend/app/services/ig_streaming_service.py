@@ -12,6 +12,7 @@ from app.core.broker_factory import get_broker
 from app.core.config import get_settings
 from app.core.ig_broker import IGBroker, IGBrokerError, IGStreamingCredentials
 from app.core.logging import get_logger
+from app.core.resilient_broker import unwrap_broker
 from app.core.runtime import runtime_manager
 from app.db.session import engine
 from app.services.health_service import get_health_service
@@ -201,13 +202,15 @@ class IGStreamingService:
         if not self.settings.ig_streaming_enabled:
             self._health.enabled = False
             return False
-        if not isinstance(self._broker, IGBroker):
+        active_broker = unwrap_broker(self._broker)
+        if not isinstance(active_broker, IGBroker):
             self._health.enabled = False
             self._health.last_error = "Active broker is not an IG broker."
             logger.warning(
                 "IG streaming requested, but active broker is not an IG broker."
             )
             return False
+        self._broker = active_broker
         if LightstreamerClient is None or Subscription is None:
             self._health.enabled = False
             self._health.dependency_ready = False

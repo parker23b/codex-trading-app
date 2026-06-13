@@ -184,6 +184,10 @@ class OperationalTelemetryResponse(BaseModel):
     exit_block_reason: str | None
     open_risk_management_state: str
     open_risk_management_reason: str | None
+    open_risk_authority_version: int | None
+    open_risk_authority_updated_at: datetime | None
+    open_risk_reconciliation_status: str | None
+    broker_resilience: dict[str, object]
     audit_write_degraded: bool
     polling_fallback_active: bool
     polling_fallback_active_instrument_count: int

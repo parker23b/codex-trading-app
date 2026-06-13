@@ -10,7 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse, Response
 from sqlmodel import Session
 
-from app.api.auth import require_operator_identity, requires_operator_auth
+from app.api.auth import (
+    require_operator_scope,
+    required_operator_scope,
+    requires_operator_auth,
+)
 from app.api.router import build_api_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
@@ -217,7 +221,14 @@ def create_app(
             settings=app_settings,
         ):
             try:
-                require_operator_identity(request, settings=app_settings)
+                require_operator_scope(
+                    request,
+                    required_scope=required_operator_scope(
+                        method=request.method,
+                        path=request.url.path,
+                    ),
+                    settings=app_settings,
+                )
             except HTTPException as exc:
                 return JSONResponse(
                     {"detail": exc.detail},

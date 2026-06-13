@@ -16,6 +16,7 @@ from app.strategies.registry import strategy_registry
 from app.services.audit_event_recorder import record_required_domain_event
 from app.services.health_service import get_health_service
 from app.services.lifecycle_rules import TRADE_INTENT_PROVENANCE_STATES
+from app.services.open_risk_authority_service import OpenRiskAuthorityService
 from app.services.runtime_state_service import RuntimeStateService
 from app.services.trade_service import TradeService
 
@@ -41,7 +42,14 @@ class ReconciliationService:
         adopted_count = 0
         corrected_count = 0
         unmatched_local_count = 0
-        remote_positions = self.broker.get_positions()
+        try:
+            remote_positions = self.broker.get_positions()
+        except Exception:
+            OpenRiskAuthorityService(self.trade_service.session).refresh(
+                source="reconciliation_service.reconcile_open_positions",
+                reconciliation_status="UNAVAILABLE",
+            )
+            raise
         local_positions = self.trade_service.list_all_open_positions()
         local_by_broker_reference = {
             position.broker_reference: position
@@ -511,6 +519,11 @@ class ReconciliationService:
                 "closed_unmatched_local_positions": unmatched_local_count,
                 "event": "reconciliation_completed",
             },
+        )
+        OpenRiskAuthorityService(self.trade_service.session).refresh(
+            source="reconciliation_service.reconcile_open_positions",
+            reconciliation_status="CURRENT",
+            reconciled_at=utc_now(),
         )
         return self.trade_service.list_positions()
 

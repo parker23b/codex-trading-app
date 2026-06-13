@@ -49,6 +49,16 @@ class BrokerSizingMode(str, Enum):
     UNSUPPORTED = "UNSUPPORTED"
 
 
+@dataclass(frozen=True, slots=True)
+class BrokerCapabilities:
+    supports_client_request_id: bool = False
+    supports_order_confirmation: bool = False
+    supports_batch_market_details: bool = False
+    supports_exact_risk_sizing: bool = False
+    supports_streaming: bool = False
+    supports_simulated_execution: bool = False
+
+
 @dataclass(slots=True)
 class OrderRequest:
     instrument: str
@@ -166,6 +176,10 @@ class Broker(ABC):
     def account_type(self) -> AccountType:
         raise NotImplementedError
 
+    @property
+    def capabilities(self) -> BrokerCapabilities:
+        return BrokerCapabilities()
+
     @abstractmethod
     def place_order(self, order: OrderRequest) -> BrokerOrderResult:
         raise NotImplementedError
@@ -225,6 +239,10 @@ class Broker(ABC):
 
 class BrokerError(RuntimeError):
     """Broker-neutral exception for application services outside adapters."""
+
+
+class BrokerCircuitOpenError(BrokerError):
+    """A retry-safe broker read was blocked by an open operation circuit."""
 
 
 def now_utc() -> datetime:

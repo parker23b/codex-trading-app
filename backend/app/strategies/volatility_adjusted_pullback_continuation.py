@@ -121,7 +121,7 @@ class VolatilityAdjustedPullbackContinuationStrategy(Strategy):
         self._signal_take_profit: float | None = None
 
     def on_price_update(self, data: PriceUpdate) -> None:
-        timestamp = (data.received_at or datetime.now(UTC)).astimezone(UTC)
+        timestamp = (data.received_at or self.current_time()).astimezone(UTC)
         high = data.high if data.high is not None else data.price
         low = data.low if data.low is not None else data.price
 
@@ -275,7 +275,7 @@ class VolatilityAdjustedPullbackContinuationStrategy(Strategy):
     ) -> None:
         self._entry_direction = direction
         self._entry_price = entry_price
-        self._entry_time = self.last_received_at or datetime.now(UTC)
+        self._entry_time = self.last_received_at or self.current_time()
         if self._signal_stop_loss is not None:
             self._stop_loss = self._signal_stop_loss
         elif direction is OrderDirection.BUY:
@@ -703,7 +703,8 @@ class VolatilityAdjustedPullbackContinuationStrategy(Strategy):
     @classmethod
     def _candle_from_dict(cls, raw: dict[str, object]) -> Candle:
         return Candle(
-            opened_at=cls._parse_timestamp(raw.get("opened_at")) or datetime.now(UTC),
+            opened_at=cls._parse_timestamp(raw.get("opened_at"))
+            or datetime.fromtimestamp(0, tz=UTC),
             open=float(raw["open"]),
             high=float(raw["high"]),
             low=float(raw["low"]),

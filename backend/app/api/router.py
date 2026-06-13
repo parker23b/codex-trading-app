@@ -4,6 +4,7 @@ from app.api.routes import (
     allocation,
     aimee,
     ai_reviewer,
+    backtesting,
     broker,
     charts,
     control_plane,
@@ -34,6 +35,7 @@ def build_api_router(settings: Settings | None = None) -> APIRouter:
     router.include_router(dashboard.router, tags=["dashboard"])
     router.include_router(events.router, tags=["events"])
     router.include_router(allocation.router, tags=["allocation"])
+    router.include_router(backtesting.router, tags=["backtesting"])
     router.include_router(market_status.router, tags=["market-status"])
     router.include_router(markets.router, tags=["markets"])
     router.include_router(charts.router, tags=["charts"])

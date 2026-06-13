@@ -17,6 +17,7 @@ from app.models.trade import Position
 from app.services.audit_event_recorder import record_required_domain_event
 from app.services.health_service import get_health_service
 from app.services.operator_control_service import OperatorControlService
+from app.services.open_risk_authority_service import OpenRiskAuthorityService
 from app.services.operational_state_service import (
     OpenRiskManagementState,
     OperationalStateService,
@@ -216,6 +217,9 @@ class StrategyDeploymentManagerService:
             self.session.add(deployment)
             self.session.commit()
             self.session.refresh(deployment)
+            OpenRiskAuthorityService(self.session).refresh(
+                source="strategy_deployment_manager.reconcile"
+            )
             if target_state in counts:
                 counts[target_state] += 1
             if target_state != previous_state:

@@ -9,9 +9,8 @@ from sqlmodel import Session, select
 from app.core.config import get_settings
 from app.core.runtime import runtime_manager
 from app.models.runtime import StrategyRuntimeState
-from app.models.strategy_deployment import StrategyDeployment
-from app.models.trade import Position
 from app.services.health_service import get_health_service
+from app.services.open_risk_authority_service import OpenRiskAuthorityService
 
 
 class FeedSourceState(str, Enum):
@@ -56,6 +55,9 @@ class OperationalStateSnapshot(BaseModel):
     exit_block_reason: str | None
     open_risk_management_state: OpenRiskManagementState
     open_risk_management_reason: str | None
+    open_risk_authority_version: int | None = None
+    open_risk_authority_updated_at: datetime | None = None
+    open_risk_reconciliation_status: str | None = None
 
 
 def get_operational_streaming_service():
@@ -150,6 +152,7 @@ class OperationalStateService:
             in {FeedSourceState.LIVE, FeedSourceState.POLLING_FALLBACK}
         )
 
+        authority = self._open_risk_authority()
         return OperationalStateSnapshot(
             feed_source_state=feed_source_state,
             feed_health_state=feed_health_state,
@@ -176,8 +179,11 @@ class OperationalStateService:
                 price_fresh=price_fresh,
                 feed_source_state=feed_source_state,
             ),
-            open_risk_management_state=self._open_risk_management_state(),
-            open_risk_management_reason=self._open_risk_management_reason(),
+            open_risk_management_state=OpenRiskManagementState(authority.state),
+            open_risk_management_reason=authority.reason,
+            open_risk_authority_version=authority.version,
+            open_risk_authority_updated_at=authority.updated_at,
+            open_risk_reconciliation_status=authority.reconciliation_status,
         )
 
     def _entry_block_reason(
@@ -237,90 +243,9 @@ class OperationalStateService:
         ).first()
         return runtime
 
-    def _open_risk_management_state(self) -> OpenRiskManagementState:
+    def _open_risk_authority(self):
         if self.session is None:
-            return OpenRiskManagementState.NO_OPEN_RISK
-        has_open_positions = self.session.exec(
-            select(Position.id).where(Position.is_open.is_(True)).limit(1)
-        ).first()
-        if has_open_positions is None:
-            return OpenRiskManagementState.NO_OPEN_RISK
-        unmanaged = self.session.exec(
-            select(StrategyDeployment.id)
-            .where(
-                StrategyDeployment.open_risk_management_state
-                == OpenRiskManagementState.UNMANAGED_OPEN_RISK.value
-            )
-            .limit(1)
-        ).first()
-        if unmanaged is not None:
-            return OpenRiskManagementState.UNMANAGED_OPEN_RISK
-        exits_only_deployment = self.session.exec(
-            select(StrategyDeployment.id)
-            .where(
-                StrategyDeployment.open_risk_management_state
-                == OpenRiskManagementState.EXITS_ONLY.value
-            )
-            .limit(1)
-        ).first()
-        if exits_only_deployment is not None:
-            return OpenRiskManagementState.EXITS_ONLY
-        exits_only_runtime = self.session.exec(
-            select(StrategyRuntimeState.id)
-            .where(
-                StrategyRuntimeState.status == "RUNNING",
-                StrategyRuntimeState.runtime_mode == "EXITS_ONLY",
-            )
-            .limit(1)
-        ).first()
-        if exits_only_runtime is not None:
-            return OpenRiskManagementState.EXITS_ONLY
-        managed_runtime = self.session.exec(
-            select(StrategyRuntimeState.id)
-            .where(
-                StrategyRuntimeState.status == "RUNNING",
-                StrategyRuntimeState.current_position_broker_reference.is_not(None),
-            )
-            .limit(1)
-        ).first()
-        if managed_runtime is not None:
-            return OpenRiskManagementState.MANAGED
-        return OpenRiskManagementState.UNMANAGED_OPEN_RISK
+            from app.models.open_risk_authority import OpenRiskAuthority
 
-    def _open_risk_management_reason(self) -> str | None:
-        if self.session is None:
-            return None
-        deployment = self.session.exec(
-            select(StrategyDeployment)
-            .where(
-                StrategyDeployment.open_risk_management_state
-                == OpenRiskManagementState.UNMANAGED_OPEN_RISK.value
-            )
-            .limit(1)
-        ).first()
-        if deployment is not None:
-            return deployment.open_risk_management_reason
-        exits_only = self.session.exec(
-            select(StrategyDeployment)
-            .where(
-                StrategyDeployment.open_risk_management_state
-                == OpenRiskManagementState.EXITS_ONLY.value
-            )
-            .limit(1)
-        ).first()
-        if exits_only is not None:
-            return exits_only.open_risk_management_reason
-        if (
-            self.session.exec(
-                select(Position.id).where(Position.is_open.is_(True)).limit(1)
-            ).first()
-            is not None
-        ):
-            running_runtime = self.session.exec(
-                select(StrategyRuntimeState.id)
-                .where(StrategyRuntimeState.status == "RUNNING")
-                .limit(1)
-            ).first()
-            if running_runtime is None:
-                return "Open positions exist without an active runtime managing exits."
-        return None
+            return OpenRiskAuthority(version=1)
+        return OpenRiskAuthorityService(self.session).get_or_derive()

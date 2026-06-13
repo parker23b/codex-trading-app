@@ -16,6 +16,7 @@ from app.models.trade import (
 )
 from app.strategies.registry import strategy_registry
 from app.services.audit_event_recorder import record_required_domain_event
+from app.services.open_risk_authority_service import OpenRiskAuthorityService
 from app.services.runtime_state_service import RuntimeStateService
 from app.services.trade_service import TradeService
 
@@ -439,6 +440,13 @@ class RuntimeRecoveryService:
                 },
             )
 
+        OpenRiskAuthorityService(self.session).refresh(
+            source="runtime_recovery_service.recover",
+            reconciliation_status="UNAVAILABLE"
+            if broker_error is not None
+            else "CURRENT",
+            reconciled_at=None if broker_error is not None else utc_now(),
+        )
         return outcomes
 
     @staticmethod

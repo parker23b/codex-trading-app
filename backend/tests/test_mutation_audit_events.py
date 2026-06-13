@@ -283,12 +283,14 @@ def test_audit_api_008_allocation_alert_mutations_persist_domain_events(session)
     acknowledged_response = acknowledge_allocation_alert(
         open_alert.id or 0,
         AlertActionRequest(actor_id="risk-operator"),
-        session,
+        request=_request(path=f"/allocation/alerts/{open_alert.id}/acknowledge"),
+        session=session,
     )
     resolved_response = resolve_allocation_alert(
         open_alert.id or 0,
         AlertActionRequest(actor_id="risk-operator"),
-        session,
+        request=_request(path=f"/allocation/alerts/{open_alert.id}/resolve"),
+        session=session,
     )
 
     events = _events(session)
@@ -303,7 +305,7 @@ def test_audit_api_008_allocation_alert_mutations_persist_domain_events(session)
         "api.allocation.alerts.resolve",
     ]
     assert events[0].actor_type == "operator"
-    assert events[0].actor_id == "risk-operator"
+    assert events[0].actor_id == "local-operator"
     assert events[0].payload_json["alert_id"] == open_alert.id
     assert events[0].payload_json["previous_state"] == "OPEN"
     assert events[0].payload_json["state"] == "ACKNOWLEDGED"
@@ -327,7 +329,8 @@ def test_audit_api_008_allocation_alert_returns_error_if_audit_persistence_fails
         acknowledge_allocation_alert(
             alert.id or 0,
             AlertActionRequest(actor_id="risk-operator"),
-            session,
+            request=_request(path=f"/allocation/alerts/{alert.id}/acknowledge"),
+            session=session,
         )
     except HTTPException as exc:
         assert exc.status_code == 503
@@ -432,6 +435,7 @@ def test_audit_api_008_review_advisory_question_persists_domain_event(session):
             strategy_name="mean_reversion",
             actor_id="desk-operator",
         ),
+        request=_request(path="/reviews/questions"),
         session=session,
     )
 
@@ -444,7 +448,7 @@ def test_audit_api_008_review_advisory_question_persists_domain_event(session):
     assert events[0].event_type == "operator.review_advisory_persisted"
     assert events[0].source == "api.reviews.questions"
     assert events[0].actor_type == "operator"
-    assert events[0].actor_id == "desk-operator"
+    assert events[0].actor_id == "local-operator"
     assert events[0].strategy_name == "mean_reversion"
     assert events[0].correlation_id == f"review:operational_question:{records[0].id}"
     assert events[0].payload_json["review_id"] == records[0].id
@@ -494,6 +498,7 @@ def test_audit_api_008_review_advisory_returns_error_if_audit_persistence_fails(
     try:
         answer_operational_question(
             OperationalQuestionRequest(question="What needs attention?"),
+            request=_request(path="/reviews/questions"),
             session=session,
         )
     except HTTPException as exc:

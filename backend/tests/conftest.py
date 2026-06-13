@@ -142,6 +142,17 @@ def fixed_now() -> datetime:
 @pytest.fixture
 def app_factory(session: Session):
     def _build_app(**setting_overrides):
+        if (
+            setting_overrides.get("operator_api_token")
+            and "operator_api_credentials" not in setting_overrides
+        ):
+            setting_overrides["operator_api_credentials"] = {
+                "operator": {
+                    "token": setting_overrides["operator_api_token"],
+                    "scopes": ["admin"],
+                }
+            }
+            setting_overrides["operator_api_token"] = None
         settings = Settings(
             **{
                 **get_settings().model_dump(),

@@ -18,7 +18,7 @@ Frontend operator console
 
 - Strategies own trading or screening logic.
 - The trading engine connects strategy decisions to broker-facing orchestration.
-- Services own persistence, governance, deployment, recovery, reconciliation, coverage, allocation, and derived read models.
+- Services own persistence, governance, deployment, recovery, reconciliation, coverage, allocation, open-risk authority, and derived read models.
 - Routes stay thin and expose service results over HTTP.
 - Broker-specific behavior stays behind normalized broker interfaces.
 - Frontend surfaces render backend truth and should not upgrade degraded, fallback, or estimated data into broker-confirmed certainty.
@@ -57,14 +57,14 @@ The intended control flow is:
 - The local database is authoritative for app metadata, governance, deployments, runtime snapshots, executions, review history, and event history.
 - In-memory runtime state is active process state and cached pricing, not long-term source of truth.
 
-Current ownership limitations:
+Open-risk ownership:
 
 - `Position` represents local exposure and broker linkage.
-- `StrategyDeployment` persists `open_risk_management_state`.
-- `StrategyRuntimeState` represents active exit capability and runtime mode.
-- `OperationalStateService` derives a system-level open-risk view from those records.
-
-There is not yet one versioned open-risk management aggregate owning the relationship between broker exposure, local position, runtime authority, exit capability, reconciliation freshness, and manual-review state (`AUDIT-ARCH-002`).
+- `StrategyRuntimeState` represents persisted runtime exit authority and mode.
+- `StrategyDeployment.open_risk_management_state` remains a family-level compatibility projection.
+- `OpenRiskAuthority` is the versioned risk-book aggregate. Its snapshot records each open position's local/broker sync state, runtime owner, runtime mode/recovery state, deployment relationship, reconciliation freshness, and manual-review requirement.
+- `OpenRiskAuthorityService` is the sole writer of the aggregate. Position, runtime, deployment, recovery, and reconciliation transitions refresh it after their durable lifecycle changes.
+- `OperationalStateService` and operator telemetry read the aggregate rather than independently applying state precedence.
 
 Important tables:
 
@@ -73,6 +73,7 @@ Important tables:
 - `Position` - live local exposure.
 - `Trade` - closed realized outcome.
 - `StrategyRuntimeState` - persisted runtime assignment, profile, mode, recovery state, cached price, and serialized strategy snapshot.
+- `OpenRiskAuthority` - versioned risk-book ownership, freshness, and per-position exit-authority snapshot.
 - `ReconciliationEvent` - broker-vs-local drift detection and recovery audit.
 - `DomainEvent` - operational events across strategy, health, reconciliation, coverage, and operator actions.
 - `GeneratedReviewRecord` - persisted reviewer outputs and history.
@@ -94,6 +95,7 @@ Important tables:
 - [../backend/app/services/reconciliation_service.py](../backend/app/services/reconciliation_service.py) - local and broker position reconciliation.
 - [../backend/app/services/runtime_leadership_service.py](../backend/app/services/runtime_leadership_service.py) - lease acquisition, monotonic generations, heartbeat/release checks, and broker-mutation fencing.
 - [../backend/app/services/runtime_recovery_service.py](../backend/app/services/runtime_recovery_service.py) - restart recovery for persisted runtimes.
+- [../backend/app/services/open_risk_authority_service.py](../backend/app/services/open_risk_authority_service.py) - versioned open-risk ownership and reconciliation-freshness authority.
 - [../backend/app/services/health_service.py](../backend/app/services/health_service.py) - system health and status aggregation.
 - [../backend/app/services/operational_telemetry_service.py](../backend/app/services/operational_telemetry_service.py) - telemetry summary for health, broker, stream, runtimes, and failures.
 - [../backend/app/services/dashboard_service.py](../backend/app/services/dashboard_service.py) - dashboard aggregates.
@@ -101,7 +103,6 @@ Important tables:
 
 ## Current Architecture Gaps
 
-- Open-risk management authority remains split across broker exposure, local positions, deployments, runtimes, and derived operational state (`AUDIT-ARCH-002`).
 - There is no deterministic event-replay/backtest architecture sharing the complete live strategy, allocation, risk, and lifecycle pipeline (`AUDIT-ARCH-003`).
 
 The `2026-06-12` P0 remediation serializes one current account/risk book globally. Future account sharding must use a stable account-scoped lock key rather than weakening that boundary. The Postgres cross-connection allocation and leadership-fence rehearsals are committed but still require CI execution before broker-connected demo readiness is restored.

@@ -151,6 +151,9 @@ class RuntimeStateService:
         self.session.add(runtime)
         self.session.commit()
         self.session.refresh(runtime)
+        self._refresh_open_risk_authority(
+            source="runtime_state_service.sync_engine_state"
+        )
         return runtime
 
     def mark_stopped(
@@ -170,6 +173,7 @@ class RuntimeStateService:
         self.session.add(runtime)
         self.session.commit()
         self.session.refresh(runtime)
+        self._refresh_open_risk_authority(source="runtime_state_service.mark_stopped")
         return runtime
 
     def mark_recovery_state(
@@ -197,4 +201,14 @@ class RuntimeStateService:
         self.session.add(runtime)
         self.session.commit()
         self.session.refresh(runtime)
+        self._refresh_open_risk_authority(
+            source="runtime_state_service.mark_recovery_state"
+        )
         return runtime
+
+    def _refresh_open_risk_authority(self, *, source: str) -> None:
+        from app.services.open_risk_authority_service import (
+            OpenRiskAuthorityService,
+        )
+
+        OpenRiskAuthorityService(self.session).refresh(source=source)

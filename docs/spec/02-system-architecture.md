@@ -130,6 +130,7 @@ Runtime safety rules:
 | Runtime | `StrategyRuntimeState` plus `runtime_manager` | Running engine and persisted restart state. |
 | Market-data freshness | `runtime_manager`, streaming health, operational-state service | Must expose stale/fallback/disconnected distinctions. |
 | Risk truth | `TradeIntent`, `Execution`, `Position`, `Trade`, allocation read model | Confidence label required when degraded/estimated. |
+| Open-risk management authority | `OpenRiskAuthority` through `OpenRiskAuthorityService` | One versioned risk-book snapshot owns per-position runtime authority, manual-review state, broker sync, and reconciliation freshness. Deployment fields are compatibility projections. |
 | AIMEE passive state | `AimeeReadService` projection | Must stay read-only. |
 
 ## Must-not-cross boundaries
@@ -164,3 +165,15 @@ Runtime safety rules:
 - Which GET endpoints call services that seed defaults, refresh alerts, reconcile broker state, or otherwise write?
 - Which response shapes are untyped dicts but consumed by frontend TypeScript types?
 - Can a runtime restart erase `EXITS_ONLY` or `UNMANAGED_OPEN_RISK` state?
+# Backtesting architecture
+
+The historical simulation subsystem is isolated from the live autonomy and broker lifecycle. Its authoritative contract is [11-backtesting-contract.md](11-backtesting-contract.md).
+
+- `app/backtesting/providers.py` owns broker-neutral ingestion provider contracts.
+- `app/backtesting/storage.py` owns immutable local partition storage.
+- `app/core/strategy_evaluation.py` is shared by live `TradingEngine` and historical replay.
+- `app/backtesting/replay.py` owns event-time ordering and simulation orchestration.
+- `app/backtesting/execution.py` owns deterministic simulated fills and position lifecycle.
+- `app/models/backtest.py` contains only historical dataset and simulation records.
+
+The replay subsystem must not call the live broker factory, runtime manager, trade decision service, strategy service, reconciliation, deployment, telemetry, or allocation-alert services.
