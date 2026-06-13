@@ -39,6 +39,8 @@ flowchart TD
 | ARCH-011 | Broker mutations may only originate from explicit broker-action or mutation workflows that satisfy lifecycle, safety, and audit requirements. | Broker mutation call graph, intent/execution/reconciliation evidence, and broker failure tests. | P0 | Medium |
 | ARCH-012 | The frontend/backend contract must be owned by backend route schemas or documented response contracts plus matching frontend types. Frontend code must not invent operational truth absent from backend fields. | Pydantic response models or documented dict shapes, `frontend/lib/types.ts`, and UI contract tests. | P1 | Medium |
 | ARCH-013 | Runtime state changes must preserve open-risk safety. Starts, stops, recovery, deployment reconcile, and mode changes must not silently erase `EXITS_ONLY`, `UNMANAGED_OPEN_RISK`, manual ownership, or broker-linked open exposure. | Runtime/deployment/control-plane tests, persisted runtime state, and domain events for safety-relevant transitions. | P0 | High |
+| ARCH-014 | Broker reconciliation MUST run as an independent leader-owned supervision function. Empty watchlist, disabled streaming, no active strategy deployment, or no current entry candidate must not suppress broker-position discovery. | Lifespan/supervisor tests plus empty-watchlist reconciliation regressions. | P0 | High |
+| ARCH-015 | Leader-owned external side effects MUST be fenced by a monotonic leadership generation immediately before the side effect and for its full mutation window. Lease heartbeat alone is insufficient; takeover must not overlap a stale leader's broker mutation. | Generation takeover tests, stale-owner rejection tests, adapter-boundary tests, and production-dialect lock rehearsal. | P0 | High |
 
 ## Route classification
 

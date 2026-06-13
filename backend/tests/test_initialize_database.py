@@ -94,7 +94,7 @@ def test_initialize_database_upgrades_legacy_sqlite_and_stamps_revision(
             ).fetchall()
         }
 
-    assert version == "20260529_01"
+    assert version == "20260612_01"
     assert "observabilitystate" in table_names
     assert runtime_columns["control_mode"]["notnull"] == 1
     assert runtime_columns["runtime_mode"]["notnull"] == 1

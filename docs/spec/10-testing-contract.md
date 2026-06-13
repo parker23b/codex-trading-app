@@ -189,8 +189,10 @@ A lower line coverage suite with strong behavioural coverage of P0/P1 invariants
 - `FLOW-ENTRY-001`: approved intent success; rejected/stale/budget-blocked/broker-metadata-failed candidates create no broker order; broker failure/partial/ambiguous outcome preserves audit/operator visibility.
 - `FLOW-EXIT-001`: successful close; close failure; partial close; ambiguous close; open risk remains visible and managed/manual-review.
 - `FLOW-RECOVERY-001`: startup recovery; unmatched broker position adoption; broker-missing local position reconciliation; recovery state distinguishable from normal strategy-owned state.
+- `ARCH-014`: reconciliation still runs with an empty active watchlist and remains a leader-owned lifespan task.
+- `ARCH-015` / `BROKER-017`: stale generation cannot renew, release, or mutate; canonical real broker mutation requires the active generation; production-dialect takeover waits for an in-flight fenced mutation.
 - `FLOW-GOVERNANCE-001`: approval vs autonomy vs deployment vs runtime separation; emergency stop; mismatch; open-risk preservation.
-- `FLOW-RISK-001`: budgets; stale/broker failure; sizing normalization; risk confidence; alert persistence; reservation/live-risk transitions.
+- `FLOW-RISK-001`: budgets; stale/broker failure; sizing normalization; risk confidence; alert persistence; reservation/live-risk transitions; overlapping allocation cycles on distinct worker/database connections.
 - `FLOW-MARKET-DATA-001`: stream healthy; fallback polling; stale stream; disconnected broker/feed; UI degraded display.
 - `FLOW-AIMEE-001`: passive snapshot no writes; forbidden services not called; frontend passive refresh uses only `/aimee/snapshot`.
 - `FLOW-COVERAGE-001`: watchlist/shortlist vs streaming vs entry eligibility; cap/cooldown; protective pins; stale stream display.
@@ -211,13 +213,13 @@ A lower line coverage suite with strong behavioural coverage of P0/P1 invariants
 
 ## Known unknowns
 
-- Frontend test runner and coverage are not identifiable.
+- Frontend Node tests and Playwright E2E tests are identifiable; coverage remains scenario/evidence based rather than line-coverage based.
 - Route-level read-only tests are incomplete for all GET endpoints.
 - OpenAPI contract testing is not identifiable.
 - Live IG behavior is represented through fakes and adapter unit tests, but not through recorded integration fixtures.
 - P0/P1 spec IDs are not yet mapped to concrete test files and test names in a maintained evidence matrix.
 - Active read/refresh routes that write state may not have explicit side-effect tests.
-- Frontend component tests and e2e coverage are not identifiable.
+- Frontend rendered/static tests and E2E coverage exist, but new critical surfaces still require explicit degraded and failure-state scenarios.
 - Response-contract testing is not identifiable.
 - Broker fake behaviour may not cover timeout, rate-limit, ambiguous confirmation, partial close, client request id correlation, or simulated-vs-live truth.
 - Some tests may rely on fake defaults that represent healthy broker/market state and do not exercise degraded paths.

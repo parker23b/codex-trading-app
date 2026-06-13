@@ -1,6 +1,6 @@
 # Operator Guide
 
-This guide covers local development setup and operator-facing surfaces. It is not a production runbook; InvestMate is not ready for live trading, and any broker-connected demo must remain human-supervised.
+This guide covers local development setup and operator-facing surfaces. It is not a production runbook. InvestMate is not ready for broker-connected demo dealing, unattended autonomy, or live trading.
 
 ## Prerequisites
 
@@ -106,17 +106,18 @@ Live-dealing guard:
 - `IG_API_BASE_URL=https://api.ig.com/gateway/deal` with `IG_TRADING_ENABLED=true` requires `IG_LIVE_TRADING_ACKNOWLEDGED=true`.
 - This acknowledgement only permits startup. It does not imply live-trading readiness.
 
-Do not enable real broker dealing from this repository state.
+Do not enable real broker dealing until the pending Postgres concurrency rehearsal and supervised-demo preflight have passed.
 
 ## Broker-Connected Demo Posture
 
-For any supervised broker-connected demo:
+Read-only broker connectivity is allowed with `IG_TRADING_ENABLED=false`. The three `2026-06-12` P0 implementation defects are fixed locally, but broker mutation remains operationally blocked until CI runs the committed Postgres allocation-lock and runtime-fence rehearsals and the supervised-demo preflight is repeated.
 
-1. Start with a fresh versioned database. Do not reuse an unversioned non-SQLite database unless a reviewed migration path exists.
-2. Run the final smoke test with `IG_TRADING_ENABLED=false` first.
-3. Confirm `/system/broker-environment` shows the expected demo environment and dealing state.
+For read-only broker investigation:
+
+1. Start with a fresh versioned database.
+2. Keep `IG_TRADING_ENABLED=false`.
+3. Confirm `/system/broker-environment` shows the expected environment and dealing is disabled.
 4. Confirm test-only controls remain gated unless you are in an explicit dev/test workflow.
-5. Only then enable broker connectivity for the supervised session you intend to observe.
 
 Manual decisions remain outside the repo:
 

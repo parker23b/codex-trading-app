@@ -2,15 +2,28 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
+from threading import Event, Thread
+from time import sleep
 from uuid import uuid4
 
 import pytest
 from alembic import command
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
+from sqlmodel import Session
 
 from app.db.migrations import alembic_config, ensure_database_schema_current
 from app.db.schema import load_sqlmodel_metadata
+from app.models.runtime_leadership import RuntimeLease
+from app.services import runtime_leadership_service
+from app.services.allocation_admission_lock import allocation_admission_lock
+from app.services.runtime_leadership_service import (
+    RuntimeLeadershipService,
+    activate_runtime_leadership,
+    deactivate_runtime_leadership,
+    hold_active_runtime_leadership_fence,
+)
 from tests.migration_assertions import filtered_metadata_diffs
 
 POSTGRES_REHEARSAL_ADMIN_URL_ENV = "POSTGRES_REHEARSAL_ADMIN_URL"
@@ -149,7 +162,7 @@ def test_postgres_migrations_apply_to_empty_database():
                 "trade",
                 "tradeintent",
             }.issubset(set(inspector.get_table_names()))
-            assert version == "20260529_01"
+            assert version == "20260612_01"
         finally:
             engine.dispose()
 
@@ -223,6 +236,7 @@ def test_postgres_schema_enforces_targeted_portability_contracts():
             assert alert_columns["alert_key"]["nullable"] is False
             assert runtimelease_columns["lease_name"]["nullable"] is False
             assert runtimelease_columns["owner_id"]["nullable"] is False
+            assert runtimelease_columns["generation"]["nullable"] is False
             assert runtimelease_columns["expires_at"]["nullable"] is False
             assert observability_columns["state_key"]["nullable"] is False
             assert observability_columns["scope_type"]["nullable"] is False
@@ -273,7 +287,7 @@ def test_postgres_versioned_upgrade_rehearses_baseline_to_head_transition():
                     text("SELECT version_num FROM alembic_version")
                 ).scalar_one()
 
-            assert version == "20260529_01"
+            assert version == "20260612_01"
             assert "observabilitystate" in inspector.get_table_names()
         finally:
             engine.dispose()
@@ -294,4 +308,136 @@ def test_postgres_refuses_unversioned_legacy_database_without_auto_stamp():
 
             assert "alembic_version" not in inspect(engine).get_table_names()
         finally:
+            engine.dispose()
+
+
+def test_postgres_allocation_admission_lock_serializes_distinct_connections():
+    with _temporary_postgres_database() as database_url:
+        engine = _upgrade_database(database_url)
+        first_entered = Event()
+        release_first = Event()
+        second_attempting = Event()
+        order: list[str] = []
+        errors: list[BaseException] = []
+
+        def first_worker():
+            try:
+                with Session(engine) as session:
+                    with allocation_admission_lock(session):
+                        order.append("first")
+                        first_entered.set()
+                        assert release_first.wait(timeout=5)
+            except BaseException as exc:
+                errors.append(exc)
+
+        def second_worker():
+            try:
+                assert first_entered.wait(timeout=5)
+                with Session(engine) as session:
+                    second_attempting.set()
+                    with allocation_admission_lock(session):
+                        order.append("second")
+            except BaseException as exc:
+                errors.append(exc)
+
+        first = Thread(target=first_worker)
+        second = Thread(target=second_worker)
+        first.start()
+        second.start()
+        assert second_attempting.wait(timeout=5)
+        sleep(0.2)
+
+        assert order == ["first"]
+
+        release_first.set()
+        first.join(timeout=5)
+        second.join(timeout=5)
+        assert not first.is_alive()
+        assert not second.is_alive()
+        engine.dispose()
+
+        assert errors == []
+        assert order == ["first", "second"]
+
+
+def test_postgres_runtime_fence_blocks_takeover_until_mutation_finishes(monkeypatch):
+    with _temporary_postgres_database() as database_url:
+        engine = _upgrade_database(database_url)
+        now = datetime.now(UTC)
+        with Session(engine) as session:
+            acquisition = RuntimeLeadershipService(
+                session,
+                owner_id="worker-a",
+            ).acquire(now=now, ttl=timedelta(seconds=30))
+
+        assert acquisition.generation == 1
+        monkeypatch.setattr(runtime_leadership_service, "engine", engine)
+        activate_runtime_leadership(
+            owner_id="worker-a",
+            generation=acquisition.generation,
+        )
+        fence_entered = Event()
+        release_fence = Event()
+        takeover_attempting = Event()
+        takeover_results = []
+        errors: list[BaseException] = []
+
+        def fenced_mutation():
+            try:
+                with hold_active_runtime_leadership_fence():
+                    fence_entered.set()
+                    assert release_fence.wait(timeout=5)
+            except BaseException as exc:
+                errors.append(exc)
+
+        def takeover_worker():
+            try:
+                assert fence_entered.wait(timeout=5)
+                takeover_attempting.set()
+                with Session(engine) as session:
+                    takeover_results.append(
+                        RuntimeLeadershipService(
+                            session,
+                            owner_id="worker-b",
+                        ).acquire(
+                            now=now + timedelta(seconds=31),
+                            ttl=timedelta(seconds=30),
+                        )
+                    )
+            except BaseException as exc:
+                errors.append(exc)
+
+        mutation = Thread(target=fenced_mutation)
+        takeover = Thread(target=takeover_worker)
+        mutation.start()
+        takeover.start()
+        assert takeover_attempting.wait(timeout=5)
+        sleep(0.2)
+
+        assert takeover_results == []
+
+        release_fence.set()
+        mutation.join(timeout=5)
+        takeover.join(timeout=5)
+        assert not mutation.is_alive()
+        assert not takeover.is_alive()
+
+        try:
+            assert errors == []
+            assert len(takeover_results) == 1
+            assert takeover_results[0].acquired is True
+            assert takeover_results[0].generation == 2
+            with Session(engine) as session:
+                lease = session.get(
+                    RuntimeLease,
+                    RuntimeLeadershipService.RUNTIME_LEASE_NAME,
+                )
+            assert lease is not None
+            assert lease.owner_id == "worker-b"
+            assert lease.generation == 2
+        finally:
+            deactivate_runtime_leadership(
+                owner_id="worker-a",
+                generation=acquisition.generation,
+            )
             engine.dispose()

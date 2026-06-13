@@ -29,12 +29,14 @@ On startup, [../backend/app/main.py](../backend/app/main.py):
 
 1. configures logging
 2. initializes database tables
-3. runs runtime recovery against persisted runtime state
-4. starts the market-data loop
-5. starts the system health heartbeat loop
-6. starts the IG streaming loop when streaming is enabled
+3. acquires the database-backed runtime lease and activates its monotonic generation
+4. runs runtime recovery against persisted runtime state
+5. starts the market-data loop
+6. starts the independent broker-reconciliation supervisor
+7. starts the system health and leadership heartbeat loop
+8. starts the IG streaming loop when streaming is enabled
 
-This makes backend startup stateful: it restores runtime state where possible, begins health tracking, and may start polling or streaming. Current audit findings still track duplicate-loop risk across reloads or multiple workers.
+This makes backend startup stateful: it restores runtime state where possible, begins health tracking and reconciliation, and may start polling or streaming. The lease generation is checked at every real IG order/close boundary. The broker mutation holds the lease row until the operation finishes, so an expired leader cannot overlap a takeover and then continue mutating broker state.
 
 ## Autonomy Layers
 
@@ -54,6 +56,15 @@ The intended control flow is:
 - Broker state is authoritative for actual open positions and confirmed closes.
 - The local database is authoritative for app metadata, governance, deployments, runtime snapshots, executions, review history, and event history.
 - In-memory runtime state is active process state and cached pricing, not long-term source of truth.
+
+Current ownership limitations:
+
+- `Position` represents local exposure and broker linkage.
+- `StrategyDeployment` persists `open_risk_management_state`.
+- `StrategyRuntimeState` represents active exit capability and runtime mode.
+- `OperationalStateService` derives a system-level open-risk view from those records.
+
+There is not yet one versioned open-risk management aggregate owning the relationship between broker exposure, local position, runtime authority, exit capability, reconciliation freshness, and manual-review state (`AUDIT-ARCH-002`).
 
 Important tables:
 
@@ -78,12 +89,22 @@ Important tables:
 - [../backend/app/services/control_plane_service.py](../backend/app/services/control_plane_service.py) - control-plane summary and family detail serialization.
 - [../backend/app/services/coverage_service.py](../backend/app/services/coverage_service.py) - streaming coverage, promotion, and allocator summary.
 - [../backend/app/services/market_data_service.py](../backend/app/services/market_data_service.py) - Tier 1 polling fallback, Tier 2 refresh, promotion generation, and deployment reconciliation triggers.
+- [../backend/app/services/broker_reconciliation_supervisor.py](../backend/app/services/broker_reconciliation_supervisor.py) - fixed-cadence broker reconciliation independent of watchlist and strategy coverage.
+- [../backend/app/services/allocation_admission_lock.py](../backend/app/services/allocation_admission_lock.py) - process-local or Postgres transaction-level serialization of allocation and durable intent admission.
 - [../backend/app/services/reconciliation_service.py](../backend/app/services/reconciliation_service.py) - local and broker position reconciliation.
+- [../backend/app/services/runtime_leadership_service.py](../backend/app/services/runtime_leadership_service.py) - lease acquisition, monotonic generations, heartbeat/release checks, and broker-mutation fencing.
 - [../backend/app/services/runtime_recovery_service.py](../backend/app/services/runtime_recovery_service.py) - restart recovery for persisted runtimes.
 - [../backend/app/services/health_service.py](../backend/app/services/health_service.py) - system health and status aggregation.
 - [../backend/app/services/operational_telemetry_service.py](../backend/app/services/operational_telemetry_service.py) - telemetry summary for health, broker, stream, runtimes, and failures.
 - [../backend/app/services/dashboard_service.py](../backend/app/services/dashboard_service.py) - dashboard aggregates.
 - [../backend/app/services/market_overview_service.py](../backend/app/services/market_overview_service.py) - market-category investigation views.
+
+## Current Architecture Gaps
+
+- Open-risk management authority remains split across broker exposure, local positions, deployments, runtimes, and derived operational state (`AUDIT-ARCH-002`).
+- There is no deterministic event-replay/backtest architecture sharing the complete live strategy, allocation, risk, and lifecycle pipeline (`AUDIT-ARCH-003`).
+
+The `2026-06-12` P0 remediation serializes one current account/risk book globally. Future account sharding must use a stable account-scoped lock key rather than weakening that boundary. The Postgres cross-connection allocation and leadership-fence rehearsals are committed but still require CI execution before broker-connected demo readiness is restored.
 
 ## Frontend Shape
 

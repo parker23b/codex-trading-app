@@ -1,94 +1,95 @@
 # Audit status
 
-This document is an audit log for InvestMate findings, evidence gaps, and follow-up actions. It is not a requirements spec; requirements live in `docs/spec/`.
+This document is the present-tense audit authority for InvestMate findings, evidence gaps, and follow-up actions. Requirements live in `docs/spec/`; dated remediation evidence is retained below as history.
 
-## Current Closure Snapshot
+Document roles:
 
-InvestMate is **not ready for live trading**.
+- [audit-status.md](audit-status.md): current risk register, readiness decision, finding details, and historical audit log.
+- [readiness.md](readiness.md): allowed operating postures.
+- [demo-trading-readiness-audit.md](demo-trading-readiness-audit.md): the dated `2026-06-04` verification record, now superseded as a readiness verdict by the current risk register.
+- [spec/99-spec-coverage-matrix.md](spec/99-spec-coverage-matrix.md): requirement-to-evidence mapping; a matrix `PASS` proves ID coverage, not behavioural closure.
 
-The current codebase is **ready for a human-supervised IG demo smoke test after sign-off**.
+## Current Assessment
 
-A local UI/research demo with dealing disabled is acceptable under the posture in [readiness.md](readiness.md).
+Assessment date: `2026-06-12`.
 
-Current CI truth is anchored to the newest successful GitHub Actions `Repo Audit` run: [26776683955](https://github.com/parker23b/codex-trading-app/actions/runs/26776683955).
+InvestMate is:
 
-- `Verify backend lockfiles`: passed
-- `Migration and drift tests`: passed
-- `Postgres migration rehearsal`: passed with exactly `5 passed` and zero skips
-- backend `Pytest`: passed
+- acceptable for local UI, research, read-only broker investigation, and non-dealing smoke testing with `IG_TRADING_ENABLED=false`;
+- **pending refreshed evidence for broker-connected demo dealing**;
+- **not ready for unattended autonomy or live trading**.
 
-Advisory annotations remained in that run, including Node 20 action deprecation warnings and non-blocking lint/type warnings, but the required backend verification path above succeeded.
+The three code-actionable P0 gaps found on `2026-06-12` are fixed in the current code and have local behavioural regressions. Broker-connected demo dealing remains disabled until CI executes the new Postgres cross-connection allocation and runtime-fence rehearsals and the supervised-demo preflight is refreshed.
 
-Additional local verification on `2026-06-04` closed the supervised-demo remediation slice:
+## Active Risk Register
 
-- `./scripts/compile_backend_requirements.sh` -> passed
-- `./scripts/check_backend_requirements.sh` -> passed
-- `backend/.venv/bin/pytest backend/tests -q` -> `562 passed, 5 skipped`
-- `cd frontend && npm run typecheck` -> passed
-- `cd frontend && npm run test:frontend` -> `78 passed`
-- `cd frontend && npm run test:e2e -- --grep "DEMO|environment|dealing|AUDIT-|FLOW-"` -> `61 passed`
-- read-only backend preflight returned `200` for `/health`, `/system/health`, `/system/telemetry`, `/system/broker-environment`, `/dashboard`, `/control-plane/summary`, `/events`, and `404` for `POST /testing/reset-history`
+| Finding ID | Severity | Status | Blocking posture | Summary |
+| --- | --- | --- | --- | --- |
+| `AUDIT-ARCH-001` | P0 | Verified | None | Broker reconciliation now runs in an independent leader-owned supervisor regardless of active watchlist coverage. |
+| `AUDIT-RISK-004` | P0 | Fixed; Postgres verification pending | Demo evidence gate | Allocation and durable intent admission are serialized per risk book; the committed two-connection Postgres rehearsal has not run locally. |
+| `AUDIT-RUNTIME-002` | P0 | Fixed; Postgres verification pending | Demo evidence gate | Monotonic lease generations and a broker-mutation row-lock fence reject stale leaders; the committed Postgres takeover-blocking rehearsal has not run locally. |
+| `AUDIT-ARCH-002` | P1 | Open | Unattended, live | Open-risk management authority is derived across positions, deployments, runtimes, and read models rather than owned by one versioned aggregate. |
+| `AUDIT-DOC-006` | P1 | Verified | None | Audit/readiness checks now distinguish verified, fixed-pending-evidence, and open findings and reject premature demo-readiness claims. |
+| `AUDIT-SEC-004` | P1 | Open | Remote, multi-user, live | Authentication proves possession of one shared browser-visible token, not operator identity or authorization. |
+| `AUDIT-BROKER-006` | P1 | Open | New broker, unattended, live | The guide now lists the full contract, but shared adapter conformance and operation-specific retry/circuit policy are still absent. |
+| `AUDIT-ARCH-003` | P1 | Open | Strategy validation, unattended, live | No deterministic replay/backtest architecture proves parity with the live strategy, allocation, risk, and lifecycle pipeline. |
 
-## Current P0/P1 Inventory
+Existing manual or documented limitations remain open separately: `AUDIT-SEC-002`, `AUDIT-SEC-003`, `AUDIT-DEP-001`, and `AUDIT-DB-001`.
 
-There is **no current code-actionable P0 or P1 defect** in the reviewed closure slice.
+## Readiness Decision
 
-Remaining open or narrowed P0/P1 findings are classified exactly as follows:
+### Allowed now
 
-| Finding ID | Severity | Classification | Current meaning |
-| --- | --- | --- | --- |
-| `AUDIT-UI-006` | P1 | `CLOSED_CURRENT_SCOPE` | Closed for the reviewed current events/live/dashboard/control-plane/markets surface inventory. |
-| `AUDIT-LIFE-005` | P1 | `CLOSED_CURRENT_SCOPE` | Closed for the current simulated-vs-broker-confirmed operator-visible provenance slice. |
-| `AUDIT-005` | P1 | `CLOSED_CURRENT_SCOPE` | Closed for the current backend/frontend operator-vocabulary parity slice. |
-| `AUDIT-UI-002` | P1 | `CLOSED_CURRENT_SCOPE` | Closed for the current reviewed unknown/degraded enum-truth slice. |
-| `AUDIT-UI-004` | P1 | `CLOSED_CURRENT_SCOPE` | Closed for the current reviewed mutation-control family slice. |
-| `AUDIT-UI-005` | P1 | `CLOSED_CURRENT_SCOPE` | Closed for the current reviewed provenance/parity slice. |
-| `AUDIT-DB-001` | P1 | `DOCUMENTED_LIMITATION` | CI verification is closed in run `26776683955`; the remaining limitation is the legacy unversioned non-SQLite manual-upgrade path. |
-| `AUDIT-SEC-002` | P1 | `DOCUMENTED_LIMITATION` | The reviewed operator/API/events projection-redaction boundary is fixed for the current surface set; raw internal authority identifiers intentionally remain internal. |
-| `AUDIT-SEC-003` | P1 | `MANUAL_SECURITY_ACTION` | Repository-history cleanup and any needed credential rotation remain manual actions outside code changes. |
-| `AUDIT-DEP-001` | P1 | `FUTURE_PRODUCTION_HARDENING` | Stronger provenance/attestation, editable-package hardening, and broader host/container dependency scanning remain future production work. |
+- Local UI and research work.
+- Read-only broker connectivity and market/account investigation.
+- Non-dealing startup and endpoint smoke tests.
+- Test and simulated workflows that cannot reach real broker mutation.
 
-## Demo And Live Readiness
+These require `IG_TRADING_ENABLED=false`, test-only controls gated, and no claim that broker exposure is under production-grade supervision.
 
-### Local UI/research demo with dealing disabled
+### Blocked now
 
-Currently acceptable when:
+- Broker-connected demo mutation until the pending Postgres rehearsals and fresh preflight pass.
+- Unattended autonomous operation.
+- Live broker mutation.
+- Remote or multi-user operator deployment using the shared frontend token as identity.
 
-- `IG_TRADING_ENABLED=false`
-- no broker mutation is attempted
-- test-only controls remain explicitly gated
-- the session is treated as local UI review, research, broker-read investigation, or smoke testing only
+The P0 implementation work is complete. Broker-connected demo dealing is held at an evidence gate, not an unfixed-code gate. Live or unattended operation additionally requires the P1 architecture and platform findings to be resolved or explicitly accepted through a documented risk decision.
 
-### Supervised broker-connected demo
+## Verification Context
 
-The remaining items are sign-offs and manual controls, not current code blockers:
+The latest recorded successful CI anchor remains GitHub Actions `Repo Audit` run [26776683955](https://github.com/parker23b/codex-trading-app/actions/runs/26776683955). Current local backend verification on `2026-06-12` recorded `574 passed, 7 skipped`; the skipped tests are the Postgres rehearsal family because `POSTGRES_REHEARSAL_ADMIN_URL` is not available locally. The `2026-06-04` frontend and read-only preflight evidence remains historical support for those slices.
 
-- use a fresh versioned database; do not use an existing unversioned non-SQLite database unless a reviewed migration path exists
-- resolve or explicitly sign off the `AUDIT-SEC-003` manual security posture:
-  - purge historical SQLite DB blobs before any broader sharing or publication
-  - rotate any local/demo credentials if the repository or workstation state was shared
-- run the final smoke test with `IG_TRADING_ENABLED=false` first, then enable broker connectivity only for the supervised session
-- confirm test-only controls remain explicitly gated during the broker-connected session
+New P0 regression evidence includes:
 
-Not a blocker at this level:
+- `test_audit_arch_001_reconciliation_runs_without_watchlist_coverage`;
+- `test_audit_risk_004_entry_admission_serializes_concurrent_cycles`;
+- `test_audit_runtime_002_stale_generation_cannot_renew_or_release_after_takeover`;
+- `test_audit_runtime_002_stale_generation_fails_broker_mutation_fence`;
+- `test_audit_runtime_002_real_ig_mutation_requires_active_fenced_leadership`;
+- committed Postgres rehearsals for distinct-connection allocation serialization and takeover blocking during a fenced mutation.
 
-- stronger supply-chain attestation/signing is **not** currently treated as a supervised-demo blocker
-- intentionally retained raw internal authority identifiers are acceptable with the current projection/redaction boundary and should not be reopened as a defect on their own
+## External Design References
 
-### Live trading
-
-Still blocked.
-
-Additional production-only hardening required beyond the supervised-demo minimum:
-
-- complete history cleanup and any required credential rotation with verified completion
-- move beyond the fresh-database-only demo posture to a production-grade legacy/non-SQLite migration story
-- add stronger supply-chain provenance/attestation and broader host/container dependency scanning
-- continue expanding operator/browser evidence and production supervision controls as the surface evolves
+- [SEC Market Access Rule](https://www.sec.gov/files/rules/final/2010/34-63241.pdf): automated pre-trade limits and regular control review.
+- [FINRA Regulatory Notice 15-09](https://www.finra.org/rules-guidance/notices/15-09): controlled development, testing, deployment, monitoring, and rapid disablement of algorithmic systems.
+- [AWS Leader Election](https://aws.amazon.com/builders-library/leader-election-in-distributed-systems/): lease expiry, process pauses, and stale-leader hazards.
+- [AWS Circuit Breaker Pattern](https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/circuit-breaker.html): explicit closed/open/half-open failure policy and observability.
+- [OAuth 2.0 Security Best Current Practice](https://www.rfc-editor.org/rfc/rfc9700.html): least privilege, token replay defenses, and stronger client/session boundaries.
 
 ## Historical Remediation Slices
 
 Everything below this heading is **historical-at-the-time evidence**. These dated entries are preserved for remediation history and should not be mistaken for the current status snapshot above.
+
+## 2026-06-12 P0 architecture remediation slice
+
+- `AUDIT-ARCH-001`: moved broker reconciliation out of `MarketDataService` into `BrokerReconciliationSupervisor`, started under runtime leadership regardless of active watchlist coverage.
+- `AUDIT-RISK-004`: wrapped the authoritative allocation-through-intent-admission section in one risk-book lock. Local/SQLite operation uses a process `RLock`; Postgres uses `pg_advisory_xact_lock` on a dedicated transaction.
+- `AUDIT-RUNTIME-002`: added monotonic `RuntimeLease.generation`, generation-aware renew/release/takeover, active-leader activation in lifespan, and an IG mutation fence that validates and holds the lease row through each real order or close.
+- Schema: added Alembic revision `20260612_01` and legacy SQLite generation-column support.
+- Local verification: `574 passed, 7 skipped`; all skips are Postgres rehearsals unavailable in this environment. Targeted P0 suite passed, pre-commit passed, audit/readiness consistency passed, spec coverage passed, and `git diff --check` passed.
+- External design check: PostgreSQL documents transaction-level advisory locks as automatically released at transaction end and `SELECT ... FOR UPDATE` as blocking conflicting writers/lockers; AWS recommends checking lease status immediately before side effects and using the database as a separate correctness mechanism when multiple leaders may briefly exist.
+- Remaining gate: obtain a green CI run for the seven-test Postgres rehearsal family, then repeat the fresh-database supervised-demo preflight before changing demo-dealing posture to ready.
 
 ## 2026-06-04 supervised IG demo readiness remediation slice
 
@@ -736,17 +737,29 @@ This slice closes the remaining code-actionable frontend parity and provenance f
 
 | Category | Finding IDs |
 | --- | --- |
-| P0 unsafe lifecycle/risk/broker behaviour | None currently open after `AUDIT-RUNTIME-001`, `AUDIT-LIFE-002`, `AUDIT-LIFE-003`, and `AUDIT-BROKER-003` were verified |
-| P0 missing proof for safety-critical behaviour | None currently open after `AUDIT-LIFE-006` was fixed for the backend lifecycle guard scope on 2026-06-01 |
-| P1 read/write boundary issue | None currently open after `AUDIT-API-001`, `AUDIT-API-002`, and `AUDIT-API-003` were verified |
-| P1 frontend truth/provenance issue | None currently open in the reviewed closure slice; `AUDIT-UI-006` is closed for current scope and future surface growth should extend the same browser/parity discipline |
-| P1 broker boundary/fake fidelity issue | None currently open in the reviewed closure slice; `AUDIT-BROKER-005` remains a P2 construction-boundary maintainability concern |
-| P1 route/API contract issue | None currently open after `AUDIT-API-006` was fixed for the current route set on 2026-06-01 |
-| P1 security/secrets/logging issue | AUDIT-SEC-002, AUDIT-SEC-003 |
-| P1 dependency/database/observability issue | AUDIT-DEP-001, AUDIT-DB-001 |
+| P0 fixed; production-dialect evidence pending | `AUDIT-RISK-004`, `AUDIT-RUNTIME-002` |
+| P0 verified | `AUDIT-ARCH-001` |
+| P1 state ownership and parity | `AUDIT-ARCH-002`, `AUDIT-ARCH-003` |
+| P1 audit/readiness integrity verified | `AUDIT-DOC-006` |
+| P1 identity and authorization | `AUDIT-SEC-004` |
+| P1 broker contract and resilience | `AUDIT-BROKER-006` |
+| P1 security/secrets/logging limitations | `AUDIT-SEC-002`, `AUDIT-SEC-003` |
+| P1 dependency/database limitations | `AUDIT-DEP-001`, `AUDIT-DB-001` |
 | P2 documentation/maintainability issue | AUDIT-001, AUDIT-004, AUDIT-006, AUDIT-BROKER-005, AUDIT-TEST-003 |
 
-## Prioritised remediation backlog
+## Current Prioritised Remediation Backlog
+
+| Order | Finding | Required outcome | Minimum regression evidence |
+| --- | --- | --- | --- |
+| 1 | `AUDIT-RISK-004`, `AUDIT-RUNTIME-002` | Execute the committed Postgres cross-connection regressions in CI and retain the green run as closure evidence. | Allocation serialization and lease-takeover blocking tests pass with zero skips. |
+| 2 | `AUDIT-ARCH-002` | Define and persist one versioned open-risk management authority with explicit ownership and freshness. | Restart, deployment transition, reconciliation, unmanaged-risk, exits-only, and operator visibility matrix. |
+| 3 | `AUDIT-BROKER-006` | Publish the complete broker capability/failure contract and implement operation-aware resilience policy. | Shared adapter conformance suite plus read retry/circuit and ambiguous-mutation tests. |
+| 4 | `AUDIT-SEC-004` | Replace shared-token identity for remote/multi-user use with server-derived identity and authorization. | Identity, role, revocation, attribution, and privileged-action tests. |
+| 5 | `AUDIT-ARCH-003` | Add deterministic event replay using the same strategy/risk/allocation/lifecycle code as live operation. | Recorded-event replay determinism and live/replay decision parity tests. |
+
+## Historical Completed Remediation Backlog
+
+The table below records previously completed or narrowed work. It is retained for traceability and is not the current priority list.
 
 | Order | Finding IDs | Severity | Category | Affected spec IDs | Recommended task | Expected files/areas | Required tests | Blocking reason | Suggested Codex prompt type |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -764,25 +777,26 @@ This slice closes the remaining code-actionable frontend parity and provenance f
 | 12 | AUDIT-SEC-002, AUDIT-SEC-003, AUDIT-DEP-001, AUDIT-DB-001 | P1 | Manual action / limitation / hardening | API-010, ARCH-011, BROKER-010, TEST-016 | Keep the current closure inventory honest: preserve the reviewed projection boundary, complete manual history/credential actions where needed, keep the fresh-database-only posture unless a reviewed migration exists, and treat stronger supply-chain provenance as future production hardening. | Security posture, repository history, lockfiles/SBOM workflow, Alembic migration path, and docs/CI guardrails. | Manual sign-off plus the existing CI/docs guards. | These items still affect supervised broker-connected demo and live-trading posture even though they are not current code-actionable defects in the reviewed closure slice. | Manual action + production hardening |
 | 13 | AUDIT-001, AUDIT-004, AUDIT-006, AUDIT-BROKER-005, AUDIT-TEST-003 | P2 | P2 documentation/maintainability issue | Multiple | Keep the unresolved evidence index current, continue tightening weak file/slice-only summaries into test-level names, and address broker construction boundary drift. | Docs/specs, dependency injection notes, CI/matrix checks. | Matrix maintenance check is now in place; lifecycle transition tables and guard tests are now explicit. Remaining work is ongoing row-quality cleanup plus broker construction-boundary discipline. | These do not currently block local UI/research demos, but they still help prevent future drift. | Cleanup + review automation |
 
-## Next implementation phases
+## Current Implementation Phases
 
 | Phase | Goal | Included backlog orders | Exit criteria |
 | --- | --- | --- | --- |
-| Phase 1 | Fix/verify P0 lifecycle, broker, risk, auth, and runtime-loop issues. | 1-6 | No P0 implementation blocker remains open; each fix has a regression test and audit evidence. |
-| Phase 2 | Add missing P0/P1 backend route, lifecycle, broker, risk, read-only, audit, and runtime tests. | 7-10 | Route no-write, active-read side-effect, broker fake contract, lifecycle ambiguity, risk accounting, runtime duplication, and domain-event persistence tests exist. |
-| Phase 3 | Add frontend test harness and operator truth/provenance tests. | 11 | Critical UI surfaces prove unknown/degraded/stale/provisional/simulated/mutation-error states. |
-| Phase 4 | Improve response schemas/OpenAPI/frontend type contracts and platform hardening. | 12 | Operator-critical dict responses are modelled or documented, frontend type contracts are tested, secrets/logs are redacted, migrations exist, dependency audit evidence is repeatable, and broader supply-chain provenance is in place. |
-| Phase 5 | Documentation/readme cleanup and automated coverage-matrix checks. | 13 | Matrix links P0/P1 spec IDs to evidence or explicit gaps; stale wording and path ambiguity are resolved. |
+| Phase 1 | Complete P0 closure evidence. | 1 | Postgres proves allocation serialization and mutation-fence takeover blocking with zero skips. |
+| Phase 2 | Make open-risk ownership explicit and auditable. | 2 | One authoritative open-risk model exists. |
+| Phase 3 | Harden broker and operator platform boundaries. | 3-4 | Broker failure semantics and authenticated operator identity are production-capable. |
+| Phase 4 | Establish strategy validation parity. | 5 | Deterministic replay shares the live decision and risk pipeline. |
 
 ## Human decisions needed
 
 | Decision | Related findings | Needed before |
 | --- | --- | --- |
-| Has the repository or workstation state been shared in a way that requires credential rotation? | `AUDIT-SEC-003` | Before any supervised broker-connected demo. |
-| Will any supervised broker-connected demo use anything other than a fresh versioned database? | `AUDIT-DB-001` | Before any supervised broker-connected demo that would rely on a reviewed legacy migration path. |
+| Has the repository or workstation state been shared in a way that requires credential rotation? | `AUDIT-SEC-003` | Before any remote sharing or future broker-connected dealing. |
+| Will any future broker-connected workflow use anything other than a fresh versioned database? | `AUDIT-DB-001` | Before that workflow relies on a reviewed legacy migration path. |
 | Must repository-history purge complete before the intended audience or publication scope of the demo? | `AUDIT-SEC-003` | Before broader sharing, publication, or any demo that depends on claiming cleaned history. |
 
-## Audit summary
+## Historical Audit Summary
+
+This summary reflects the earlier closure inventory and is preserved as historical context. The present-tense authority is the active risk register at the top of this document.
 
 | Area | Status | Blocking issues | Notes |
 | --- | --- | --- | --- |
@@ -805,6 +819,14 @@ This slice closes the remaining code-actionable frontend parity and provenance f
 
 | ID | Severity | Status | Area | Affected spec IDs | Finding | Evidence | Next action |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| AUDIT-ARCH-001 | P0 | Verified 2026-06-12 | Broker reconciliation supervision | PROD-009, PROD-011, ARCH-013, ARCH-014, FLOW-RECOVERY-001, RISK-007, STATE-010 | Periodic broker reconciliation must not depend on active market-data coverage. | Code: `BrokerReconciliationSupervisor` owns fixed-cadence reconciliation and is started as a leader-owned lifespan task; `MarketDataService` no longer owns reconciliation. Test evidence: `test_audit_arch_001_reconciliation_runs_without_watchlist_coverage` and the lifespan supervisor regression pass. Confidence: High. | Keep the supervisor independent and add operator-visible reconciliation freshness before unattended/live operation. |
+| AUDIT-RISK-004 | P0 | Fixed 2026-06-12; Postgres verification pending | Allocation concurrency | PROD-003, RISK-001, RISK-014 | Concurrent allocation cycles must not approve different instruments from one stale aggregate budget snapshot. | Code: `TradeDecisionService._decide_entry_candidates()` now holds `allocation_admission_lock` across allocation, risk checks, and durable intent admission. SQLite/local mode uses a process `RLock`; Postgres uses `pg_advisory_xact_lock`. Test evidence: `test_audit_risk_004_entry_admission_serializes_concurrent_cycles` passes locally; `test_postgres_allocation_admission_lock_serializes_distinct_connections` is committed but skipped locally without `POSTGRES_REHEARSAL_ADMIN_URL`. Confidence: High for implementation, Medium until production-dialect execution. | Run the Postgres rehearsal in CI with zero skips; use an account-scoped key before supporting multiple independent risk books. |
+| AUDIT-RUNTIME-002 | P0 | Fixed 2026-06-12; Postgres verification pending | Runtime leadership fencing | ARCH-013, ARCH-015, BROKER-012, BROKER-013, BROKER-017, STATE-008, FLOW-RUNTIME-001 | A stale former leader must not mutate broker state after lease takeover. | Code: `RuntimeLease.generation` increments on takeover; renew/release require the generation; lifespan activates the acquired generation; real IG orders/closes validate the current lease and hold its row through the broker operation. Tests prove stale renew/release rejection, stale fence rejection, and canonical IG mutation refusal without leadership. The Postgres test proving takeover blocks during a fenced mutation is committed but skipped locally without the rehearsal database. Confidence: High for implementation, Medium until production-dialect execution. | Run the Postgres rehearsal in CI with zero skips and retain the green run as closure evidence. |
+| AUDIT-ARCH-002 | P1 | Open 2026-06-12 | Open-risk authority | PROD-011, ARCH-013, STATE-005, STATE-010, RISK-007 | Open-risk management state is persisted on deployments but also derived from positions and runtime rows. The specs acknowledge that the exact persistence source needs confirmation, leaving ownership, versioning, and restart semantics ambiguous. | Code: `StrategyDeployment.open_risk_management_state` is persisted, while `OperationalStateService` derives a global state from `Position`, `StrategyDeployment`, and `StrategyRuntimeState`; deployment reconciliation independently recomputes state. Tests cover selected branches but not a complete restart/reconcile/deployment ownership matrix. Confidence: High. Behaviour is ambiguous rather than proven correct. | Define one versioned open-risk management aggregate per account/instrument with broker exposure, local position, owning runtime, exit capability, reconciliation freshness, and manual-review state. Make other surfaces projections of that authority. |
+| AUDIT-DOC-006 | P1 | Verified 2026-06-12 | Audit and spec consistency | PROD-010, TEST-BND-006, RISK-014 | Documentation controls must prevent historical closure language or ID coverage from being mistaken for behavioural readiness. | `scripts/check_audit_status_consistency.py` now requires the exact verified/fixed-pending/open status split, requires the Postgres evidence gate in audit/readiness docs, rejects premature demo-readiness wording, and verifies `RISK-014` remains linked to pending production-dialect evidence. `scripts/check_spec_coverage_matrix.py` separately preserves complete P0/P1 ID coverage. Both checks pass. Confidence: High. | Keep the current-status checks synchronized when a pending Postgres finding becomes verified or a new P0/P1 finding is opened. |
+| AUDIT-SEC-004 | P1 | Open 2026-06-12 | Operator identity and authorization | API-010, PROD-012, UI-004, UI-006 | The current boundary authenticates possession of one shared bearer token and maps every valid request to the same operator identity. The frontend token is browser-visible, and some mutation payloads accept caller-supplied actor IDs. This is acceptable only for constrained local use, not remote, multi-user, or live operation. | Code: `require_operator_identity()` returns the literal `operator`; `NEXT_PUBLIC_OPERATOR_API_TOKEN` is sent by browser code; allocation alert mutations accept `actor_id` from the client. Existing tests prove token enforcement but not individual identity, roles, revocation, MFA, or trustworthy attribution. Confidence: High. | Keep the shared-token mode local-only. For broader deployment, use server-side OIDC/session handling, server-derived actor identity, role/scoped authorization, revocation, and step-up controls for dealing and emergency mutations. |
+| AUDIT-BROKER-006 | P1 | Open 2026-06-12 | Broker capability and resilience contract | PROD-007, BROKER-003, BROKER-004, BROKER-008, BROKER-012, BROKER-013 | The previous broker guide documented only four methods despite a broader abstract contract. This review corrected the guide and reconciliation supervision is now independent, but retry/backoff/circuit behaviour is still not centralized by operation type and no shared conformance suite proves equivalent adapter semantics. | Docs now list the complete `Broker` method and DTO family plus the required retry/reconciliation rules. Code still has only an IG allowance breaker rather than a shared policy distinguishing retry-safe reads from ambiguous writes. Tests remain adapter-specific instead of applying one contract suite to every implementation. Confidence: High. | Add shared adapter conformance tests, implement bounded backoff/circuit state for safe reads, and require reconciliation/manual review rather than blind retries for ambiguous mutations. |
+| AUDIT-ARCH-003 | P1 | Open 2026-06-12 | Backtest/live parity | PROD-003, PROD-010, TEST-001, TEST-003 | The architecture has no deterministic event replay or backtest mode that exercises the same strategy, allocation, risk, and lifecycle pipeline as live operation. Time is partly carried as `received_at` and partly read directly from the wall clock. | Code search found no backtest/replay subsystem and multiple direct `datetime.now(UTC)` calls in strategy and runtime paths. Existing strategy tests do not prove recorded-event determinism or live/replay parity. Confidence: Medium-High. This is an architectural omission rather than a demonstrated immediate mutation bug. | Introduce an injected clock and canonical market-event envelope with event/receive time and provenance. Drive live and replay through the same decision pipeline and add deterministic recorded-event parity tests. |
 | AUDIT-001 | P2 | Open | Spec location / audit scope | All spec files | The requested scope and previous audit log wording referenced `specs/`, but this repository's spec set is under `docs/spec/`. | No top-level `specs/` directory exists. `docs/audit-status.md` previously said requirements live in `specs/`; repo instructions and discovered files point to `docs/spec/`. | Keep future audit prompts, scripts, and audit-log wording aligned on `docs/spec/`, or create an explicit alias if a top-level `specs/` path is desired. |
 | AUDIT-002 | P1 | Fixed 2026-05-21 | Coverage matrix | ARCH-BND-001 through ARCH-BND-006; BROKER-BND-001 through BROKER-BND-006; UI-OPERATE-001 through UI-STRATEGY-001; UI-BND-001 through UI-BND-007; FLOW-BND-001 through FLOW-BND-008; STATE-BND-001 through STATE-BND-009; RISK-BND-001 through RISK-BND-009; AIMEE-BND-001 through AIMEE-BND-008; TEST-BND-001 through TEST-BND-007 | `99-spec-coverage-matrix.md` now covers every current P0/P1 spec ID through either an explicit row or the grouped-coverage appendix, and CI/pre-push now fail if that completeness drifts. | `scripts/check_spec_coverage_matrix.py` found `192` unique source P0/P1 IDs and now passes with `152` explicit matrix rows plus `46` grouped coverage IDs. The remediation added explicit rows for `TEST-BND-*`, `UI-BND-*`, and the operator surface rows `UI-CONTROL-001`, `UI-COVERAGE-001`, `UI-EVENTS-001`, `UI-LIVE-001`, `UI-MARKETS-001`, `UI-OPERATE-001`, `UI-RISK-001`, and `UI-STRATEGY-001`. The grouped appendix now explicitly lists the remaining boundary families by ID. | Keep the matrix checker and grouped appendix current when specs change. Row-quality and underlying behavioural evidence remain tracked under the family findings, not under this completeness control. |
 | AUDIT-003 | P1 | Verified | Route classification | API-001, API-002, API-008, ARCH-010, RISK-018, FLOW-RISK-001, UI-003, UI-BND-002, TEST-012 | Fixed: default allocation-alert reads are passive, explicit `refresh=true` remains the active-read/refresh path, and passive frontend load/polling no longer requests refresh writes. | `AllocationAlertService.list_alerts()` now defaults to `refresh=False`; `GET /allocation/alerts` declares `refresh: bool = Query(default=False)`; `GET /allocation/alerts/unresolved-critical` reads persisted unresolved critical alerts without refreshing. `requires_operator_auth()` now treats only `/allocation/alerts?refresh=true` as an active-read GET for this route family. Passive dashboard/live/risk loads and polling call `getAllocationAlerts({ limit })` without `refresh: true`; `refresh=true` remains only after the explicit alert acknowledge/resolve mutation follow-up. Regression evidence: `test_audit_003_allocation_alert_service_default_read_does_not_refresh`; `test_audit_003_allocation_alert_route_default_is_passive_read`; `test_audit_003_allocation_alert_route_refresh_true_is_active_read`; `test_audit_003_unresolved_critical_route_reads_persisted_alerts_without_refresh`; `AUDIT-003 passive frontend alert reads do not request refresh=true`; targeted backend and frontend tests passed on 2026-05-10. | No further action for this finding. Related direct route-function read/write slices are now verified under `AUDIT-API-001`, `AUDIT-API-002`, and `AUDIT-API-003`; broad HTTP route evidence is now verified under `AUDIT-TEST-001`; alert mutation error display remains under `AUDIT-UI-004`. |

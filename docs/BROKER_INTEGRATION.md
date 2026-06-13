@@ -6,7 +6,7 @@ This backend is designed so broker-specific code stays behind the shared executi
 
 - API routes call services.
 - Services coordinate persistence and runtime state.
-- The trading engine only talks to the `Broker` interface.
+- Trading and application services consume the broker-neutral `Broker` interface or broker-neutral DTOs.
 - Strategy classes stay pure and never touch broker SDKs, HTTP clients, or the database.
 
 That separation is the reason a new broker can be added without rewriting the trading engine or API layer.
@@ -16,7 +16,8 @@ That separation is the reason a new broker can be added without rewriting the tr
 - [broker.py](../backend/app/core/broker.py): shared broker contract
 - [broker_factory.py](../backend/app/core/broker_factory.py): provider selection and construction
 - [ig_broker.py](../backend/app/core/ig_broker.py): current IG implementation
-- [trading_engine.py](../backend/app/core/trading_engine.py): broker consumer
+- [trading_engine.py](../backend/app/core/trading_engine.py): one broker consumer
+- service consumers include market status, reconciliation, recovery, account, allocation, and market-data paths
 
 ## Adding A New Broker
 
@@ -36,11 +37,20 @@ Implement the `Broker` abstract base class:
 - `place_order`
 - `close_position`
 - `get_positions`
+- `get_latest_price`
+- `get_account_summary`
+- `get_market_details`
+- `quote_risk_sized_order`
+- `normalize_order_size`
 
 Return the shared dataclasses already defined in `broker.py`:
 
 - `BrokerOrderResult`
 - `BrokerPosition`
+- `BrokerAccountSummary`
+- `BrokerMarketDetails`
+- `BrokerRiskSizingQuote`
+- `BrokerSizeNormalization`
 
 Do not leak raw SDK responses or broker-specific payloads outside the adapter.
 
@@ -111,6 +121,10 @@ That becomes important for:
 - manual trades placed outside this app
 - session expiry or reconnects
 
+Reconciliation runs through `BrokerReconciliationSupervisor`, a leader-owned fixed-cadence task independent of watchlist, streaming, and strategy-deployment coverage. An empty active watchlist therefore does not suppress broker-position discovery.
+
+Real IG order and close mutations also require the active runtime-leadership generation. The adapter validates the lease immediately before mutation and holds the lease row until the broker operation finishes, preventing takeover from overlapping an in-flight stale-leader mutation.
+
 ### 7. Test at the adapter boundary
 
 Add tests for:
@@ -120,8 +134,28 @@ Add tests for:
 - token refresh behavior
 - response parsing
 - error mapping
+- every required broker capability and DTO field
+- pending, partial, rejected, timeout, rate-limit, unknown, and ambiguous outcomes
+- stable client request-id correlation
+- read freshness and provenance
+- safe retry classification
 
 Mock the broker API at the HTTP client layer. The rest of the backend should continue to test only against the shared `Broker` contract.
+
+Every broker adapter should also pass one shared conformance suite. Adapter-specific unit tests alone are not enough to prove equivalent failure semantics.
+
+## Retry And Circuit Policy
+
+The current repository does not yet have one centralized broker policy for retry, backoff, and circuit state (`AUDIT-BROKER-006`).
+
+Required design:
+
+- Retry only operations that are explicitly safe and idempotent.
+- Use bounded exponential backoff with jitter for retry-safe reads.
+- Surface circuit state and the last successful broker/reconciliation timestamps to operators.
+- Do not blindly retry an order or close after timeout, transport loss, or ambiguous confirmation.
+- Resolve ambiguous mutations through stable client request IDs, broker confirmation lookup, reconciliation, and manual review.
+- Keep entry and close policies separate: entry failures may block new risk, while close failures must preserve visible open-risk and an exit/recovery path.
 
 ## IG-Specific Notes
 

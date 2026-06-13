@@ -6,7 +6,11 @@ InvestMate is a FastAPI and Next.js trading-operations workspace for supervised 
 
 InvestMate is **not ready for live trading**.
 
-The current codebase is ready only for a **human-supervised IG demo smoke test after sign-off**. That supervised-demo posture is narrower than live-trading readiness:
+The three P0 architecture defects identified on `2026-06-12` now have implementation fixes and local behavioural regressions:
+
+- broker reconciliation runs in an independent leader-owned supervisor
+- allocation plus durable intent admission is serialized per risk book
+- real IG mutations require the current runtime-leadership generation and hold the lease row against takeover
 
 - the backend now derives broker environment solely from `IG_API_BASE_URL`
 - only the canonical IG demo and live gateways are accepted
@@ -14,7 +18,7 @@ The current codebase is ready only for a **human-supervised IG demo smoke test a
 - `/system/broker-environment` exposes backend-owned environment and dealing truth
 - test-only backend routes are disabled by default and blocked in production-like or live-dealing posture
 
-Keep `IG_TRADING_ENABLED=false` for normal local use. Live trading remains blocked. Read the current posture in [docs/readiness.md](docs/readiness.md) and the verification record in [docs/demo-trading-readiness-audit.md](docs/demo-trading-readiness-audit.md).
+Keep `IG_TRADING_ENABLED=false` until the new Postgres concurrency rehearsals pass in CI and the supervised-demo preflight is rerun. Unattended autonomy and live trading remain blocked by P1 architecture and platform gaps. Read the current posture in [docs/readiness.md](docs/readiness.md), the risk register in [docs/audit-status.md](docs/audit-status.md), and the dated verification record in [docs/demo-trading-readiness-audit.md](docs/demo-trading-readiness-audit.md).
 
 ## What This Is
 

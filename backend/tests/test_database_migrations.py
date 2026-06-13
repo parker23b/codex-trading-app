@@ -41,7 +41,7 @@ def test_migrations_apply_to_empty_sqlite_database(tmp_path):
     assert "strategyruntimestate" in table_names
     assert "runtimelease" in table_names
     assert "observabilitystate" in table_names
-    assert version == "20260529_01"
+    assert version == "20260612_01"
 
 
 def test_migrated_schema_matches_current_sqlmodel_metadata(tmp_path):

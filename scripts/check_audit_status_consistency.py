@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Guard the current audit/readiness closure snapshot against stale drift.
+"""Guard the current audit/readiness risk register against stale drift.
 
 This check is intentionally explicit and conservative. It validates only the
 small set of current-status claims that are easy to drift back into
 contradiction:
 
-- the current CI truth must stay anchored to the newest successful Repo Audit
-  run reviewed in this closure pass;
-- current-scope finding classifications must not silently regress;
+- historical verification stays anchored to the latest reviewed successful
+  Repo Audit run without being confused for current readiness;
+- current P0 remediation and open P1 findings remain visible in the audit and coverage matrix;
+- broker-connected dealing remains gated while production-dialect P0 evidence is pending;
 - current sections must not reintroduce older failed CI runs as present truth;
 - manual security actions must not be described as completed in the current
   readiness snapshot.
@@ -58,15 +59,20 @@ def main() -> int:
 
     for text, label in (
         (audit_current, "audit-status current section"),
-        (readiness_current, "readiness current section"),
         (matrix_current, "coverage-matrix current section"),
     ):
         require(
             text,
             re.escape(LATEST_SUCCESS_RUN_ID),
-            f"{label} must reference current successful Repo Audit run {LATEST_SUCCESS_RUN_ID}.",
+            f"{label} must reference the latest reviewed successful Repo Audit run {LATEST_SUCCESS_RUN_ID}.",
             errors,
         )
+
+    for text, label in (
+        (audit_current, "audit-status current section"),
+        (readiness_current, "readiness current section"),
+        (matrix_current, "coverage-matrix current section"),
+    ):
         for run_id in OLDER_RUN_IDS:
             forbid(
                 text,
@@ -75,69 +81,74 @@ def main() -> int:
                 errors,
             )
 
-    for pattern, description in (
-        (r"`Verify backend lockfiles`: passed", "Verify backend lockfiles pass status"),
-        (r"`Migration and drift tests`: passed", "migration and drift pass status"),
-        (r"`Postgres migration rehearsal`: passed with exactly `5 passed` and zero skips|`Postgres migration rehearsal`: exactly `5 passed`, zero skips", "Postgres rehearsal pass status"),
-        (r"backend `Pytest`: passed", "backend pytest pass status"),
-    ):
-        require(audit_current, pattern, f"audit-status current section must include {description}.", errors)
-
-    expected_classes = {
-        "AUDIT-UI-006": "CLOSED_CURRENT_SCOPE",
-        "AUDIT-LIFE-005": "CLOSED_CURRENT_SCOPE",
-        "AUDIT-005": "CLOSED_CURRENT_SCOPE",
-        "AUDIT-UI-002": "CLOSED_CURRENT_SCOPE",
-        "AUDIT-UI-004": "CLOSED_CURRENT_SCOPE",
-        "AUDIT-UI-005": "CLOSED_CURRENT_SCOPE",
-        "AUDIT-DB-001": "DOCUMENTED_LIMITATION",
-        "AUDIT-SEC-002": "DOCUMENTED_LIMITATION",
-        "AUDIT-SEC-003": "MANUAL_SECURITY_ACTION",
-        "AUDIT-DEP-001": "FUTURE_PRODUCTION_HARDENING",
+    remediated_p0_findings = {
+        "AUDIT-ARCH-001": r"Verified",
+        "AUDIT-RISK-004": r"Fixed;\s*Postgres verification pending",
+        "AUDIT-RUNTIME-002": r"Fixed;\s*Postgres verification pending",
     }
-    for finding_id, classification in expected_classes.items():
+    for finding_id, status in remediated_p0_findings.items():
         require(
             audit_current,
-            rf"\|\s*`?{re.escape(finding_id)}`?\s*\|[^\n]*`{re.escape(classification)}`",
-            f"audit-status current inventory must classify {finding_id} as {classification}.",
+            rf"\|\s*`{re.escape(finding_id)}`\s*\|\s*P0\s*\|\s*{status}\s*\|",
+            f"audit-status current risk register must preserve the current remediation status for {finding_id}.",
+            errors,
+        )
+        require(
+            matrix_current,
+            re.escape(finding_id),
+            f"coverage-matrix current section must reference {finding_id}.",
             errors,
         )
 
-    forbid(
-        audit_current.lower(),
-        r"audit-ui-006.{0,120}(open|still open|remains open)",
-        "audit-status current section must not re-open AUDIT-UI-006 without explicit new residual scope.",
+    expected_open_findings = {
+        "AUDIT-ARCH-002": "P1",
+        "AUDIT-SEC-004": "P1",
+        "AUDIT-BROKER-006": "P1",
+        "AUDIT-ARCH-003": "P1",
+    }
+    for finding_id, severity in expected_open_findings.items():
+        require(
+            audit_current,
+            rf"\|\s*`{re.escape(finding_id)}`\s*\|\s*{severity}\s*\|\s*Open\s*\|",
+            f"audit-status current risk register must classify {finding_id} as open {severity}.",
+            errors,
+        )
+        require(
+            matrix_current,
+            re.escape(finding_id),
+            f"coverage-matrix current section must reference {finding_id}.",
+            errors,
+        )
+
+    require(
+        audit_current,
+        r"\|\s*`AUDIT-DOC-006`\s*\|\s*P1\s*\|\s*Verified\s*\|",
+        "audit-status current risk register must keep AUDIT-DOC-006 verified.",
         errors,
     )
-    forbid(
-        readiness_current.lower(),
-        r"audit-ui-006.{0,120}(open|still open|remains open)",
-        "readiness current section must not describe AUDIT-UI-006 as currently open.",
-        errors,
-    )
-    forbid(
-        audit_current.lower(),
-        r"current ci still does not prove|does not include a successful current-workflow ci run",
-        "audit-status current section must not claim current CI proof is missing.",
-        errors,
-    )
-    forbid(
-        readiness_current.lower(),
-        r"current ci still does not prove|does not include a successful current-workflow ci run",
-        "readiness current section must not claim current CI proof is missing.",
+    require(
+        matrix_current,
+        r"AUDIT-DOC-006",
+        "coverage-matrix current section must reference AUDIT-DOC-006.",
         errors,
     )
 
     require(
         audit_current.lower(),
-        r"no current code-actionable p0 or p1 defect",
-        "audit-status current section must state that no current code-actionable P0/P1 defect remains.",
+        r"pending refreshed evidence for broker-connected demo dealing",
+        "audit-status current section must keep broker-connected demo dealing behind the evidence gate.",
+        errors,
+    )
+    require(
+        audit_current,
+        r"three code-actionable P0 gaps.*are fixed",
+        "audit-status current section must state that the three code-actionable P0 gaps are fixed.",
         errors,
     )
 
     for heading in (
-        "### Local UI/research demo with dealing disabled",
-        "### Supervised broker-connected demo",
+        "### Local UI, research, and read-only smoke testing",
+        "### Broker-connected demo dealing",
         "### Live trading",
     ):
         require(
@@ -149,12 +160,41 @@ def main() -> int:
 
     for phrase, description in (
         (r"IG_TRADING_ENABLED=false", "disabled dealing posture"),
-        (r"fresh versioned database", "fresh-database-only supervised demo posture"),
-        (r"supply-chain attestation/signing is \*\*not\*\* a supervised-demo blocker", "demo-vs-live supply-chain distinction"),
-        (r"raw internal authority identifiers are acceptable", "current raw-identifier boundary statement"),
-        (r"manual security posture", "manual security action statement"),
+        (r"committed Postgres cross-connection tests pass in CI", "Postgres P0 evidence gate"),
+        (r"not yet approved for broker-connected demo dealing", "pending demo-dealing posture"),
+        (r"not approve unattended autonomy", "blocked unattended-autonomy posture"),
     ):
         require(readiness_current, phrase, f"readiness must include {description}.", errors)
+
+    require(
+        matrix_text,
+        r"\|\s*RISK-014\s*\|[^\n]*`SERVICE_VERIFIED`; Postgres rehearsal pending CI",
+        "coverage matrix must keep RISK-014 linked to the pending Postgres verification gate.",
+        errors,
+    )
+    require(
+        matrix_current,
+        r"2026-06-01 historical closure snapshot",
+        "coverage matrix must label the previous closure snapshot as historical.",
+        errors,
+    )
+
+    for text, label in (
+        (audit_current.lower(), "audit-status current section"),
+        (readiness_current.lower(), "readiness current section"),
+    ):
+        forbid(
+            text,
+            r"ready for a human-supervised ig demo|ready for supervised broker-connected demo",
+            f"{label} must not claim dealing readiness before the Postgres and preflight gates pass.",
+            errors,
+        )
+        forbid(
+            text,
+            r"no current code-actionable p0 or p1 defect",
+            f"{label} must not claim that no actionable P0/P1 remains.",
+            errors,
+        )
 
     forbid(
         readiness_current.lower(),

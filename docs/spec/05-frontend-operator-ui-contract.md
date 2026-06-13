@@ -147,8 +147,8 @@ Passive surfaces must not hide mutation controls inside auto-refresh, passive po
 
 ## Known unknowns
 
-- No frontend test suite was found in the inspected file list.
-- Some TypeScript enums are missing newer backend states. For example `Execution` type does not include `SUBMISSION_PENDING` though backend new executions start there.
+- Frontend unit-style Node tests and Playwright E2E tests exist, but new operator-critical surfaces must continue adding degraded, unknown, stale, and mutation-failure evidence.
+- `ExecutionStatus` currently includes `SUBMISSION_PENDING`, and shared parity tests cover the reviewed backend/frontend vocabulary family. Future enum additions still require parity updates.
 - Data provenance is partly implicit; not every displayed metric clearly shows source/freshness/confidence.
 - `getBrokerAuthStatus` derives broker status from telemetry rather than `/broker/positions`; this is acceptable only if labeled as derived telemetry.
 - Whether passive pages/drawers import mutation API functions indirectly through shared hooks or utility modules.

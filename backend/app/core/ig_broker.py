@@ -41,6 +41,9 @@ from app.core.broker_environment import (
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.redaction import sanitize_error_detail, sanitize_payload
+from app.services.runtime_leadership_service import (
+    hold_active_runtime_leadership_fence,
+)
 
 logger = get_logger(__name__)
 
@@ -157,6 +160,17 @@ class IGBroker(Broker):
         return self._endpoint_classification
 
     def place_order(self, order: OrderRequest) -> BrokerOrderResult:
+        if not self._trading_enabled:
+            return self._place_order_unfenced(order)
+        if (
+            self._endpoint_classification
+            is BrokerEndpointClassification.TEST_ONLY_CUSTOM
+        ):
+            return self._place_order_unfenced(order)
+        with hold_active_runtime_leadership_fence():
+            return self._place_order_unfenced(order)
+
+    def _place_order_unfenced(self, order: OrderRequest) -> BrokerOrderResult:
         submitted_at = now_utc()
         if not self._trading_enabled:
             logger.info(
@@ -300,6 +314,35 @@ class IGBroker(Broker):
         )
 
     def close_position(
+        self,
+        instrument: str,
+        *,
+        broker_reference: str | None = None,
+        client_request_id: str | None = None,
+    ) -> BrokerOrderResult:
+        if not self._trading_enabled:
+            return self._close_position_unfenced(
+                instrument,
+                broker_reference=broker_reference,
+                client_request_id=client_request_id,
+            )
+        if (
+            self._endpoint_classification
+            is BrokerEndpointClassification.TEST_ONLY_CUSTOM
+        ):
+            return self._close_position_unfenced(
+                instrument,
+                broker_reference=broker_reference,
+                client_request_id=client_request_id,
+            )
+        with hold_active_runtime_leadership_fence():
+            return self._close_position_unfenced(
+                instrument,
+                broker_reference=broker_reference,
+                client_request_id=client_request_id,
+            )
+
+    def _close_position_unfenced(
         self,
         instrument: str,
         *,

@@ -200,6 +200,9 @@ def _upgrade_legacy_sqlite_database(engine: Engine) -> None:
     _ensure_sqlite_column(
         engine, "strategydeployment", "last_restart_reason", "VARCHAR"
     )
+    _ensure_sqlite_column(
+        engine, "runtimelease", "generation", "INTEGER NOT NULL DEFAULT 1"
+    )
     _normalize_legacy_runtime_state_schema(engine)
 
 

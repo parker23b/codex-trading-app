@@ -296,7 +296,7 @@ Required tests:
 | Field | Value |
 | --- | --- |
 | Owner service/model | `OperationalStateService`, `StrategyDeploymentManagerService`, `RuntimeRecoveryService`, `ReconciliationService`, `StrategyService` where applicable. |
-| Source of truth | Backend operational/deployment/runtime/read models; exact persistence location needs confirmation. |
+| Source of truth | No single authoritative aggregate exists yet. `StrategyDeployment` persists a management state while operational views derive state from positions, deployments, and runtimes. This is tracked under `AUDIT-ARCH-002`. |
 | Current verification confidence | Medium; state is safety-critical and should be audited across runtime/deployment/recovery flows. |
 
 Known states:
@@ -471,12 +471,12 @@ P0 transitions must not rely only on logs where durable domain/event evidence is
 ## Known unknowns
 
 - Some state machines are implicit in service code rather than centralized transition tables.
-- Frontend `Execution` TypeScript union omits `SUBMISSION_PENDING`.
+- Frontend `ExecutionStatus` includes `SUBMISSION_PENDING`; parity tests cover the reviewed state family.
 - `AUTO_DEPLOYABLE` appears in enum but current transition use needs confirmation.
 - Transition authority is not centrally enforced for every state machine.
 - Some lifecycle transitions may happen through direct field assignment in services rather than explicit transition helpers.
 - Broker ambiguity states may not be represented centrally across `TradeIntent`, `Execution`, `Position`, and reconciliation records.
-- Open-risk management state may not have a single persistence source of truth.
+- Open-risk management state does not yet have a single versioned persistence source of truth (`AUDIT-ARCH-002`).
 - Frontend enum coverage may be incomplete beyond `Execution.SUBMISSION_PENDING`.
 - `AUTO_DEPLOYABLE` transition semantics need confirmation.
 - Manual-review and reconciliation-needed states may not be consistently represented across execution, runtime, deployment, and UI.

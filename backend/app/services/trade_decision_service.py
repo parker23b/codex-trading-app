@@ -11,6 +11,7 @@ from app.services.capital_allocator_service import (
     AllocationDecision,
     CapitalAllocatorService,
 )
+from app.services.allocation_admission_lock import allocation_admission_lock
 from app.services.market_status_service import get_market_status_service
 from app.services.operational_state_service import OperationalStateService
 from app.services.portfolio_risk_service import PortfolioRiskService
@@ -117,6 +118,18 @@ class TradeDecisionService:
         return results
 
     def _decide_entry_candidates(
+        self,
+        candidates: list[SignalCandidate],
+        *,
+        received_at: datetime | None = None,
+    ) -> list[TradeDecisionResult]:
+        with allocation_admission_lock(self.session):
+            return self._decide_entry_candidates_locked(
+                candidates,
+                received_at=received_at,
+            )
+
+    def _decide_entry_candidates_locked(
         self,
         candidates: list[SignalCandidate],
         *,

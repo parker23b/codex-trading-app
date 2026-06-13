@@ -12,8 +12,14 @@ from app.core.broker import (
     OrderDirection,
     OrderRequest,
 )
-from app.core.broker_environment import BrokerEnvironment, IG_LIVE_BASE_URL
+from app.core.broker_environment import (
+    BrokerEnvironment,
+    IG_DEMO_BASE_URL,
+    IG_LIVE_BASE_URL,
+)
 from app.core.ig_broker import IGBroker, IGBrokerError
+from app.services import runtime_leadership_service
+from app.services.runtime_leadership_service import RuntimeLeadershipFenceError
 
 
 def _ig_market_payload() -> dict[str, object]:
@@ -80,6 +86,39 @@ def _authenticated_ig_broker(monkeypatch) -> IGBroker:
         ),
     )
     return broker
+
+
+def test_audit_runtime_002_real_ig_mutation_requires_active_fenced_leadership(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        runtime_leadership_service,
+        "_ACTIVE_RUNTIME_LEADERSHIP",
+        None,
+    )
+    broker = IGBroker(
+        api_key="key",
+        username="user",
+        password="password",
+        account_id="acct-1",
+        base_url=IG_DEMO_BASE_URL,
+        trading_enabled=True,
+    )
+
+    with pytest.raises(
+        RuntimeLeadershipFenceError,
+        match="requires active runtime leadership",
+    ):
+        broker.place_order(
+            OrderRequest(
+                instrument="CS.D.EURUSD.MINI.IP",
+                direction=OrderDirection.BUY,
+                size=0.2,
+                price=1.2346,
+                strategy_name="mean_reversion",
+                client_request_id="client-entry-fenced",
+            )
+        )
 
 
 def test_audit_life_001_ig_place_order_confirmation_rate_limit_returns_manual_review_dto(

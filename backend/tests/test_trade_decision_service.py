@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from threading import Event, Lock, Thread
+from time import sleep
 from types import SimpleNamespace
 
 import pytest
+from sqlmodel import Session
 from app.core.broker import (
     AccountType,
     BrokerAccountSummary,
@@ -25,6 +28,70 @@ from tests.fakes import make_order_result
 
 
 INSTRUMENT = "CS.D.EURUSD.MINI.IP"
+
+
+def test_audit_risk_004_entry_admission_serializes_concurrent_cycles(
+    session,
+    monkeypatch,
+):
+    bind = session.get_bind()
+    sessions = [Session(bind), Session(bind)]
+    services = [TradeDecisionService(active_session) for active_session in sessions]
+    first_entered = Event()
+    release_first = Event()
+    state_lock = Lock()
+    state = {"active": 0, "max_active": 0, "calls": 0}
+    errors: list[BaseException] = []
+
+    def decide_locked(self, _candidates, *, received_at=None):
+        del self, received_at
+        with state_lock:
+            state["calls"] += 1
+            call_number = state["calls"]
+            state["active"] += 1
+            state["max_active"] = max(state["max_active"], state["active"])
+        try:
+            if call_number == 1:
+                first_entered.set()
+                assert release_first.wait(timeout=2)
+            return []
+        finally:
+            with state_lock:
+                state["active"] -= 1
+
+    monkeypatch.setattr(
+        TradeDecisionService,
+        "_decide_entry_candidates_locked",
+        decide_locked,
+    )
+
+    def run(service):
+        try:
+            service._decide_entry_candidates([])
+        except BaseException as exc:
+            errors.append(exc)
+
+    first = Thread(target=run, args=(services[0],))
+    second = Thread(target=run, args=(services[1],))
+    first.start()
+    assert first_entered.wait(timeout=2)
+    second.start()
+    sleep(0.1)
+
+    assert state["calls"] == 1
+    assert state["max_active"] == 1
+
+    release_first.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+    assert not first.is_alive()
+    assert not second.is_alive()
+    for active_session in sessions:
+        active_session.close()
+
+    assert errors == []
+    assert state["calls"] == 2
+    assert state["max_active"] == 1
 
 
 def _candidate(

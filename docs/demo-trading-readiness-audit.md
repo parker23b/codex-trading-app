@@ -2,17 +2,20 @@
 
 ## Audit date
 
-- Updated: `2026-06-04`
+- Verification run: `2026-06-04`
+- Readiness reassessed: `2026-06-12`
 
 ## Final verdict
 
-`READY_FOR_HUMAN_SUPERVISED_IG_DEMO_SMOKE_TEST_AFTER_SIGN_OFF`
+`P0_REMEDIATED_PENDING_POSTGRES_AND_PREFLIGHT_EVIDENCE`
 
-This verdict is deliberately narrow:
+The `2026-06-04` verification evidence below remains valid for the tested slices. The current readiness authority is the risk register in [audit-status.md](audit-status.md).
 
-- it does **not** claim live-trading readiness
-- it does **not** approve unattended autonomy
-- it still requires human sign-off, a fresh versioned database, and the documented manual security posture
+P0 defects found and remediated on `2026-06-12`:
+
+- `AUDIT-ARCH-001`: reconciliation now runs independently of an active watchlist
+- `AUDIT-RISK-004`: allocation and durable intent admission are serialized per risk book
+- `AUDIT-RUNTIME-002`: runtime takeover now uses monotonic generations and a broker-mutation fence
 
 ## What the codebase currently does
 
@@ -48,13 +51,13 @@ This verdict is deliberately narrow:
 - Test-only destructive routes must be unavailable by backend registration policy, not merely hidden in the UI.
 - Passive health and telemetry reads must use the active app database context so verification evidence remains trustworthy.
 
-## What I recommend changing next
+## What must change next
 
-- Do not broaden this supervised-demo closure into a live-readiness claim.
+- Keep broker dealing disabled until the committed Postgres allocation/fencing rehearsals pass in CI.
+- Repeat the fresh-database, demo-account supervised preflight after that CI evidence is green.
 - Keep using `/system/broker-environment` as the required preflight truth source before broker-connected sessions.
 - Preserve the current canonical-gateway validation if broker code evolves.
 - Keep test-only routes disabled outside explicit harnesses.
-- Expand production runbooks and live-trading controls separately from this demo-readiness slice.
 
 ## Verification results
 
@@ -78,11 +81,11 @@ This verdict is deliberately narrow:
 
 ### Full backend suite
 
-- `backend/.venv/bin/pytest backend/tests -q` -> `562 passed, 5 skipped, 1 warning`
+- `backend/.venv/bin/python -m pytest backend/tests -q` -> `574 passed, 7 skipped, 1 warning`
 
 Skipped:
 
-- `backend/tests/test_postgres_migration_rehearsal.py` skipped because `POSTGRES_REHEARSAL_ADMIN_URL` is not set in this local environment
+- the seven tests in `backend/tests/test_postgres_migration_rehearsal.py` skipped because `POSTGRES_REHEARSAL_ADMIN_URL` is not set in this local environment
 
 ### Frontend verification
 
@@ -121,15 +124,11 @@ Observed results:
 
 ## Remaining supervised-demo blockers
 
-No remaining code blockers were found in this remediation slice.
+No known P0 implementation blocker remains from the `2026-06-12` review. The remaining supervised-demo gate is evidence and operations:
 
-Required non-code sign-offs remain:
-
-1. Use a fresh versioned database for the supervised demo.
-2. Confirm the intended IG account is a demo account.
-3. Verify `/system/broker-environment` before the smoke workflow.
-4. Keep test-only controls disabled.
-5. Complete or explicitly accept the manual security actions in `AUDIT-SEC-003`.
+1. Green CI execution of all Postgres migration/concurrency rehearsals with zero skips.
+2. Fresh-database and demo-account preflight.
+3. Environment, test-route, and security sign-offs.
 
 ## Live-trading posture
 

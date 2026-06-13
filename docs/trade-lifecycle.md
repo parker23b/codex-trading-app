@@ -29,7 +29,7 @@ Compatibility note: legacy execution statuses such as `SIGNAL_GENERATED`, `RISK_
 4. The linked local `Position` is closed.
 5. The linked `TradeIntent` moves to the appropriate closed lifecycle state.
 
-Current audit findings still track gaps around failed, partial, rejected, or ambiguous closes preserving open-risk authority.
+Failed, partial, rejected, and ambiguous close paths have targeted tests preserving open-risk authority and manual-review state. The remaining architecture gap is that open-risk management ownership is split across position, deployment, runtime, and derived operational-state records (`AUDIT-ARCH-002`).
 
 ## Same-Instrument Exclusivity
 
@@ -39,7 +39,9 @@ The backend is intended to enforce one active instrument owner at a time.
 - Persistence-level enforcement lives in [../backend/app/models/trade.py](../backend/app/models/trade.py) as the partial unique index `uq_trade_intent_active_instrument`.
 - Active ownership states include `PROPOSED`, `APPROVED`, `SUBMITTED`, `ACKNOWLEDGED`, `PARTIALLY_FILLED`, `FILLED`, `POSITION_OPENED`, `CLOSE_REQUESTED`, `EXTERNAL_POSITION_ADOPTED`, and `RECOVERED_POSITION_ATTACHED`.
 
-If two workers race to admit the same instrument, the database should reject the second active owner. Current audit findings still require broader cross-process runtime and broker-action idempotency evidence.
+If two workers race to admit the same instrument, the database should reject the second active owner.
+
+Aggregate portfolio admission is additionally serialized around snapshot calculation, allocation, risk checks, and durable intent admission. SQLite/local operation uses a process lock; Postgres uses a transaction-scoped advisory lock so distinct workers cannot approve different instruments from the same stale aggregate budget snapshot.
 
 ## Recovery And Reconciliation
 
@@ -51,6 +53,8 @@ Reconciliation in [../backend/app/services/reconciliation_service.py](../backend
 - broker-missing local positions create forced-close lifecycle records such as `FORCED_RECONCILIATION_CLOSE`
 
 Stopped-runtime startup recovery now has backend regression coverage proving broker-confirmed open risk receives explicit `RECOVERED_POSITION_ATTACHED` intent/position evidence before the runtime remains paused.
+
+Periodic reconciliation runs in an independent leader-owned supervisor. It continues on its configured cadence even when the active market-data watchlist is empty.
 
 ## Target Invariants
 

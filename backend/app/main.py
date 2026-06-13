@@ -17,11 +17,18 @@ from app.core.logging import configure_logging, get_logger
 from app.core.process_identity import get_process_identity
 from app.db.init_db import initialize_database
 from app.db.session import engine
+from app.services.broker_reconciliation_supervisor import (
+    BrokerReconciliationSupervisor,
+)
 from app.services.domain_event_service import domain_event_service
 from app.services.health_service import get_health_service
 from app.services.ig_streaming_service import get_ig_streaming_service
 from app.services.market_data_service import MarketDataService
-from app.services.runtime_leadership_service import RuntimeLeadershipService
+from app.services.runtime_leadership_service import (
+    RuntimeLeadershipService,
+    activate_runtime_leadership,
+    deactivate_runtime_leadership,
+)
 from app.services.runtime_recovery_service import RuntimeRecoveryService
 
 settings = get_settings()
@@ -63,47 +70,68 @@ async def lifespan(_: FastAPI):
         )
         yield
         return
+    if acquisition.generation is None:
+        raise RuntimeError("Runtime leadership acquisition returned no generation.")
+    leader_generation = acquisition.generation
+    activate_runtime_leadership(
+        owner_id=leader_owner_id,
+        generation=leader_generation,
+    )
 
-    with Session(engine) as session:
-        RuntimeRecoveryService(session).recover()
-    streaming_service = get_ig_streaming_service()
-    get_health_service().heartbeat()
-    streaming_enabled = streaming_service.is_enabled()
-    managed_tasks: list[asyncio.Task[None]] = []
-    market_data_task = asyncio.create_task(
-        MarketDataService(poll_prices=not streaming_enabled).run()
-    )
-    managed_tasks.append(market_data_task)
-    streaming_task: asyncio.Task[None] | None = None
-    if streaming_enabled:
-        streaming_task = asyncio.create_task(streaming_service.run())
-        managed_tasks.append(streaming_task)
-    heartbeat_task = asyncio.create_task(
-        _runtime_leader_heartbeat_loop(
-            owner_id=leader_owner_id,
-            ttl=leader_ttl,
-            managed_tasks=managed_tasks,
-        )
-    )
     try:
-        yield
-    finally:
-        heartbeat_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await heartbeat_task
-        for task in managed_tasks:
-            task.cancel()
-        for task in managed_tasks:
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
         with Session(engine) as session:
-            RuntimeLeadershipService(session, owner_id=leader_owner_id).release()
+            RuntimeRecoveryService(session).recover()
+        streaming_service = get_ig_streaming_service()
+        get_health_service().heartbeat()
+        streaming_enabled = streaming_service.is_enabled()
+        managed_tasks: list[asyncio.Task[None]] = []
+        market_data_task = asyncio.create_task(
+            MarketDataService(poll_prices=not streaming_enabled).run()
+        )
+        managed_tasks.append(market_data_task)
+        reconciliation_task = asyncio.create_task(
+            BrokerReconciliationSupervisor().run()
+        )
+        managed_tasks.append(reconciliation_task)
+        streaming_task: asyncio.Task[None] | None = None
+        if streaming_enabled:
+            streaming_task = asyncio.create_task(streaming_service.run())
+            managed_tasks.append(streaming_task)
+        heartbeat_task = asyncio.create_task(
+            _runtime_leader_heartbeat_loop(
+                owner_id=leader_owner_id,
+                generation=leader_generation,
+                ttl=leader_ttl,
+                managed_tasks=managed_tasks,
+            )
+        )
+        try:
+            yield
+        finally:
+            heartbeat_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat_task
+            for task in managed_tasks:
+                task.cancel()
+            for task in managed_tasks:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            with Session(engine) as session:
+                RuntimeLeadershipService(session, owner_id=leader_owner_id).release(
+                    generation=leader_generation
+                )
+    finally:
+        deactivate_runtime_leadership(
+            owner_id=leader_owner_id,
+            generation=leader_generation,
+        )
         logger.info("Shutting down application")
 
 
 async def _runtime_leader_heartbeat_loop(
     *,
     owner_id: str,
+    generation: int,
     ttl: timedelta,
     managed_tasks: list[asyncio.Task[None]],
 ) -> None:
@@ -115,7 +143,8 @@ async def _runtime_leader_heartbeat_loop(
     while True:
         with Session(engine) as session:
             renewed = RuntimeLeadershipService(session, owner_id=owner_id).renew(
-                ttl=ttl
+                generation=generation,
+                ttl=ttl,
             )
         if not renewed:
             logger.error(

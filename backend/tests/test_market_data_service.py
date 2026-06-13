@@ -345,10 +345,6 @@ def test_successful_polling_fallback_does_not_mark_stream_as_connected(monkeypat
         "app.services.market_data_service.runtime_manager.get_engines_for_instrument",
         lambda _: [("test", fake_engine)],
     )
-    monkeypatch.setattr(
-        "app.services.market_data_service.BrokerService.reconcile_positions",
-        lambda *args, **kwargs: None,
-    )
     processed: list[str] = []
     monkeypatch.setattr(
         "app.services.market_data_service.StrategyService.process_price_update",
@@ -361,33 +357,6 @@ def test_successful_polling_fallback_does_not_mark_stream_as_connected(monkeypat
 
     assert processed == [instrument]
     assert get_health_service().get_system_health().stream_connected is False
-
-
-def test_broker_reconciliation_uses_slow_cadence(session, monkeypatch):
-    service = MarketDataService(poll_prices=False)
-    service.settings.broker_reconciliation_interval_seconds = 60
-    now = datetime(2026, 4, 8, 18, 0, tzinfo=UTC)
-    service._now = lambda: now  # type: ignore[method-assign]
-    calls = 0
-
-    def fake_reconcile(self, active_session):
-        nonlocal calls
-        calls += 1
-        assert active_session is session
-        return []
-
-    monkeypatch.setattr(
-        "app.services.market_data_service.BrokerService.reconcile_positions",
-        fake_reconcile,
-    )
-
-    service._reconcile_positions_if_due(session=session)
-    service._now = lambda: now + timedelta(seconds=10)  # type: ignore[method-assign]
-    service._reconcile_positions_if_due(session=session)
-    service._now = lambda: now + timedelta(seconds=61)  # type: ignore[method-assign]
-    service._reconcile_positions_if_due(session=session)
-
-    assert calls == 2
 
 
 def test_tier2_refresh_creates_promotion_request_for_high_scoring_candidate(

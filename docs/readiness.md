@@ -2,33 +2,31 @@
 
 InvestMate is **not ready for live trading**.
 
-The current repository state is **ready for a human-supervised IG demo smoke test after sign-off**. That readiness claim is intentionally narrow:
+The current repository state is not yet approved for broker-connected demo dealing. The three `2026-06-12` P0 implementation defects are fixed and locally regression-tested, but the new Postgres concurrency rehearsals have not run in this local environment. The allowed posture remains intentionally narrow until CI and preflight evidence are refreshed:
 
 - it does not approve unattended autonomy
 - it does not approve live dealing
-- it does not remove manual security and operations sign-offs
+- it does not approve demo broker mutation
+- it permits local/read-only investigation with dealing disabled
 
-## Current verified supervised-demo posture
+## Current posture
 
-The 2026-06-04 remediation pass closed the current code blockers for a supervised IG demo smoke test:
+The `2026-06-12` remediation:
 
-1. `IG_API_BASE_URL` is the single source of truth for broker environment.
-2. Only these canonical gateways are accepted:
-   - demo: `https://demo-api.ig.com/gateway/deal`
-   - live: `https://api.ig.com/gateway/deal`
-3. Live dealing now fails closed unless `IG_LIVE_TRADING_ACKNOWLEDGED=true`.
-4. `/system/broker-environment` exposes backend-owned environment, endpoint classification, and dealing truth.
-5. Test-only backend routes default to disabled and cannot register in production-like or live-dealing posture.
-6. `HealthService` now uses the active injected database context instead of a hidden module-global engine.
-7. Backend lockfile regeneration and freshness checks are green again.
+1. moved periodic broker reconciliation into an independent leader-owned supervisor (`AUDIT-ARCH-001`);
+2. serialized allocation and durable intent admission with a process lock on SQLite and a transaction-scoped Postgres advisory lock (`AUDIT-RISK-004`);
+3. added monotonic lease generations and an IG mutation fence that holds the lease row against takeover (`AUDIT-RUNTIME-002`).
+
+Local backend evidence is green. Production-dialect proof remains pending because the Postgres rehearsal environment variable is unavailable on this machine.
 
 ## Local verification snapshot
 
-The current local verification record is captured in [docs/demo-trading-readiness-audit.md](demo-trading-readiness-audit.md).
+The current verification record is captured in [docs/demo-trading-readiness-audit.md](demo-trading-readiness-audit.md).
 
-Highlights from the 2026-06-04 run:
+Highlights:
 
-- `backend/.venv/bin/pytest backend/tests -q` -> `562 passed, 5 skipped`
+- `backend/.venv/bin/python -m pytest backend/tests -q` -> `574 passed, 7 skipped`
+- the skipped tests are the Postgres migration, allocation-lock, and runtime-fence rehearsals because `POSTGRES_REHEARSAL_ADMIN_URL` is not set locally
 - `cd frontend && npm run typecheck` -> passed
 - `cd frontend && npm run test:frontend` -> `78 passed`
 - `cd frontend && npm run test:e2e -- --grep "DEMO|environment|dealing|AUDIT-|FLOW-"` -> `61 passed`
@@ -45,17 +43,9 @@ This is acceptable when all of the following stay true:
 3. No broker mutation is attempted
 4. The session is treated as UI review, operator research, broker-read investigation, or smoke testing only
 
-### Human-supervised IG demo smoke test
+### Broker-connected demo dealing
 
-This is acceptable only after human sign-off on these conditions:
-
-1. Use a fresh versioned database.
-2. Use the demo gateway: `IG_API_BASE_URL=https://demo-api.ig.com/gateway/deal`.
-3. Verify `/system/broker-environment` reports `DEMO` and the expected dealing state before any smoke workflow.
-4. Keep test-only controls disabled.
-5. Resolve or explicitly accept the manual security posture in `AUDIT-SEC-003`:
-   - purge historical SQLite DB blobs before broader sharing or publication
-   - rotate any local or demo credentials if repository or workstation state was shared
+Pending. Keep dealing disabled until the committed Postgres cross-connection tests pass in CI and the fresh-database, demo-account preflight is rerun. The prior P0 code paths are fixed locally; this hold is now an evidence gate rather than an unfixed-design gate.
 
 ### Live trading
 
@@ -63,10 +53,11 @@ Live trading remains blocked.
 
 Additional production-only work is still required:
 
-1. Verified manual history cleanup and any required credential rotation.
-2. A reviewed production migration story beyond the fresh-database demo posture.
-3. Stronger supply-chain provenance, attestation, and broader dependency/runtime hardening.
-4. Continued operator/browser evidence and runbook expansion as the surface area evolves.
+1. Define one authoritative open-risk management model (`AUDIT-ARCH-002`).
+2. Introduce production-grade operator identity and authorization (`AUDIT-SEC-004`).
+3. Complete the broker capability/resilience contract (`AUDIT-BROKER-006`).
+4. Establish deterministic replay/live parity (`AUDIT-ARCH-003`).
+5. Complete history, migration, supply-chain, and operations hardening.
 
 ## Historical Notes
 
