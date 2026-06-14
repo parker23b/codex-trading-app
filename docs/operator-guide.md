@@ -227,6 +227,10 @@ Current evidence gaps are tracked in [audit-status.md](audit-status.md).
 
 The application remains usable when OANDA or IG credentials are absent. Provider cards show the missing optional configuration.
 
+Binance ingestion currently uses paginated public REST klines. Automatic use of
+the official daily/monthly archive files is not implemented in this slice, so
+prefer bounded imports until that large-backfill path is added.
+
 ## Import data
 
 Open `/backtests`.
@@ -260,8 +264,12 @@ Use `DATASET` spread only when both bid and ask are present. For midpoint or tra
 ## Interpret results
 
 - Signals use the completed candle and fill at the next candle open.
+- Same-timestamp cycles process queued exits, queued entries, stop/target
+  handling, and close evaluation in that order, with stable instrument ordering.
 - Equity and drawdown use candle-resolution marks.
 - A stop and target inside the same candle resolves to the stop unless higher-resolution data establishes ordering.
+- Gap-through stops use the less favorable candle open; end-of-run closes use
+  the final candle close.
 - Binance spot data is venue-specific and does not reproduce an IG crypto CFD.
 - One-minute OHLC is not tick or quote replay and cannot prove exact intraminute fill order.
 - Backtest trades are isolated simulation records, never broker-confirmed executions.

@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import io
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 import json
 from math import isfinite
@@ -62,11 +62,25 @@ class HistoricalCandle:
             raise ValueError("Candle instrument is required.")
         if self.timeframe not in TIMEFRAME_SECONDS:
             raise ValueError(f"Unsupported candle timeframe '{self.timeframe}'.")
+        normalized_timestamp = self.timestamp.astimezone(UTC)
+        interval_seconds = TIMEFRAME_SECONDS[self.timeframe]
+        if (
+            normalized_timestamp.microsecond
+            or int(normalized_timestamp.timestamp()) % interval_seconds
+        ):
+            raise ValueError(
+                f"Candle timestamp {normalized_timestamp.isoformat()} is not aligned "
+                f"to the {self.timeframe} boundary."
+            )
         components = self.available_components
         if not components:
             raise ValueError("Candle requires at least one price component.")
         for component in components:
             getattr(self, component).validate(component)
+        if self.bid is not None and self.ask is not None:
+            for field_name in ("open", "high", "low", "close"):
+                if getattr(self.ask, field_name) < getattr(self.bid, field_name):
+                    raise ValueError(f"Ask {field_name} is below bid {field_name}.")
         if self.volume is not None and (not isfinite(self.volume) or self.volume < 0):
             raise ValueError("Candle volume must be finite and non-negative.")
 
@@ -76,6 +90,12 @@ class HistoricalCandle:
             component
             for component in PRICE_COMPONENTS
             if getattr(self, component) is not None
+        )
+
+    @property
+    def close_timestamp(self) -> datetime:
+        return self.timestamp.astimezone(UTC) + timedelta(
+            seconds=TIMEFRAME_SECONDS[self.timeframe]
         )
 
     def canonical_dict(self) -> dict[str, object]:
@@ -141,6 +161,9 @@ def validate_candle_series(
         raise ValueError("Historical partition contains mixed instruments.")
     if len(timeframes) != 1:
         raise ValueError("Historical partition contains mixed timeframes.")
+    component_sets = {candle.available_components for candle in ordered}
+    if len(component_sets) != 1:
+        raise ValueError("Historical partition contains inconsistent price components.")
     seen: set[datetime] = set()
     for candle in ordered:
         candle.validate()
@@ -204,6 +227,19 @@ def resample_candles(
     result: list[HistoricalCandle] = []
     for bucket_at in sorted(buckets):
         rows = buckets[bucket_at]
+        expected_count = target_seconds // source_seconds
+        expected_timestamps = [
+            bucket_at + timedelta(seconds=index * source_seconds)
+            for index in range(expected_count)
+        ]
+        if (
+            len(rows) != expected_count
+            or [row.timestamp.astimezone(UTC) for row in rows] != expected_timestamps
+        ):
+            raise ValueError(
+                f"Cannot derive a complete {target_timeframe} candle at "
+                f"{bucket_at.isoformat()}."
+            )
 
         def aggregate(component: str) -> PriceBar | None:
             bars = [getattr(row, component) for row in rows]

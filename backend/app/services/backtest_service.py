@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from math import isfinite
 from pathlib import Path
 from uuid import uuid4
 
@@ -76,15 +77,38 @@ class BacktestService:
         dataset = self.datasets.get_dataset(dataset_id)
         metadata = strategy_registry.get_metadata(strategy_identifier)
         resolved = strategy_registry.resolve_profile(strategy_identifier, profile_name)
+        allowed_parameters = {definition.key for definition in metadata.parameters}
+        unknown_parameters = sorted(set(strategy_parameters) - allowed_parameters)
+        if unknown_parameters:
+            raise ValueError(
+                "Unknown strategy parameters: " + ", ".join(unknown_parameters)
+            )
         parameters = dict(resolved.parameter_values)
         parameters.update(strategy_parameters)
-        resolved = strategy_registry.resolve_profile(strategy_identifier, profile_name)
         constructor_kwargs = {
             definition.constructor_key or definition.key: parameters.get(
                 definition.key, definition.value
             )
             for definition in metadata.parameters
         }
+        normalized_shortlist = sorted(
+            {instrument.strip() for instrument in shortlist if instrument.strip()}
+        )
+        self._validate_configuration(
+            timeframe=timeframe,
+            start_at=start_at,
+            end_at=end_at,
+            starting_capital=starting_capital,
+            position_sizing_mode=position_sizing_mode,
+            risk_configuration=risk_configuration,
+            spread_model=spread_model,
+            spread_assumption=spread_assumption,
+            slippage_model=slippage_model,
+            slippage_assumption=slippage_assumption,
+            fee_model=fee_model,
+            fee_assumption=fee_assumption,
+            open_position_treatment=open_position_treatment,
+        )
         run = BacktestRun(
             id=str(uuid4()),
             name=name,
@@ -97,7 +121,7 @@ class BacktestService:
             },
             dataset_id=dataset.id,
             dataset_checksum=dataset.checksum or "",
-            shortlist=sorted(set(shortlist)),
+            shortlist=normalized_shortlist,
             timeframe=timeframe,
             requested_start_at=self._utc(start_at),
             requested_end_at=self._utc(end_at),
@@ -152,6 +176,10 @@ class BacktestService:
             result = engine.run(candles)
             self._persist_result(run, result, partitions, candles)
         except Exception as exc:
+            self.session.rollback()
+            persisted_run = self.session.get(BacktestRun, run.id)
+            if persisted_run is not None:
+                run = persisted_run
             run.status = BacktestRunStatus.FAILED.value
             run.failure_reason = str(exc)
             run.completed_at = datetime.now(UTC)
@@ -234,7 +262,7 @@ class BacktestService:
         dict[str, list[HistoricalCandle]],
         dict[str, HistoricalDatasetPartition],
     ]:
-        dataset = self.datasets.get_dataset(run.dataset_id)
+        dataset = self.datasets.verify_dataset_checksum(run.dataset_id)
         if dataset.status != DatasetStatus.READY.value or not dataset.checksum:
             raise ValueError("Backtest requires a completed immutable dataset.")
         if dataset.checksum != run.dataset_checksum:
@@ -252,6 +280,15 @@ class BacktestService:
         requested_end = self._stored_utc(run.requested_end_at)
         if requested_start >= requested_end:
             raise ValueError("Backtest start must be before end.")
+        target_seconds = TIMEFRAME_SECONDS[run.timeframe]
+        for label, value in (
+            ("start", requested_start),
+            ("end", requested_end),
+        ):
+            if value.microsecond or int(value.timestamp()) % target_seconds:
+                raise ValueError(
+                    f"Backtest {label} must align to a {run.timeframe} boundary."
+                )
         partitions = {
             item.instrument: item for item in self.datasets.list_partitions(dataset.id)
         }
@@ -276,14 +313,13 @@ class BacktestService:
                 raise ValueError(
                     f"Requested date range is not covered for {instrument}."
                 )
-            candles = self.datasets.load_partition(partition)
-            if run.timeframe != partition.timeframe:
-                candles = resample_candles(candles, run.timeframe)
             candles = [
                 candle
-                for candle in candles
+                for candle in self.datasets.load_partition(partition)
                 if requested_start <= candle.timestamp.astimezone(UTC) < requested_end
             ]
+            if run.timeframe != partition.timeframe:
+                candles = resample_candles(candles, run.timeframe)
             if not candles:
                 raise ValueError(
                     f"Requested date range produced no candles for {instrument}."
@@ -388,6 +424,20 @@ class BacktestService:
                     details=warning.details,
                 )
             )
+        for partition in partitions.values():
+            for gap in partition.detected_gaps:
+                self.session.add(
+                    BacktestWarning(
+                        run_id=run.id,
+                        code="DATASET_GAP",
+                        message=(
+                            "The selected historical partition contains missing "
+                            "candles within its stored coverage."
+                        ),
+                        instrument=partition.instrument,
+                        details=dict(gap),
+                    )
+                )
         if any(
             "bid" not in partition.price_components
             or "ask" not in partition.price_components
@@ -415,6 +465,96 @@ class BacktestService:
                 )
             )
         self.session.commit()
+
+    @staticmethod
+    def _validate_configuration(
+        *,
+        timeframe: str,
+        start_at: datetime,
+        end_at: datetime,
+        starting_capital: float,
+        position_sizing_mode: str,
+        risk_configuration: dict[str, object],
+        spread_model: str,
+        spread_assumption: dict[str, object],
+        slippage_model: str,
+        slippage_assumption: dict[str, object],
+        fee_model: str,
+        fee_assumption: dict[str, object],
+        open_position_treatment: str,
+    ) -> None:
+        if timeframe not in TIMEFRAME_SECONDS:
+            raise ValueError(f"Unsupported backtest timeframe '{timeframe}'.")
+        normalized_start = BacktestService._utc(start_at)
+        normalized_end = BacktestService._utc(end_at)
+        if normalized_start >= normalized_end:
+            raise ValueError("Backtest start must be before end.")
+        if not isfinite(starting_capital) or starting_capital <= 0:
+            raise ValueError("Starting capital must be finite and positive.")
+        if position_sizing_mode not in {"FIXED_UNITS", "PERCENT_RISK"}:
+            raise ValueError(
+                f"Unsupported position sizing mode '{position_sizing_mode}'."
+            )
+        max_open_positions = BacktestService._positive_number(
+            risk_configuration, "max_open_positions", default=1
+        )
+        if not float(max_open_positions).is_integer():
+            raise ValueError("max_open_positions must be a whole number.")
+        if position_sizing_mode == "FIXED_UNITS":
+            BacktestService._positive_number(risk_configuration, "fixed_size")
+        else:
+            risk_percent = BacktestService._positive_number(
+                risk_configuration, "risk_per_trade_percent"
+            )
+            if risk_percent > 100:
+                raise ValueError("risk_per_trade_percent cannot exceed 100.")
+            BacktestService._positive_number(
+                risk_configuration, "fallback_stop_percent"
+            )
+            if risk_configuration.get("max_size") is not None:
+                BacktestService._positive_number(risk_configuration, "max_size")
+
+        model_options = (
+            ("spread", spread_model, {"DATASET", "FIXED_PRICE", "FIXED_BPS", "NONE"}),
+            ("slippage", slippage_model, {"NONE", "FIXED_PRICE", "FIXED_BPS"}),
+            (
+                "fee",
+                fee_model,
+                {"NONE", "FIXED_PER_ORDER", "PER_UNIT", "BPS_NOTIONAL"},
+            ),
+        )
+        for label, model, allowed in model_options:
+            if model not in allowed:
+                raise ValueError(f"Unsupported {label} model '{model}'.")
+        for label, assumption in (
+            ("spread", spread_assumption),
+            ("slippage", slippage_assumption),
+            ("fee", fee_assumption),
+        ):
+            value = float(assumption.get("value", 0.0))
+            if not isfinite(value) or value < 0:
+                raise ValueError(
+                    f"{label.capitalize()} assumption must be finite and non-negative."
+                )
+        if open_position_treatment not in {"CLOSE_AT_END", "MARK_TO_MARKET"}:
+            raise ValueError(
+                f"Unsupported open-position treatment '{open_position_treatment}'."
+            )
+
+    @staticmethod
+    def _positive_number(
+        values: dict[str, object],
+        key: str,
+        *,
+        default: float | None = None,
+    ) -> float:
+        raw = values.get(key, default)
+        if raw is None:
+            raise ValueError(f"{key} is required.")
+        value = float(raw)
+        if not isfinite(value) or value <= 0:
+            raise ValueError(f"{key} must be finite and positive.")
+        return value
 
     @staticmethod
     def _utc(value: datetime) -> datetime:

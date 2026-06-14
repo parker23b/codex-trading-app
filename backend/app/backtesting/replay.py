@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from app.backtesting.candles import HistoricalCandle
@@ -14,7 +14,6 @@ from app.backtesting.execution import (
 )
 from app.backtesting.metrics import (
     EquitySample,
-    calculate_grouped_metrics,
     calculate_metrics,
 )
 from app.core.broker import OrderDirection
@@ -113,12 +112,22 @@ class BacktestReplayEngine:
 
         for timestamp in timestamps:
             self.clock.advance_to(timestamp)
-            for candle in sorted(
-                by_timestamp[timestamp], key=lambda item: item.instrument
-            ):
+            rows = sorted(by_timestamp[timestamp], key=lambda item: item.instrument)
+            close_timestamps = {candle.close_timestamp for candle in rows}
+            if len(close_timestamps) != 1:
+                raise ValueError(
+                    "Candles sharing an open timestamp must share a close timestamp."
+                )
+            close_timestamp = next(iter(close_timestamps))
+            for candle in rows:
                 instrument = candle.instrument
                 latest_candles[instrument] = candle
                 pricing_modes.add(self.execution.pricing_mode(candle))
+
+            # Execute every queued action at the shared candle open before any
+            # strategy can observe the current candle's high, low, or close.
+            for candle in rows:
+                instrument = candle.instrument
                 strategy = self.strategies[instrument]
 
                 if instrument in pending_exits and instrument in positions:
@@ -127,11 +136,14 @@ class BacktestReplayEngine:
                         candle=candle,
                         exit_reason="STRATEGY_EXIT_NEXT_OPEN",
                     )
-                    cash += trade.net_pnl
+                    cash += self._cash_settlement(trade)
                     trades.append(trade)
                     strategy.on_position_closed()
                     del pending_exits[instrument]
 
+            for candle in rows:
+                instrument = candle.instrument
+                strategy = self.strategies[instrument]
                 if instrument in pending_entries and instrument not in positions:
                     pending = pending_entries.pop(instrument)
                     size = self._position_size(
@@ -141,6 +153,7 @@ class BacktestReplayEngine:
                             cash=cash,
                             positions=positions,
                             latest_candles=latest_candles,
+                            open_timestamp=timestamp,
                         ),
                     )
                     if size <= 0:
@@ -169,9 +182,13 @@ class BacktestReplayEngine:
                         )
                     else:
                         hints = pending.decision.hints
+                        if pending.decision.direction is None:
+                            raise ValueError(
+                                f"Entry decision for {instrument} has no direction."
+                            )
                         position = self.execution.open_position(
                             instrument=instrument,
-                            direction=pending.decision.direction or OrderDirection.BUY,
+                            direction=pending.decision.direction,
                             size=size,
                             candle=candle,
                             stop_loss_price=_optional_float(
@@ -183,11 +200,15 @@ class BacktestReplayEngine:
                             metadata={"signal_at": pending.created_at.isoformat()},
                         )
                         positions[instrument] = position
+                        cash -= position.entry_fee
                         strategy.on_position_opened(
                             direction=position.direction,
                             entry_price=position.open_price,
                         )
 
+            for candle in rows:
+                instrument = candle.instrument
+                strategy = self.strategies[instrument]
                 position = positions.get(instrument)
                 if position is not None:
                     threshold_trade = self.execution.threshold_exit(
@@ -195,7 +216,7 @@ class BacktestReplayEngine:
                     )
                     if threshold_trade is not None:
                         positions.pop(instrument)
-                        cash += threshold_trade.net_pnl
+                        cash += self._cash_settlement(threshold_trade)
                         trades.append(threshold_trade)
                         strategy.on_position_closed()
                         if threshold_trade.conservative_ambiguity:
@@ -214,6 +235,10 @@ class BacktestReplayEngine:
                                 )
                             )
 
+            self.clock.advance_to(close_timestamp)
+            for candle in rows:
+                instrument = candle.instrument
+                strategy = self.strategies[instrument]
                 decision = evaluate_strategy_update(
                     strategy=strategy,
                     update=self._price_update(candle),
@@ -226,7 +251,7 @@ class BacktestReplayEngine:
                         and instrument not in pending_entries
                     ):
                         pending_entries[instrument] = _PendingOrder(
-                            decision=decision, created_at=timestamp
+                            decision=decision, created_at=close_timestamp
                         )
                     elif (
                         decision.kind is StrategyDecisionKind.EXIT
@@ -234,7 +259,7 @@ class BacktestReplayEngine:
                         and instrument not in pending_exits
                     ):
                         pending_exits[instrument] = _PendingOrder(
-                            decision=decision, created_at=timestamp
+                            decision=decision, created_at=close_timestamp
                         )
 
             equity_value = self._current_equity(
@@ -244,7 +269,7 @@ class BacktestReplayEngine:
             )
             equity.append(
                 EquitySample(
-                    timestamp=timestamp,
+                    timestamp=close_timestamp,
                     cash=cash,
                     unrealized_pnl=equity_value - cash,
                     equity=equity_value,
@@ -252,7 +277,7 @@ class BacktestReplayEngine:
                 )
             )
 
-        final_timestamp = timestamps[-1]
+        final_timestamp = equity[-1].timestamp
         if positions and self.configuration.open_position_treatment == "CLOSE_AT_END":
             for instrument in sorted(list(positions)):
                 candle = latest_candles[instrument]
@@ -260,8 +285,10 @@ class BacktestReplayEngine:
                     position=positions.pop(instrument),
                     candle=candle,
                     exit_reason="END_OF_RUN",
+                    at="close",
+                    execution_time=final_timestamp,
                 )
-                cash += trade.net_pnl
+                cash += self._cash_settlement(trade)
                 trades.append(trade)
                 self.strategies[instrument].on_position_closed()
             equity[-1] = EquitySample(
@@ -289,18 +316,43 @@ class BacktestReplayEngine:
             equity=equity,
             open_positions_at_end=len(positions),
         )
+        trades_by_instrument = {
+            instrument: [
+                trade for trade in trades if trade.position.instrument == instrument
+            ]
+            for instrument in sorted(self.strategies)
+        }
+        grouped_metrics: dict[str, dict[str, object]] = {}
+        for instrument in sorted(self.strategies):
+            instrument_trades = trades_by_instrument[instrument]
+            pnl = sum(trade.net_pnl for trade in instrument_trades)
+            position = positions.get(instrument)
+            if position is not None:
+                mark = self.execution.mark_price(
+                    position=position,
+                    candle=latest_candles[instrument],
+                )
+                pnl += (
+                    (mark - position.open_price) * position.size
+                    if position.direction is OrderDirection.BUY
+                    else (position.open_price - mark) * position.size
+                ) - position.entry_fee
+            grouped_metrics[instrument] = calculate_metrics(
+                starting_capital=self.configuration.starting_capital,
+                ending_capital=self.configuration.starting_capital + pnl,
+                trades=instrument_trades,
+                equity=[],
+                open_positions_at_end=int(position is not None),
+            )
         return ReplayResult(
             trades=trades,
             equity=equity,
             metrics=metrics,
-            metrics_by_instrument=calculate_grouped_metrics(
-                starting_capital=self.configuration.starting_capital,
-                trades=trades,
-            ),
+            metrics_by_instrument=grouped_metrics,
             warnings=warnings,
             open_positions=[positions[key] for key in sorted(positions)],
             effective_start_at=timestamps[0],
-            effective_end_at=timestamps[-1],
+            effective_end_at=final_timestamp,
             pricing_modes=tuple(sorted(pricing_modes)),
         )
 
@@ -339,19 +391,33 @@ class BacktestReplayEngine:
         cash: float,
         positions: dict[str, SimulatedPosition],
         latest_candles: dict[str, HistoricalCandle],
+        open_timestamp: datetime | None = None,
     ) -> float:
         unrealized = 0.0
         for instrument, position in positions.items():
             candle = latest_candles.get(instrument)
             if candle is None:
                 continue
-            mark = self.execution.mark_price(position=position, candle=candle)
+            mark = self.execution.mark_price(
+                position=position,
+                candle=candle,
+                at=(
+                    "open"
+                    if open_timestamp is not None and candle.timestamp == open_timestamp
+                    else "close"
+                ),
+            )
             unrealized += (
                 (mark - position.open_price) * position.size
                 if position.direction is OrderDirection.BUY
                 else (position.open_price - mark) * position.size
             )
         return cash + unrealized
+
+    @staticmethod
+    def _cash_settlement(trade: SimulatedTradeResult) -> float:
+        exit_fee = trade.fees - trade.position.entry_fee
+        return trade.gross_pnl - exit_fee
 
     @staticmethod
     def _price_update(candle: HistoricalCandle) -> PriceUpdate:
@@ -375,7 +441,7 @@ class BacktestReplayEngine:
             low=low,
             market_status="TRADEABLE",
             tradable=True,
-            received_at=candle.timestamp.astimezone(UTC),
+            received_at=candle.close_timestamp,
         )
 
 

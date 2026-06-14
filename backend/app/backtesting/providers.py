@@ -203,7 +203,8 @@ class BinanceHistoricalMarketDataProvider(HistoricalMarketDataProvider):
             },
             quota_warnings=(
                 "Spot klines are venue-specific trade-price candles, not IG CFD prices.",
-                "Large imports should prefer Binance public daily/monthly archives.",
+                "This MVP uses paginated REST; Binance public daily/monthly archive "
+                "ingestion remains a large-backfill extension.",
             ),
         )
 

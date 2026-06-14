@@ -62,10 +62,23 @@ Intentionally excluded:
 
 - Strategy evaluation occurs after the current candle closes.
 - Entry and strategy-exit decisions become executable at the next candle open.
+- Every same-timestamp replay cycle executes queued exits, then queued entries,
+  then stop/target handling, then close evaluation; instruments are ordered by
+  internal identifier within each phase.
 - Stops and targets are checked against the execution-side candle component: bid for long exits and ask for short exits where available.
+- Gap-through stops fill at the less favorable candle open. End-of-run
+  `CLOSE_AT_END` positions fill at the final candle close.
 - Midpoint or trade-price candles require `FIXED_BPS`, `FIXED_PRICE`, or explicit zero spread. `DATASET` spread is rejected without bid and ask.
 - If both stop and target are reachable in one candle, stop loss wins and a warning is persisted.
+- Entry fees reduce cash immediately. Mark-to-market results therefore include
+  paid entry fees even when the position remains open.
 - One-minute OHLC does not establish tick ordering. Optional OANDA five-second data reduces but does not eliminate quote-order ambiguity.
+
+Derived candles require complete, UTC epoch-aligned source buckets. Partial
+buckets are rejected rather than silently incorporating candles outside the
+requested range. Dataset identity covers provider provenance, instrument
+mappings, coverage metadata, partition checksums, detected gaps, and warnings;
+all of it is re-verified before replay.
 
 ## Provider posture
 
@@ -78,16 +91,24 @@ Intentionally excluded:
 
 Official references reviewed for this phase:
 
-- [OANDA instrument candles](https://developer.oanda.com/rest-live-v20/instrument-ep/)
 - [OANDA v20 introduction and demo access](https://developer.oanda.com/rest-live-v20/introduction/)
 - [Binance spot market-data endpoints](https://developers.binance.com/docs/binance-spot-api-docs/rest-api/market-data-endpoints)
 - [Binance public data archives](https://github.com/binance/binance-public-data)
 - [IG REST API guide](https://labs.ig.com/rest-trading-api-guide.html)
+
+These official sources were rechecked on June 14, 2026. OANDA still documents
+demo-account access, Binance documents public spot klines with a maximum of
+1,000 records per request, and Binance's official public-data repository
+documents daily/monthly downloadable archives. The IG source remains an
+existing-credentials validation path, not a dependency for general app use.
 
 ## Known limitations and extensions
 
 - Synchronous runs are bounded by `BACKTEST_MAX_CANDLES_PER_RUN`.
 - JSONL gzip is used instead of Parquet in this phase to avoid adding a large columnar runtime dependency.
 - IG ingestion currently uses the existing recent-history adapter and is intentionally limited.
+- Binance ingestion currently uses deterministic paginated REST. Automatic
+  daily/monthly archive ingestion is not yet implemented, so very large
+  backfills remain a documented next slice.
 - The MVP does not model partial fills, order books, latency distributions, tick paths, margin, financing, or corporate actions.
 - Future work may add Parquet partitions, quote/tick replay, walk-forward tests, parameter sweeps, benchmark comparisons, and whole-system multi-strategy simulation without changing dataset identity or strategy reuse rules.

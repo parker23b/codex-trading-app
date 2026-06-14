@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    FiniteFloat,
+    model_validator,
+)
 
 
 class HistoricalProviderCapabilitiesResponse(BaseModel):
@@ -31,22 +38,28 @@ class HistoricalProviderCapabilitiesResponse(BaseModel):
 class ProviderImportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    display_name: str
+    display_name: str = Field(min_length=1)
     provider_id: str
     instruments: list[str] = Field(min_length=1)
     timeframe: str
-    start_at: datetime
-    end_at: datetime
+    start_at: AwareDatetime
+    end_at: AwareDatetime
     asset_class: str
     market_type: str
     venue: str | None = None
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "ProviderImportRequest":
+        if self.start_at >= self.end_at:
+            raise ValueError("Historical import start must be before end.")
+        return self
 
 
 class CsvImportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    display_name: str
-    csv_text: str
+    display_name: str = Field(min_length=1)
+    csv_text: str = Field(min_length=1)
     asset_class: str
     venue: str
     market_type: str
@@ -104,6 +117,12 @@ class HistoricalDatasetResponse(BaseModel):
     partitions: list[HistoricalDatasetPartitionResponse] = Field(default_factory=list)
 
 
+class ExecutionAssumptionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: FiniteFloat = Field(default=0.0, ge=0)
+
+
 class BacktestRunCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -111,24 +130,55 @@ class BacktestRunCreateRequest(BaseModel):
     notes: str | None = None
     strategy_identifier: str
     profile_name: str | None = None
-    strategy_parameters: dict[str, Any] = Field(default_factory=dict)
+    strategy_parameters: dict[str, FiniteFloat] = Field(default_factory=dict)
     dataset_id: str
     shortlist: list[str] = Field(min_length=1)
-    timeframe: str
-    start_at: datetime
-    end_at: datetime
-    starting_capital: float = Field(gt=0)
-    position_sizing_mode: str = "FIXED_UNITS"
-    risk_configuration: dict[str, Any] = Field(
+    timeframe: Literal["S5", "1m", "M1", "5m", "M5", "15m", "M15", "30m", "1h", "H1"]
+    start_at: AwareDatetime
+    end_at: AwareDatetime
+    starting_capital: FiniteFloat = Field(gt=0)
+    position_sizing_mode: Literal["FIXED_UNITS", "PERCENT_RISK"] = "FIXED_UNITS"
+    risk_configuration: dict[str, FiniteFloat] = Field(
         default_factory=lambda: {"fixed_size": 1.0}
     )
-    spread_model: str = "DATASET"
-    spread_assumption: dict[str, Any] = Field(default_factory=lambda: {"value": 0.0})
-    slippage_model: str = "NONE"
-    slippage_assumption: dict[str, Any] = Field(default_factory=lambda: {"value": 0.0})
-    fee_model: str = "NONE"
-    fee_assumption: dict[str, Any] = Field(default_factory=lambda: {"value": 0.0})
-    open_position_treatment: str = "CLOSE_AT_END"
+    spread_model: Literal["DATASET", "FIXED_PRICE", "FIXED_BPS", "NONE"] = "DATASET"
+    spread_assumption: ExecutionAssumptionRequest = Field(
+        default_factory=ExecutionAssumptionRequest
+    )
+    slippage_model: Literal["NONE", "FIXED_PRICE", "FIXED_BPS"] = "NONE"
+    slippage_assumption: ExecutionAssumptionRequest = Field(
+        default_factory=ExecutionAssumptionRequest
+    )
+    fee_model: Literal["NONE", "FIXED_PER_ORDER", "PER_UNIT", "BPS_NOTIONAL"] = "NONE"
+    fee_assumption: ExecutionAssumptionRequest = Field(
+        default_factory=ExecutionAssumptionRequest
+    )
+    open_position_treatment: Literal["CLOSE_AT_END", "MARK_TO_MARKET"] = "CLOSE_AT_END"
+
+    @model_validator(mode="after")
+    def validate_configuration(self) -> "BacktestRunCreateRequest":
+        if self.start_at >= self.end_at:
+            raise ValueError("Backtest start must be before end.")
+        if len(set(self.shortlist)) != len(self.shortlist):
+            raise ValueError("Backtest shortlist cannot contain duplicates.")
+        max_open_positions = self.risk_configuration.get("max_open_positions", 1)
+        if max_open_positions <= 0 or not float(max_open_positions).is_integer():
+            raise ValueError("max_open_positions must be a positive whole number.")
+        if self.position_sizing_mode == "FIXED_UNITS":
+            if self.risk_configuration.get("fixed_size", 0) <= 0:
+                raise ValueError("fixed_size must be positive.")
+        else:
+            risk_percent = self.risk_configuration.get("risk_per_trade_percent", 0)
+            if risk_percent <= 0 or risk_percent > 100:
+                raise ValueError(
+                    "risk_per_trade_percent must be greater than 0 and at most 100."
+                )
+            if self.risk_configuration.get("fallback_stop_percent", 0) <= 0:
+                raise ValueError("fallback_stop_percent must be positive.")
+            max_size = self.risk_configuration.get("max_size")
+            if max_size is not None and max_size <= 0:
+                raise ValueError("max_size must be positive.")
+        return self
 
 
 class BacktestRunResponse(BaseModel):

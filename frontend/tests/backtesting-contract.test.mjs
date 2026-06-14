@@ -50,6 +50,12 @@ test("backtesting UI renders empty, failed, warning, provenance, and limitation 
   assert.match(source, /not tick-level execution/i);
   assert.match(source, /Same-candle stop\/target ambiguity is resolved against the strategy/);
   assert.match(source, /Binance spot prices are not IG crypto CFD prices/);
+  assert.match(source, /Run did not produce analytics/);
+  assert.match(source, /no result metrics are inferred/);
+  assert.match(source, /selectedProvider\.quota_warnings/);
+  assert.match(source, /Detected gaps/);
+  assert.match(source, /Dataset warnings/);
+  assert.match(source, /setResult\(null\);\s+setPending\("result"\)/);
   assert.match(source, /utcTimestampLabel/);
   assert.doesNotMatch(source, /toLocale(?:DateString|String)/);
 });

@@ -53,7 +53,9 @@ Live trading remains blocked.
 
 Additional production-only work is still required:
 
-1. Establish deterministic replay/live parity (`AUDIT-ARCH-003`).
+1. Extend the deterministic single-strategy backtester to whole-system
+   allocation, shared-risk, lifecycle, reconciliation, and recovery parity
+   (`AUDIT-ARCH-003`).
 2. Complete history, migration, supply-chain, and operations hardening.
 3. For internet-facing deployments, replace static named operator credentials with an external OIDC authorization-code flow, short-lived sessions, and step-up/MFA policy. The current server-derived identity and scope boundary removes shared/caller-supplied identity but is not a substitute for an enterprise identity provider.
 

@@ -80,3 +80,23 @@ def test_undefined_metrics_are_null():
     assert metrics["average_trade_pnl"] is None
     assert metrics["average_winner"] is None
     assert metrics["average_loser"] is None
+    assert metrics["maximum_drawdown"] is None
+    assert metrics["maximum_drawdown_percentage"] is None
+
+
+def test_exposure_uses_union_of_overlapping_trade_intervals():
+    trades = [_trade(1, 0), _trade(1, 0)]
+    equity = [
+        EquitySample(START, 100, 0, 100, 0),
+        EquitySample(START + timedelta(minutes=2), 102, 0, 102, 0),
+    ]
+
+    metrics = calculate_metrics(
+        starting_capital=100,
+        ending_capital=102,
+        trades=trades,
+        equity=equity,
+        open_positions_at_end=0,
+    )
+
+    assert metrics["exposure_time_percent"] == 50

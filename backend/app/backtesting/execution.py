@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from itertools import count
+from math import isfinite
 from typing import Any
 
 from app.backtesting.candles import HistoricalCandle, PriceBar
@@ -53,6 +54,7 @@ class SimulatedTradeResult:
 
 class SimulatedExecutionAdapter:
     def __init__(self, assumptions: ExecutionAssumptions) -> None:
+        self._validate_assumptions(assumptions)
         self.assumptions = assumptions
         self._position_ids = count(1)
 
@@ -101,6 +103,8 @@ class SimulatedExecutionAdapter:
         exit_reason: str,
         trigger_price: float | None = None,
         conservative_ambiguity: bool = False,
+        at: str = "open",
+        execution_time: datetime | None = None,
     ) -> SimulatedTradeResult:
         close_direction = (
             OrderDirection.SELL
@@ -111,12 +115,15 @@ class SimulatedExecutionAdapter:
             executable, spread_per_unit = self._execution_price(
                 candle=candle,
                 direction=close_direction,
-                at="open",
+                at=at,
             )
         else:
             executable = trigger_price
-            reference = self._reference_price(candle, at="open")
-            spread_per_unit = abs(reference - executable)
+            spread_per_unit = self._estimated_half_spread(
+                candle=candle,
+                reference_price=trigger_price,
+                at=at,
+            )
         fill, exit_slippage_cost = self._apply_slippage(
             executable, direction=close_direction, size=position.size
         )
@@ -131,7 +138,8 @@ class SimulatedExecutionAdapter:
         slippage_cost = position.entry_slippage_cost + exit_slippage_cost
         return SimulatedTradeResult(
             position=position,
-            close_time=candle.timestamp,
+            close_time=execution_time
+            or (candle.close_timestamp if at == "close" else candle.timestamp),
             close_price=fill,
             gross_pnl=gross_pnl,
             fees=fees,
@@ -162,27 +170,40 @@ class SimulatedExecutionAdapter:
             return None
         ambiguous = stop_hit and target_hit
         if stop_hit:
+            assert stop is not None
+            trigger = stop
+            if position.direction is OrderDirection.BUY and bar.open <= stop:
+                trigger = bar.open
+            elif position.direction is OrderDirection.SELL and bar.open >= stop:
+                trigger = bar.open
             return self.close_position(
                 position=position,
                 candle=candle,
                 exit_reason=(
                     "STOP_LOSS_CONSERVATIVE_INTRACANDLE" if ambiguous else "STOP_LOSS"
                 ),
-                trigger_price=stop,
+                trigger_price=trigger,
                 conservative_ambiguity=ambiguous,
+                execution_time=candle.close_timestamp,
             )
+        assert target is not None
         return self.close_position(
             position=position,
             candle=candle,
             exit_reason="TAKE_PROFIT",
             trigger_price=target,
+            execution_time=candle.close_timestamp,
         )
 
     def mark_price(
-        self, *, position: SimulatedPosition, candle: HistoricalCandle
+        self,
+        *,
+        position: SimulatedPosition,
+        candle: HistoricalCandle,
+        at: str = "close",
     ) -> float:
         bar = self._exit_bar(candle, position.direction)
-        return bar.close
+        return getattr(bar, at)
 
     def pricing_mode(self, candle: HistoricalCandle) -> str:
         if candle.bid is not None and candle.ask is not None:
@@ -261,6 +282,17 @@ class SimulatedExecutionAdapter:
             return 0.0
         raise ValueError(f"Unsupported spread model '{model}'.")
 
+    def _estimated_half_spread(
+        self,
+        *,
+        candle: HistoricalCandle,
+        reference_price: float,
+        at: str,
+    ) -> float:
+        if candle.bid is not None and candle.ask is not None:
+            return abs(getattr(candle.ask, at) - getattr(candle.bid, at)) / 2
+        return self._spread_amount(reference_price) / 2
+
     def _apply_slippage(
         self,
         price: float,
@@ -293,3 +325,19 @@ class SimulatedExecutionAdapter:
         if model == "BPS_NOTIONAL":
             return price * size * value / 10_000
         raise ValueError(f"Unsupported fee model '{model}'.")
+
+    @staticmethod
+    def _validate_assumptions(assumptions: ExecutionAssumptions) -> None:
+        allowed = {
+            "spread_model": {"DATASET", "FIXED_PRICE", "FIXED_BPS", "NONE"},
+            "slippage_model": {"NONE", "FIXED_PRICE", "FIXED_BPS"},
+            "fee_model": {"NONE", "FIXED_PER_ORDER", "PER_UNIT", "BPS_NOTIONAL"},
+        }
+        for field_name, options in allowed.items():
+            value = getattr(assumptions, field_name)
+            if value not in options:
+                raise ValueError(f"Unsupported {field_name} '{value}'.")
+        for field_name in ("spread_value", "slippage_value", "fee_value"):
+            value = getattr(assumptions, field_name)
+            if not isfinite(value) or value < 0:
+                raise ValueError(f"{field_name} must be finite and non-negative.")

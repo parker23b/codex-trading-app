@@ -32,7 +32,7 @@ The three code-actionable P0 gaps found on `2026-06-12` are fixed in the current
 | `AUDIT-DOC-006` | P1 | Verified | None | Audit/readiness checks now distinguish verified, fixed-pending-evidence, and open findings and reject premature demo-readiness claims. |
 | `AUDIT-SEC-004` | P1 | Verified | None | Production-like mutations require named server-side credentials, server-derived identity, revocation state, and operation scopes. |
 | `AUDIT-BROKER-006` | P1 | Verified | None | Broker capabilities, shared conformance, retry-safe read circuits, and single-attempt mutation policy are explicit. |
-| `AUDIT-ARCH-003` | P1 | Open | Strategy validation, unattended, live | No deterministic replay/backtest architecture proves parity with the live strategy, allocation, risk, and lifecycle pipeline. |
+| `AUDIT-ARCH-003` | P1 | Open | Whole-system validation | Narrowed by the deterministic single-strategy MVP, which reuses production strategy evaluation; full allocation, shared-risk, broker-lifecycle, reconciliation, and recovery parity remains unimplemented. |
 
 Existing manual or documented limitations remain open separately: `AUDIT-SEC-002`, `AUDIT-SEC-003`, `AUDIT-DEP-001`, and `AUDIT-DB-001`.
 
@@ -54,7 +54,10 @@ These require `IG_TRADING_ENABLED=false`, test-only controls gated, and no claim
 - Live broker mutation.
 - Production-like operator deployment using only the legacy shared token.
 
-The P0 implementation work is complete. Broker-connected demo dealing is held at an evidence gate, not an unfixed-code gate. The excluded replay/backtest parity finding remains open and continues to block deterministic strategy-validation claims.
+The P0 implementation work is complete. Broker-connected demo dealing is held
+at an evidence gate, not an unfixed-code gate. The backtesting slice now
+supports deterministic single-strategy validation; `AUDIT-ARCH-003` remains
+open only for whole-system replay parity beyond that scope.
 
 ## Verification Context
 

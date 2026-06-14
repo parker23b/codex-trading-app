@@ -90,5 +90,56 @@ def test_same_candle_stop_and_target_uses_conservative_stop():
 
     assert trade is not None
     assert trade.close_price == 95.0
+    assert trade.spread_cost == 2.0
     assert trade.conservative_ambiguity is True
     assert trade.exit_reason == "STOP_LOSS_CONSERVATIVE_INTRACANDLE"
+
+
+def test_gap_through_stop_uses_less_favorable_candle_open():
+    adapter = SimulatedExecutionAdapter(ExecutionAssumptions(spread_model="DATASET"))
+    position = adapter.open_position(
+        instrument="EUR_USD",
+        direction=OrderDirection.BUY,
+        size=1,
+        candle=_bid_ask_candle(),
+        stop_loss_price=95.0,
+        take_profit_price=None,
+    )
+    gap = HistoricalCandle(
+        timestamp=NOW,
+        instrument="EUR_USD",
+        timeframe="1m",
+        bid=PriceBar(90, 93, 89, 92),
+        ask=PriceBar(92, 95, 91, 94),
+        mid=PriceBar(91, 94, 90, 93),
+    )
+
+    trade = adapter.threshold_exit(position=position, candle=gap)
+
+    assert trade is not None
+    assert trade.close_price == 90
+
+
+def test_threshold_spread_cost_does_not_include_market_move():
+    candle = HistoricalCandle(
+        timestamp=NOW,
+        instrument="TEST",
+        timeframe="1m",
+        mid=PriceBar(100, 110, 90, 105),
+    )
+    adapter = SimulatedExecutionAdapter(
+        ExecutionAssumptions(spread_model="FIXED_PRICE", spread_value=2)
+    )
+    position = adapter.open_position(
+        instrument="TEST",
+        direction=OrderDirection.BUY,
+        size=1,
+        candle=candle,
+        stop_loss_price=95,
+        take_profit_price=None,
+    )
+
+    trade = adapter.threshold_exit(position=position, candle=candle)
+
+    assert trade is not None
+    assert trade.spread_cost == 2

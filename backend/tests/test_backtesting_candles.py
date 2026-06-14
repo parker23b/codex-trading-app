@@ -75,3 +75,50 @@ def test_resampling_uses_utc_epoch_aligned_boundaries():
     assert result[0].mid.open == pytest.approx(1.1)
     assert result[0].mid.close == pytest.approx(1.1045)
     assert result[0].volume == 50
+
+
+def test_resampling_rejects_incomplete_boundary_buckets():
+    with pytest.raises(ValueError, match="complete 5m candle"):
+        resample_candles([_candle(index) for index in range(1, 5)], "5m")
+
+
+def test_validation_rejects_misaligned_and_inconsistent_component_candles():
+    misaligned = HistoricalCandle(
+        timestamp=START + timedelta(seconds=30),
+        instrument="TEST",
+        timeframe="1m",
+        trade=PriceBar(1, 1, 1, 1),
+    )
+    with pytest.raises(ValueError, match="not aligned"):
+        misaligned.validate()
+
+    with pytest.raises(ValueError, match="inconsistent price components"):
+        validate_candle_series(
+            [
+                HistoricalCandle(
+                    timestamp=START,
+                    instrument="TEST",
+                    timeframe="1m",
+                    trade=PriceBar(1, 1, 1, 1),
+                ),
+                HistoricalCandle(
+                    timestamp=START + timedelta(minutes=1),
+                    instrument="TEST",
+                    timeframe="1m",
+                    mid=PriceBar(1, 1, 1, 1),
+                ),
+            ]
+        )
+
+
+def test_validation_rejects_ask_prices_below_bid():
+    candle = HistoricalCandle(
+        timestamp=START,
+        instrument="TEST",
+        timeframe="1m",
+        bid=PriceBar(2, 2, 2, 2),
+        ask=PriceBar(1, 1, 1, 1),
+    )
+
+    with pytest.raises(ValueError, match="Ask open is below bid"):
+        candle.validate()

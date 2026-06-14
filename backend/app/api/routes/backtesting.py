@@ -26,6 +26,20 @@ from app.services.historical_data_service import HistoricalDataService
 router = APIRouter()
 
 
+def _existing_backtest_service(
+    *,
+    run_id: str,
+    request: Request,
+    session: Session,
+) -> BacktestService:
+    service = BacktestService(session, settings=resolve_request_settings(request))
+    try:
+        service.get_run(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return service
+
+
 def _dataset_response(
     service: HistoricalDataService, dataset_id: str
 ) -> HistoricalDatasetResponse:
@@ -231,8 +245,9 @@ def get_backtest_metrics(
     request: Request,
     session: Session = Depends(get_session),
 ) -> BacktestMetricsResponse:
-    service = BacktestService(session, settings=resolve_request_settings(request))
-    service.get_run(run_id)
+    service = _existing_backtest_service(
+        run_id=run_id, request=request, session=session
+    )
     return BacktestMetricsResponse(**service.metrics(run_id))
 
 
@@ -242,8 +257,9 @@ def get_backtest_trades(
     request: Request,
     session: Session = Depends(get_session),
 ) -> list[BacktestTradeResponse]:
-    service = BacktestService(session, settings=resolve_request_settings(request))
-    service.get_run(run_id)
+    service = _existing_backtest_service(
+        run_id=run_id, request=request, session=session
+    )
     return [
         BacktestTradeResponse.model_validate(trade) for trade in service.trades(run_id)
     ]
@@ -258,8 +274,9 @@ def get_backtest_equity(
     request: Request,
     session: Session = Depends(get_session),
 ) -> list[BacktestEquityPointResponse]:
-    service = BacktestService(session, settings=resolve_request_settings(request))
-    service.get_run(run_id)
+    service = _existing_backtest_service(
+        run_id=run_id, request=request, session=session
+    )
     return [
         BacktestEquityPointResponse.model_validate(point)
         for point in service.equity(run_id)
@@ -275,8 +292,9 @@ def get_backtest_warnings(
     request: Request,
     session: Session = Depends(get_session),
 ) -> list[BacktestWarningResponse]:
-    service = BacktestService(session, settings=resolve_request_settings(request))
-    service.get_run(run_id)
+    service = _existing_backtest_service(
+        run_id=run_id, request=request, session=session
+    )
     return [
         BacktestWarningResponse.model_validate(warning)
         for warning in service.warnings(run_id)
@@ -292,8 +310,9 @@ def get_backtest_instruments(
     request: Request,
     session: Session = Depends(get_session),
 ) -> list[BacktestInstrumentResponse]:
-    service = BacktestService(session, settings=resolve_request_settings(request))
-    service.get_run(run_id)
+    service = _existing_backtest_service(
+        run_id=run_id, request=request, session=session
+    )
     return [
         BacktestInstrumentResponse.model_validate(item)
         for item in service.instruments(run_id)

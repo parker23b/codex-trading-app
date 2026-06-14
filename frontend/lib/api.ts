@@ -699,27 +699,39 @@ export async function getBacktests(): Promise<BacktestRun[]> {
 }
 
 export async function getBacktest(runId: string): Promise<BacktestRun> {
-  return request<BacktestRun>(`/backtests/${encodeURIComponent(runId)}`);
+  return request<BacktestRun>(`/backtests/${encodeURIComponent(runId)}`, {
+    timeoutMs: 12000,
+  });
 }
 
 export async function getBacktestMetrics(runId: string): Promise<BacktestMetrics> {
-  return request<BacktestMetrics>(`/backtests/${encodeURIComponent(runId)}/metrics`);
+  return request<BacktestMetrics>(`/backtests/${encodeURIComponent(runId)}/metrics`, {
+    timeoutMs: 12000,
+  });
 }
 
 export async function getBacktestTrades(runId: string): Promise<BacktestTrade[]> {
-  return request<BacktestTrade[]>(`/backtests/${encodeURIComponent(runId)}/trades`);
+  return request<BacktestTrade[]>(`/backtests/${encodeURIComponent(runId)}/trades`, {
+    timeoutMs: 12000,
+  });
 }
 
 export async function getBacktestEquity(runId: string): Promise<BacktestEquityPoint[]> {
-  return request<BacktestEquityPoint[]>(`/backtests/${encodeURIComponent(runId)}/equity`);
+  return request<BacktestEquityPoint[]>(`/backtests/${encodeURIComponent(runId)}/equity`, {
+    timeoutMs: 12000,
+  });
 }
 
 export async function getBacktestWarnings(runId: string): Promise<BacktestWarning[]> {
-  return request<BacktestWarning[]>(`/backtests/${encodeURIComponent(runId)}/warnings`);
+  return request<BacktestWarning[]>(`/backtests/${encodeURIComponent(runId)}/warnings`, {
+    timeoutMs: 12000,
+  });
 }
 
 export async function getBacktestInstruments(runId: string): Promise<BacktestInstrument[]> {
-  return request<BacktestInstrument[]>(`/backtests/${encodeURIComponent(runId)}/instruments`);
+  return request<BacktestInstrument[]>(`/backtests/${encodeURIComponent(runId)}/instruments`, {
+    timeoutMs: 12000,
+  });
 }
 
 export async function getMarketOverview(category: MarketCategory = "forex"): Promise<MarketCategoryOverviewResponse> {

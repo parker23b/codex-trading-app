@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from sqlmodel import select
 
 from app.backtesting.storage import JsonlHistoricalDataRepository
@@ -112,3 +113,58 @@ def test_identical_runs_produce_identical_metrics(session, tmp_path: Path):
 
     assert first.result_summary == second.result_summary
     assert first.result_summary["ending_capital"] == 1002
+
+
+def test_dataset_provenance_mutation_is_detected_before_replay(session, tmp_path: Path):
+    repository = JsonlHistoricalDataRepository(tmp_path / "history")
+    service = HistoricalDataService(session, repository=repository)
+    dataset = service.import_csv(
+        display_name="fixture",
+        csv_text=_csv(),
+        asset_class="FOREX",
+        venue="TEST",
+        market_type="SPOT_FX",
+    )
+    dataset.venue = "MUTATED"
+    session.add(dataset)
+    session.commit()
+
+    with pytest.raises(ValueError, match="dataset checksum mismatch"):
+        service.verify_dataset_checksum(dataset.id)
+
+
+def test_unknown_strategy_parameters_are_rejected_not_silently_ignored(
+    session, tmp_path: Path
+):
+    repository = JsonlHistoricalDataRepository(tmp_path / "history")
+    dataset = HistoricalDataService(session, repository=repository).import_csv(
+        display_name="fixture",
+        csv_text=_csv(),
+        asset_class="FOREX",
+        venue="TEST",
+        market_type="SPOT_FX",
+    )
+
+    with pytest.raises(ValueError, match="Unknown strategy parameters"):
+        BacktestService(session, repository=repository).create_and_run(
+            name=None,
+            notes=None,
+            strategy_identifier="smoke_test_hold",
+            profile_name="default",
+            strategy_parameters={"not_a_real_parameter": 1},
+            dataset_id=dataset.id,
+            shortlist=["TEST_FX"],
+            timeframe="1m",
+            start_at=START,
+            end_at=START + timedelta(minutes=6),
+            starting_capital=1000,
+            position_sizing_mode="FIXED_UNITS",
+            risk_configuration={"fixed_size": 1, "max_open_positions": 1},
+            spread_model="FIXED_BPS",
+            spread_assumption={"value": 0},
+            slippage_model="NONE",
+            slippage_assumption={"value": 0},
+            fee_model="NONE",
+            fee_assumption={"value": 0},
+            open_position_treatment="CLOSE_AT_END",
+        )

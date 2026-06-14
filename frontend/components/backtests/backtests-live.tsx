@@ -133,6 +133,13 @@ export function BacktestsLive({
     null,
   );
   const [selectedRunId, setSelectedRunId] = useState(initialRuns[0]?.id ?? "");
+  const [selectedProviderId, setSelectedProviderId] = useState(
+    initialProviders.find((provider) => provider.provider_id !== "CSV")
+      ?.provider_id ?? "",
+  );
+  const [selectedStrategyId, setSelectedStrategyId] = useState(
+    initialStrategies[0]?.name ?? "",
+  );
   const [result, setResult] = useState<ResultBundle | null>(null);
   const [error, setError] = useState(initialError);
   const [notice, setNotice] = useState<string | null>(null);
@@ -140,6 +147,18 @@ export function BacktestsLive({
 
   const readyDatasets = datasets.filter((dataset) => dataset.status === "READY");
   const configuredProviders = initialProviders.filter((provider) => provider.configured);
+  const selectedProvider = initialProviders.find(
+    (provider) => provider.provider_id === selectedProviderId,
+  );
+  const compatibleStrategies = initialStrategies.filter(
+    (strategy) =>
+      !selectedDataset ||
+      !strategy.supported_asset_classes?.length ||
+      strategy.supported_asset_classes.includes(selectedDataset.asset_class),
+  );
+  const selectedStrategy =
+    compatibleStrategies.find((strategy) => strategy.name === selectedStrategyId) ??
+    compatibleStrategies[0];
 
   const refreshLists = useCallback(async () => {
     const [nextDatasets, nextRuns] = await Promise.all([
@@ -167,17 +186,15 @@ export function BacktestsLive({
       setResult(null);
       return;
     }
+    setResult(null);
     setPending("result");
     try {
-      const [run, metrics, trades, equity, warnings, instruments] =
-        await Promise.all([
-          getBacktest(runId),
-          getBacktestMetrics(runId),
-          getBacktestTrades(runId),
-          getBacktestEquity(runId),
-          getBacktestWarnings(runId),
-          getBacktestInstruments(runId),
-        ]);
+      const run = await getBacktest(runId);
+      const metrics = await getBacktestMetrics(runId);
+      const trades = await getBacktestTrades(runId);
+      const equity = await getBacktestEquity(runId);
+      const warnings = await getBacktestWarnings(runId);
+      const instruments = await getBacktestInstruments(runId);
       setResult({ run, metrics, trades, equity, warnings, instruments });
       setError(null);
     } catch (reason) {
@@ -196,6 +213,15 @@ export function BacktestsLive({
   useEffect(() => {
     if (selectedRunId) void loadResult(selectedRunId);
   }, [loadResult, selectedRunId]);
+
+  useEffect(() => {
+    if (
+      compatibleStrategies.length &&
+      !compatibleStrategies.some((strategy) => strategy.name === selectedStrategyId)
+    ) {
+      setSelectedStrategyId(compatibleStrategies[0].name);
+    }
+  }, [compatibleStrategies, selectedStrategyId]);
 
   const handleCsvImport = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -233,9 +259,6 @@ export function BacktestsLive({
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const providerId = String(form.get("provider_id"));
-    const provider = initialProviders.find(
-      (item) => item.provider_id === providerId,
-    );
     setPending("provider");
     setNotice(null);
     try {
@@ -251,7 +274,7 @@ export function BacktestsLive({
         end_at: toIso(String(form.get("end_at"))),
         asset_class: String(form.get("asset_class")),
         market_type: String(form.get("market_type")),
-        venue: provider?.venue,
+        venue: selectedProvider?.venue,
       });
       await refreshLists();
       await loadDataset(dataset.id);
@@ -266,7 +289,7 @@ export function BacktestsLive({
 
   const handleBacktest = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selectedDataset) {
+    if (!selectedDataset || selectedDataset.status !== "READY") {
       setError("Select a ready immutable dataset.");
       return;
     }
@@ -317,7 +340,6 @@ export function BacktestsLive({
     }
   };
 
-  const selectedStrategy = initialStrategies[0];
   const chartPoints = useMemo(() => {
     const rows = result?.equity ?? [];
     const stride = Math.max(Math.ceil(rows.length / 8), 1);
@@ -417,7 +439,13 @@ export function BacktestsLive({
 
             <form className="flex flex-col gap-2" onSubmit={handleProviderImport}>
               <strong>Provider import</strong>
-              <select className={inputClass} name="provider_id" required>
+              <select
+                className={inputClass}
+                name="provider_id"
+                value={selectedProviderId}
+                onChange={(event) => setSelectedProviderId(event.target.value)}
+                required
+              >
                 {initialProviders
                   .filter((provider) => provider.provider_id !== "CSV")
                   .map((provider) => (
@@ -429,17 +457,64 @@ export function BacktestsLive({
               <input className={inputClass} name="display_name" placeholder="Dataset name" required />
               <input className={inputClass} name="instruments" placeholder="Comma-separated internal instruments" required />
               <div className="grid grid-cols-3 gap-2">
-                <input className={inputClass} name="timeframe" defaultValue="1m" />
-                <input className={inputClass} name="asset_class" defaultValue="FOREX" />
-                <input className={inputClass} name="market_type" defaultValue="SPOT_FX" />
+                <select
+                  key={`${selectedProviderId}-timeframe`}
+                  className={inputClass}
+                  name="timeframe"
+                  defaultValue={selectedProvider?.available_timeframes[0]}
+                >
+                  {selectedProvider?.available_timeframes.map((timeframe) => (
+                    <option key={timeframe}>{timeframe}</option>
+                  ))}
+                </select>
+                <select
+                  key={`${selectedProviderId}-asset`}
+                  className={inputClass}
+                  name="asset_class"
+                  defaultValue={selectedProvider?.supported_asset_classes[0]}
+                >
+                  {selectedProvider?.supported_asset_classes.map((assetClass) => (
+                    <option key={assetClass}>{assetClass}</option>
+                  ))}
+                </select>
+                <select
+                  key={`${selectedProviderId}-market`}
+                  className={inputClass}
+                  name="market_type"
+                  defaultValue={selectedProvider?.supported_market_types[0]}
+                >
+                  {selectedProvider?.supported_market_types.map((marketType) => (
+                    <option key={marketType}>{marketType}</option>
+                  ))}
+                </select>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <input className={inputClass} name="start_at" type="datetime-local" required />
                 <input className={inputClass} name="end_at" type="datetime-local" required />
               </div>
-              <button className={buttonClass} disabled={pending !== null}>
+              <button
+                className={buttonClass}
+                disabled={pending !== null || !selectedProvider?.configured}
+              >
                 {pending === "provider" ? "Importing..." : "Request provider import"}
               </button>
+              {selectedProvider ? (
+                <div className="rounded-[10px] border border-[color:var(--border)] p-2 text-xs text-[color:var(--text-secondary)]">
+                  <p>
+                    {selectedProvider.venue} · {selectedProvider.authentication} ·
+                    {" "}{selectedProvider.midpoint_ohlc ? "mid " : ""}
+                    {selectedProvider.bid_ohlc ? "bid " : ""}
+                    {selectedProvider.ask_ohlc ? "ask " : ""}
+                    {selectedProvider.trade_price_ohlc ? "trade " : ""}OHLC
+                  </p>
+                  {selectedProvider.configuration_warning ? (
+                    <p>{selectedProvider.configuration_warning}</p>
+                  ) : null}
+                  {selectedProvider.quota_warnings.map((warning) => (
+                    <p key={warning}>{warning}</p>
+                  ))}
+                </div>
+              ) : null}
             </form>
           </div>
 
@@ -449,9 +524,9 @@ export function BacktestsLive({
             onChange={(event) => void loadDataset(event.target.value)}
           >
             <option value="">Select dataset</option>
-            {readyDatasets.map((dataset) => (
+            {datasets.map((dataset) => (
               <option key={dataset.id} value={dataset.id}>
-                {dataset.display_name} · {dataset.provider} · {dataset.candle_count} candles
+                {dataset.display_name} · {dataset.status} · {dataset.provider} · {dataset.candle_count} candles
               </option>
             ))}
           </select>
@@ -466,14 +541,34 @@ export function BacktestsLive({
               </div>
               <div>
                 <p>Checksum: <code>{selectedDataset.checksum}</code></p>
-                <p>Storage: {selectedDataset.storage_format} · immutable</p>
+                <p>Status: {selectedDataset.status}</p>
+                <p>Storage: {selectedDataset.storage_format} · {selectedDataset.immutable ? "immutable" : "mutable"}</p>
                 <p>Gaps: {selectedDataset.detected_gaps.length} · warnings: {selectedDataset.warnings.length}</p>
+                {selectedDataset.failure_reason ? (
+                  <p>Failure: {selectedDataset.failure_reason}</p>
+                ) : null}
                 <p>
                   Venue truth: {selectedDataset.provider === "BINANCE"
                     ? "Binance spot prices are not IG crypto CFD prices."
                     : "Provider provenance is persisted with this snapshot."}
                 </p>
               </div>
+              {selectedDataset.detected_gaps.length ? (
+                <div className="col-span-2 rounded-[10px] border border-[color:var(--warning)] p-2 text-xs">
+                  <strong>Detected gaps</strong>
+                  {selectedDataset.detected_gaps.map((gap, index) => (
+                    <p key={`${index}-${JSON.stringify(gap)}`}>{JSON.stringify(gap)}</p>
+                  ))}
+                </div>
+              ) : null}
+              {selectedDataset.warnings.length ? (
+                <div className="col-span-2 rounded-[10px] border border-[color:var(--warning)] p-2 text-xs">
+                  <strong>Dataset warnings</strong>
+                  {selectedDataset.warnings.map((warning, index) => (
+                    <p key={`${index}-${JSON.stringify(warning)}`}>{JSON.stringify(warning)}</p>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : (
             <p className="text-sm text-[color:var(--text-secondary)]">
@@ -494,8 +589,13 @@ export function BacktestsLive({
           >
             <div className="grid grid-cols-2 gap-2">
               <input className={inputClass} name="name" placeholder="Optional run name" />
-              <select className={inputClass} name="strategy_identifier" defaultValue={selectedStrategy?.name}>
-                {initialStrategies.map((strategy) => (
+              <select
+                className={inputClass}
+                name="strategy_identifier"
+                value={selectedStrategy?.name ?? ""}
+                onChange={(event) => setSelectedStrategyId(event.target.value)}
+              >
+                {compatibleStrategies.map((strategy) => (
                   <option key={strategy.name} value={strategy.name}>
                     {strategy.name}
                   </option>
@@ -503,7 +603,19 @@ export function BacktestsLive({
               </select>
             </div>
             <textarea className={inputClass} name="notes" placeholder="Optional notes" />
-            <input className={inputClass} name="profile_name" defaultValue="default" />
+            <select
+              key={`${selectedStrategy?.name}-profile`}
+              className={inputClass}
+              name="profile_name"
+              defaultValue={selectedStrategy?.available_profiles?.[0] ?? "default"}
+            >
+              {(selectedStrategy?.available_profiles?.length
+                ? selectedStrategy.available_profiles
+                : ["default"]
+              ).map((profile) => (
+                <option key={profile}>{profile}</option>
+              ))}
+            </select>
 
             <div className="rounded-[10px] border border-[color:var(--border)] p-3">
               <strong>Instrument shortlist</strong>
@@ -581,7 +693,14 @@ export function BacktestsLive({
               </label>
             </div>
 
-            <button className={buttonClass} disabled={pending !== null || !selectedDataset}>
+            <button
+              className={buttonClass}
+              disabled={
+                pending !== null ||
+                selectedDataset?.status !== "READY" ||
+                !selectedStrategy
+              }
+            >
               {pending === "backtest" ? "Running bounded simulation..." : "Start manual backtest"}
             </button>
                 <p className="text-xs text-[color:var(--text-secondary)]">
@@ -619,66 +738,80 @@ export function BacktestsLive({
       {pending === "result" ? <DataIndicator state="loading" message="Loading persisted result..." /> : null}
       {result ? (
         <>
-          <StatusStrip
-            items={[
-              { label: "Ending capital", value: money(result.metrics.run.ending_capital), tone: "neutral" },
-              { label: "Net P&L", value: money(result.metrics.run.net_pnl), tone: (numberValue(result.metrics.run.net_pnl) ?? 0) >= 0 ? "positive" : "negative" },
-              { label: "Return", value: numberValue(result.metrics.run.percentage_return) == null ? "Undefined" : `${numberValue(result.metrics.run.percentage_return)?.toFixed(2)}%`, tone: "neutral" },
-              { label: "Trades", value: numberValue(result.metrics.run.total_trades) ?? 0, tone: "neutral" },
-              { label: "Max drawdown", value: money(result.metrics.run.maximum_drawdown), tone: "warning" },
-              { label: "Warnings", value: result.warnings.length, tone: result.warnings.length ? "warning" : "positive" },
-            ]}
-          />
+          {result.run.status === "COMPLETED" ? (
+            <>
+              <StatusStrip
+                items={[
+                  { label: "Ending capital", value: money(result.metrics.run.ending_capital), tone: "neutral" },
+                  { label: "Net P&L", value: money(result.metrics.run.net_pnl), tone: (numberValue(result.metrics.run.net_pnl) ?? 0) >= 0 ? "positive" : "negative" },
+                  { label: "Return", value: numberValue(result.metrics.run.percentage_return) == null ? "Undefined" : `${numberValue(result.metrics.run.percentage_return)?.toFixed(2)}%`, tone: "neutral" },
+                  { label: "Trades", value: numberValue(result.metrics.run.total_trades) ?? 0, tone: "neutral" },
+                  { label: "Max drawdown", value: money(result.metrics.run.maximum_drawdown), tone: "warning" },
+                  { label: "Warnings", value: result.warnings.length, tone: result.warnings.length ? "warning" : "positive" },
+                ]}
+              />
 
-          <section className="grid grid-cols-2 gap-3 max-[1100px]:grid-cols-1">
-            <LineChart
-              title="Equity curve"
-              subtitle="Persisted simulated equity; candle-resolution marks only."
-              points={chartPoints}
-              latestValue={money(result.metrics.run.ending_capital)}
-              delta={numberValue(result.metrics.run.percentage_return) == null ? undefined : `${numberValue(result.metrics.run.percentage_return)?.toFixed(2)}%`}
-              tone={(numberValue(result.metrics.run.absolute_return) ?? 0) >= 0 ? "positive" : "negative"}
-            />
-            <LineChart
-              title="Drawdown"
-              subtitle="Peak-to-trough drawdown from persisted equity points."
-              points={result.equity
-                .filter((_, index) => index % Math.max(Math.ceil(result.equity.length / 8), 1) === 0 || index === result.equity.length - 1)
-                .map((point) => ({ label: utcChartLabel(point.timestamp), value: point.drawdown }))}
-              latestValue={money(result.metrics.run.maximum_drawdown)}
+              <section className="grid grid-cols-2 gap-3 max-[1100px]:grid-cols-1">
+                <LineChart
+                  title="Equity curve"
+                  subtitle="Persisted simulated equity; candle-resolution marks only."
+                  points={chartPoints}
+                  latestValue={money(result.metrics.run.ending_capital)}
+                  delta={numberValue(result.metrics.run.percentage_return) == null ? undefined : `${numberValue(result.metrics.run.percentage_return)?.toFixed(2)}%`}
+                  tone={(numberValue(result.metrics.run.absolute_return) ?? 0) >= 0 ? "positive" : "negative"}
+                />
+                <LineChart
+                  title="Drawdown"
+                  subtitle="Peak-to-trough drawdown from persisted equity points."
+                  points={result.equity
+                    .filter((_, index) => index % Math.max(Math.ceil(result.equity.length / 8), 1) === 0 || index === result.equity.length - 1)
+                    .map((point) => ({ label: utcChartLabel(point.timestamp), value: point.drawdown }))}
+                  latestValue={money(result.metrics.run.maximum_drawdown)}
+                  tone="negative"
+                />
+              </section>
+
+              <section className="grid grid-cols-2 gap-3 max-[1100px]:grid-cols-1">
+                <Panel title="Trades" subtitle="Deterministic simulated fills, never broker executions.">
+                  <CompactTable
+                    rows={result.trades}
+                    emptyLabel="The strategy produced no completed trades."
+                    columns={[
+                      { key: "instrument", header: "Instrument", render: (trade) => trade.instrument },
+                      { key: "direction", header: "Side", render: (trade) => trade.direction },
+                      { key: "open", header: "Open", render: (trade) => trade.open_price.toFixed(5) },
+                      { key: "close", header: "Close", render: (trade) => trade.close_price.toFixed(5) },
+                      { key: "pnl", header: "Net P&L", render: (trade) => money(trade.net_pnl) },
+                      { key: "reason", header: "Exit", render: (trade) => trade.exit_reason },
+                    ]}
+                  />
+                </Panel>
+
+                <Panel title="Per instrument" subtitle="The selected strategy is isolated per shortlist instrument.">
+                  <CompactTable
+                    rows={result.instruments}
+                    emptyLabel="No instrument breakdown is available."
+                    columns={[
+                      { key: "instrument", header: "Instrument", render: (item) => item.instrument },
+                      { key: "candles", header: "Candles", render: (item) => item.candle_count },
+                      { key: "trades", header: "Trades", render: (item) => item.metrics.total_trades ?? 0 },
+                      { key: "pnl", header: "Net P&L", render: (item) => money(item.metrics.net_pnl) },
+                    ]}
+                  />
+                </Panel>
+              </section>
+            </>
+          ) : (
+            <Panel
+              title="Run did not produce analytics"
+              subtitle="Failed and incomplete runs remain auditable, but no result metrics are inferred."
               tone="negative"
-            />
-          </section>
-
-          <section className="grid grid-cols-2 gap-3 max-[1100px]:grid-cols-1">
-            <Panel title="Trades" subtitle="Deterministic simulated fills, never broker executions.">
-              <CompactTable
-                rows={result.trades}
-                emptyLabel="The strategy produced no completed trades."
-                columns={[
-                  { key: "instrument", header: "Instrument", render: (trade) => trade.instrument },
-                  { key: "direction", header: "Side", render: (trade) => trade.direction },
-                  { key: "open", header: "Open", render: (trade) => trade.open_price.toFixed(5) },
-                  { key: "close", header: "Close", render: (trade) => trade.close_price.toFixed(5) },
-                  { key: "pnl", header: "Net P&L", render: (trade) => money(trade.net_pnl) },
-                  { key: "reason", header: "Exit", render: (trade) => trade.exit_reason },
-                ]}
-              />
+            >
+              <p className="text-sm">
+                {result.run.failure_reason ?? `Run status is ${result.run.status}.`}
+              </p>
             </Panel>
-
-            <Panel title="Per instrument" subtitle="The selected strategy is isolated per shortlist instrument.">
-              <CompactTable
-                rows={result.instruments}
-                emptyLabel="No instrument breakdown is available."
-                columns={[
-                  { key: "instrument", header: "Instrument", render: (item) => item.instrument },
-                  { key: "candles", header: "Candles", render: (item) => item.candle_count },
-                  { key: "trades", header: "Trades", render: (item) => item.metrics.total_trades ?? 0 },
-                  { key: "pnl", header: "Net P&L", render: (item) => money(item.metrics.net_pnl) },
-                ]}
-              />
-            </Panel>
-          </section>
+          )}
 
           <section className="grid grid-cols-2 gap-3 max-[1100px]:grid-cols-1">
             <Panel title="Assumptions and provenance" tone={result.run.pricing_mode.includes("SYNTHETIC") ? "warning" : "neutral"}>

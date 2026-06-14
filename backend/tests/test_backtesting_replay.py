@@ -55,6 +55,14 @@ class ImmediateHoldStrategy(Strategy):
         self.in_position = False
 
 
+class HoldWithStopStrategy(ImmediateHoldStrategy):
+    def should_exit_trade(self) -> bool:
+        return False
+
+    def entry_signal_hints(self) -> dict[str, float]:
+        return {"stop_loss_price": 90.0}
+
+
 def _candles(instrument: str) -> list[HistoricalCandle]:
     return [
         HistoricalCandle(
@@ -97,8 +105,12 @@ def test_strategy_cannot_receive_future_candles_during_evaluation():
     result = _run({"A": strategy})
 
     assert strategy.updates == [100.0, 101.0, 102.0, 103.0]
-    assert result.trades[0].position.metadata["signal_at"] == START.isoformat()
+    assert (
+        result.trades[0].position.metadata["signal_at"]
+        == (START + timedelta(minutes=1)).isoformat()
+    )
     assert result.trades[0].position.open_price == 101.0
+    assert strategy.last_at == START + timedelta(minutes=4)
 
 
 def test_shortlist_replay_uses_stable_instrument_order_for_equal_timestamps():
@@ -111,6 +123,100 @@ def test_shortlist_replay_uses_stable_instrument_order_for_equal_timestamps():
     )
 
     assert order[:2] == [
-        f"{START.isoformat()}:A",
-        f"{START.isoformat()}:B",
+        f"{(START + timedelta(minutes=1)).isoformat()}:A",
+        f"{(START + timedelta(minutes=1)).isoformat()}:B",
     ]
+
+
+def test_percent_risk_sizing_at_open_cannot_see_current_candle_close():
+    rows = {
+        "A": [
+            HistoricalCandle(
+                timestamp=START,
+                instrument="A",
+                timeframe="1m",
+                trade=PriceBar(100, 101, 99, 100),
+            ),
+            HistoricalCandle(
+                timestamp=START + timedelta(minutes=1),
+                instrument="A",
+                timeframe="1m",
+                trade=PriceBar(100, 200, 99, 200),
+            ),
+        ],
+        "B": [
+            HistoricalCandle(
+                timestamp=START + timedelta(minutes=index),
+                instrument="B",
+                timeframe="1m",
+                trade=PriceBar(100, 101, 99, 100),
+            )
+            for index in range(2)
+        ],
+    }
+    result = BacktestReplayEngine(
+        strategies={
+            "A": HoldWithStopStrategy(),
+            "B": HoldWithStopStrategy(),
+        },
+        configuration=ReplayConfiguration(
+            starting_capital=1000,
+            position_sizing_mode="PERCENT_RISK",
+            risk_configuration={
+                "risk_per_trade_percent": 10,
+                "fallback_stop_percent": 1,
+                "max_open_positions": 2,
+            },
+            execution_assumptions=ExecutionAssumptions(
+                spread_model="FIXED_PRICE", spread_value=0
+            ),
+            open_position_treatment="MARK_TO_MARKET",
+        ),
+        clock=SimulatedClock(START),
+    ).run(rows)
+
+    assert [position.size for position in result.open_positions] == [10, 10]
+
+
+def test_end_treatment_uses_final_close_and_open_fees_reduce_equity():
+    candles = [
+        HistoricalCandle(
+            timestamp=START,
+            instrument="A",
+            timeframe="1m",
+            trade=PriceBar(100, 100, 100, 100),
+        ),
+        HistoricalCandle(
+            timestamp=START + timedelta(minutes=1),
+            instrument="A",
+            timeframe="1m",
+            trade=PriceBar(101, 110, 101, 110),
+        ),
+    ]
+
+    def execute(treatment: str):
+        return BacktestReplayEngine(
+            strategies={"A": HoldWithStopStrategy()},
+            configuration=ReplayConfiguration(
+                starting_capital=1000,
+                position_sizing_mode="FIXED_UNITS",
+                risk_configuration={"fixed_size": 1, "max_open_positions": 1},
+                execution_assumptions=ExecutionAssumptions(
+                    spread_model="FIXED_PRICE",
+                    spread_value=0,
+                    fee_model="FIXED_PER_ORDER",
+                    fee_value=2,
+                ),
+                open_position_treatment=treatment,
+            ),
+            clock=SimulatedClock(START),
+        ).run({"A": candles})
+
+    marked = execute("MARK_TO_MARKET")
+    closed = execute("CLOSE_AT_END")
+
+    assert marked.metrics["ending_capital"] == 1007
+    assert marked.metrics["open_positions_at_end"] == 1
+    assert closed.trades[0].close_price == 110
+    assert closed.trades[0].close_time == START + timedelta(minutes=2)
+    assert closed.metrics["ending_capital"] == 1005

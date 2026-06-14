@@ -92,3 +92,48 @@ def test_typed_dataset_and_backtest_route_flow(client_factory, tmp_path):
         assert trades.status_code == 200
         assert equity.status_code == 200
         assert len(equity.json()) == 6
+
+
+def test_backtest_result_subresources_return_404_for_unknown_run(
+    client_factory, tmp_path
+):
+    with client_factory(
+        operator_api_token="expected-token",
+        historical_data_dir=str(tmp_path / "history"),
+    ) as client:
+        for suffix in ("metrics", "trades", "equity", "warnings", "instruments"):
+            response = client.get(f"/backtests/missing/{suffix}")
+            assert response.status_code == 404
+
+
+def test_backtest_contract_rejects_invalid_models_and_assumptions(
+    client_factory, tmp_path
+):
+    with client_factory(
+        operator_api_token="expected-token",
+        historical_data_dir=str(tmp_path / "history"),
+    ) as client:
+        response = client.post(
+            "/backtests",
+            headers=AUTH,
+            json={
+                "strategy_identifier": "smoke_test_hold",
+                "dataset_id": "dataset",
+                "shortlist": ["TEST_FX"],
+                "timeframe": "1m",
+                "start_at": START.isoformat(),
+                "end_at": (START + timedelta(minutes=1)).isoformat(),
+                "starting_capital": 1000,
+                "position_sizing_mode": "FIXED_UNITS",
+                "risk_configuration": {"fixed_size": 1},
+                "spread_model": "MADE_UP",
+                "spread_assumption": {"value": -1},
+                "slippage_model": "NONE",
+                "slippage_assumption": {"value": 0},
+                "fee_model": "NONE",
+                "fee_assumption": {"value": 0},
+                "open_position_treatment": "CLOSE_AT_END",
+            },
+        )
+
+        assert response.status_code == 422

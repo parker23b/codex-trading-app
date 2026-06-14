@@ -103,7 +103,11 @@ Important tables:
 
 ## Current Architecture Gaps
 
-- There is no deterministic event-replay/backtest architecture sharing the complete live strategy, allocation, risk, and lifecycle pipeline (`AUDIT-ARCH-003`).
+- The deterministic single-strategy backtester now reuses production strategy
+  evaluation with an injected clock, immutable local data, and isolated
+  execution/persistence. It intentionally does not yet replay the complete live
+  allocation, cross-strategy risk, broker lifecycle, reconciliation, or
+  recovery pipeline (`AUDIT-ARCH-003` remains narrowed rather than closed).
 
 The `2026-06-12` P0 remediation serializes one current account/risk book globally. Future account sharding must use a stable account-scoped lock key rather than weakening that boundary. The Postgres cross-connection allocation and leadership-fence rehearsals are committed but still require CI execution before broker-connected demo readiness is restored.
 

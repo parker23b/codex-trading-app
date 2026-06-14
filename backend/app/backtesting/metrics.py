@@ -34,9 +34,12 @@ def calculate_metrics(
     gross_loss = sum(trade.net_pnl for trade in losers)
     net_pnl = sum(trade.net_pnl for trade in trade_rows)
     drawdowns = _drawdowns(equity_rows)
-    exposure_seconds = sum(
-        max((trade.close_time - trade.position.open_time).total_seconds(), 0.0)
-        for trade in trade_rows
+    exposure_seconds = _union_duration_seconds(
+        [
+            (trade.position.open_time, trade.close_time)
+            for trade in trade_rows
+            if trade.close_time >= trade.position.open_time
+        ]
     )
     total_period_seconds = (
         max((equity_rows[-1].timestamp - equity_rows[0].timestamp).total_seconds(), 0)
@@ -60,9 +63,9 @@ def calculate_metrics(
         "gross_profit": gross_profit,
         "gross_loss": gross_loss,
         "net_pnl": net_pnl,
-        "maximum_drawdown": max((item[0] for item in drawdowns), default=0.0),
-        "maximum_drawdown_percentage": max(
-            (item[1] for item in drawdowns), default=0.0
+        "maximum_drawdown": (max(item[0] for item in drawdowns) if drawdowns else None),
+        "maximum_drawdown_percentage": (
+            max(item[1] for item in drawdowns) if drawdowns else None
         ),
         "profit_factor": (
             gross_profit / abs(gross_loss)
@@ -75,7 +78,7 @@ def calculate_metrics(
         "largest_winner": (max((trade.net_pnl for trade in winners), default=None)),
         "largest_loser": (min((trade.net_pnl for trade in losers), default=None)),
         "exposure_time_percent": (
-            min(exposure_seconds / total_period_seconds * 100, 100.0)
+            exposure_seconds / total_period_seconds * 100
             if total_period_seconds > 0
             else None
         ),
@@ -125,3 +128,20 @@ def _drawdowns(samples: list[EquitySample]) -> list[tuple[float, float]]:
         (drawdown, drawdown_percent)
         for _, drawdown, drawdown_percent in equity_drawdown(samples)
     ]
+
+
+def _union_duration_seconds(
+    intervals: list[tuple[datetime, datetime]],
+) -> float:
+    if not intervals:
+        return 0.0
+    ordered = sorted(intervals)
+    start, end = ordered[0]
+    total = 0.0
+    for next_start, next_end in ordered[1:]:
+        if next_start <= end:
+            end = max(end, next_end)
+            continue
+        total += (end - start).total_seconds()
+        start, end = next_start, next_end
+    return total + (end - start).total_seconds()
