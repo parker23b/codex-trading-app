@@ -103,6 +103,17 @@ Open marks use the directionally executable bid/ask or synthetic-spread side,
 but do not reserve a hypothetical future exit fee or exit slippage; only costs
 already incurred are included.
 
+No real account currency is persisted in this phase. Monetary API values use
+`account_currency=null` and `monetary_unit_label="account units"`. The UI must
+not infer GBP or another currency. Price decimals are adaptive display
+formatting only; they are not broker tick precision unless future instrument
+metadata explicitly supplies that precision.
+
+`profit_factor` is defined only when the run has at least one winning and one
+losing closed trade. Otherwise it is `null`, with
+`profit_factor_null_reason` equal to `NO_CLOSED_TRADES`,
+`NO_LOSING_TRADES`, or `NO_WINNING_TRADES`.
+
 Exposure is wall-clock exposure: the union of all position-open intervals
 divided by the interval from the first replay candle open to the final mark.
 Overlapping instruments do not double-count time. Open-at-end positions run
@@ -113,7 +124,11 @@ configured entry and stop-exit slippage, and modeled entry/exit fees. A
 strategy stop is used when supplied; otherwise the fallback stop percentage is
 measured from the executable entry fill. The simulator permits continuous
 position sizes and does not model broker lot steps, minimum sizes, margin, or
-financing.
+financing. The persisted numerical acceptance tolerance is
+`percent_risk_sizing_absolute_tolerance=1e-9` account units. Non-gap stop
+regressions compare actual simulated net loss with the configured risk budget
+using that tolerance; sizing itself remains conservative at the budget
+boundary.
 
 Completed runs persist `BACKTEST_RESULT_MANIFEST_V1`. Its canonical projection
 covers strategy and dataset identity, configuration and assumptions, final
@@ -130,6 +145,12 @@ verification envelope. The public verifier reconstructs the persisted
 projection and rejects authoritative-field mutation. Equal inputs copied into
 independent databases produce the same checksum even when run IDs and
 wall-clock timestamps differ.
+
+Completed runs are required to have `failure_reason=null`; the API and public
+verifier reject a completed row with a non-null failure reason even though
+that status-constrained field is not part of the canonical completed-result
+projection. Failed runs retain `failure_reason` for diagnosis but do not
+receive a completed-result manifest or result checksum.
 
 Derived candles require complete, UTC epoch-aligned source buckets. Partial
 buckets are rejected rather than silently incorporating candles outside the
@@ -194,6 +215,13 @@ all of it is re-verified before replay.
   and converted to explicit UTC instants before API submission; backend values
   are never repaired by appending `Z`.
 
+The Binance still-open-candle filter and staged publication/reconciliation
+changes were explicitly reviewed as dataset-integrity prerequisites for
+immutable replay inputs. They are not evidence of accounting correctness and
+do not change replay, strategy, broker, or live-trading behavior. Focused
+provider tests cover still-open candle exclusion, truncation, multi-instrument
+failure, publication failure, recovery, and retry.
+
 ## Provider posture
 
 | Provider | MVP role | Authentication | Price components | Limits and warnings |
@@ -229,6 +257,6 @@ existing-credentials validation path, not a dependency for general app use.
   backfills remain a documented next slice.
 - The MVP does not model partial fills, order books, latency distributions, tick paths, margin, financing, or corporate actions.
 - Result checksums detect mutation and prove equality of the covered
-  projection; they are not signatures and do not establish source-build
-  provenance.
+  completed-result projection plus the completed-run failure invariant; they
+  are not signatures and do not establish source-build provenance.
 - Future work may add Parquet partitions, quote/tick replay, walk-forward tests, parameter sweeps, benchmark comparisons, and whole-system multi-strategy simulation without changing dataset identity or strategy reuse rules.

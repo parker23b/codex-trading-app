@@ -146,15 +146,32 @@ function numberValue(value: unknown) {
   return typeof value === "number" ? value : null;
 }
 
-function money(value: unknown) {
+function monetaryValue(
+  value: unknown,
+  metrics: BacktestMetrics["run"],
+) {
   const amount = numberValue(value);
-  return amount == null
-    ? "Undefined"
-    : new Intl.NumberFormat("en-GB", {
+  if (amount == null) {
+    return "Undefined";
+  }
+  if (metrics.account_currency) {
+    return new Intl.NumberFormat("en-GB", {
         style: "currency",
-        currency: "GBP",
-        maximumFractionDigits: 2,
+        currency: metrics.account_currency,
       }).format(amount);
+  }
+  return `${new Intl.NumberFormat("en-GB", {
+    maximumFractionDigits: 6,
+  }).format(amount)} ${metrics.monetary_unit_label}`;
+}
+
+function adaptivePrice(value: number) {
+  const absolute = Math.abs(value);
+  const maximumFractionDigits = absolute >= 1000 ? 2 : absolute >= 1 ? 6 : 8;
+  return new Intl.NumberFormat("en-GB", {
+    useGrouping: false,
+    maximumFractionDigits,
+  }).format(value);
 }
 
 export function BacktestsLive({
@@ -799,15 +816,15 @@ export function BacktestsLive({
             <>
               <StatusStrip
                 items={[
-                  { label: "Ending equity", value: money(result.metrics.run.ending_equity), tone: "neutral" },
-                  { label: "Realised P&L", value: money(result.metrics.run.realised_pnl), tone: (numberValue(result.metrics.run.realised_pnl) ?? 0) >= 0 ? "positive" : "negative" },
-                  { label: "Unrealised P&L", value: money(result.metrics.run.unrealised_pnl), tone: (numberValue(result.metrics.run.unrealised_pnl) ?? 0) >= 0 ? "positive" : "negative" },
-                  { label: "Total P&L", value: money(result.metrics.run.total_pnl), tone: (numberValue(result.metrics.run.total_pnl) ?? 0) >= 0 ? "positive" : "negative" },
+                  { label: "Ending equity", value: monetaryValue(result.metrics.run.ending_equity, result.metrics.run), tone: "neutral" },
+                  { label: "Realised P&L", value: monetaryValue(result.metrics.run.realised_pnl, result.metrics.run), tone: (numberValue(result.metrics.run.realised_pnl) ?? 0) >= 0 ? "positive" : "negative" },
+                  { label: "Unrealised P&L", value: monetaryValue(result.metrics.run.unrealised_pnl, result.metrics.run), tone: (numberValue(result.metrics.run.unrealised_pnl) ?? 0) >= 0 ? "positive" : "negative" },
+                  { label: "Total P&L", value: monetaryValue(result.metrics.run.total_pnl, result.metrics.run), tone: (numberValue(result.metrics.run.total_pnl) ?? 0) >= 0 ? "positive" : "negative" },
                   { label: "Total return", value: numberValue(result.metrics.run.return_pct) == null ? "Undefined" : `${numberValue(result.metrics.run.return_pct)?.toFixed(2)}%`, tone: "neutral" },
                   { label: "Closed trades", value: numberValue(result.metrics.run.closed_trade_count) ?? 0, tone: "neutral" },
                   { label: "Closed-trade win rate", value: numberValue(result.metrics.run.closed_trade_win_rate) == null ? "Undefined" : `${numberValue(result.metrics.run.closed_trade_win_rate)?.toFixed(2)}%`, tone: "neutral" },
                   { label: "Open positions at end", value: numberValue(result.metrics.run.open_positions_at_end) ?? 0, tone: (numberValue(result.metrics.run.open_positions_at_end) ?? 0) > 0 ? "warning" : "neutral" },
-                  { label: "Max drawdown", value: money(result.metrics.run.maximum_drawdown), tone: "warning" },
+                  { label: "Max drawdown", value: monetaryValue(result.metrics.run.maximum_drawdown, result.metrics.run), tone: "warning" },
                   { label: "Warnings", value: result.warnings.length, tone: result.warnings.length ? "warning" : "positive" },
                 ]}
               />
@@ -817,7 +834,7 @@ export function BacktestsLive({
                   title="Equity curve"
                   subtitle="Persisted simulated equity; candle-resolution marks only."
                   points={chartPoints}
-                  latestValue={money(result.metrics.run.ending_equity)}
+                  latestValue={monetaryValue(result.metrics.run.ending_equity, result.metrics.run)}
                   delta={numberValue(result.metrics.run.return_pct) == null ? undefined : `${numberValue(result.metrics.run.return_pct)?.toFixed(2)}%`}
                   tone={(numberValue(result.metrics.run.total_pnl) ?? 0) >= 0 ? "positive" : "negative"}
                 />
@@ -827,7 +844,7 @@ export function BacktestsLive({
                   points={result.equity
                     .filter((_, index) => index % Math.max(Math.ceil(result.equity.length / 8), 1) === 0 || index === result.equity.length - 1)
                     .map((point) => ({ label: utcChartLabel(point.timestamp), value: point.drawdown }))}
-                  latestValue={money(result.metrics.run.maximum_drawdown)}
+                  latestValue={monetaryValue(result.metrics.run.maximum_drawdown, result.metrics.run)}
                   tone="negative"
                 />
               </section>
@@ -840,9 +857,9 @@ export function BacktestsLive({
                     columns={[
                       { key: "instrument", header: "Instrument", render: (trade) => trade.instrument },
                       { key: "direction", header: "Side", render: (trade) => trade.direction },
-                      { key: "open", header: "Open", render: (trade) => trade.open_price.toFixed(5) },
-                      { key: "close", header: "Close", render: (trade) => trade.close_price.toFixed(5) },
-                      { key: "pnl", header: "Closed trade net P&L", render: (trade) => money(trade.net_pnl) },
+                      { key: "open", header: "Open", render: (trade) => adaptivePrice(trade.open_price) },
+                      { key: "close", header: "Close", render: (trade) => adaptivePrice(trade.close_price) },
+                      { key: "pnl", header: "Closed trade net P&L", render: (trade) => monetaryValue(trade.net_pnl, result.metrics.run) },
                       { key: "reason", header: "Exit", render: (trade) => trade.exit_reason },
                     ]}
                   />
@@ -856,7 +873,7 @@ export function BacktestsLive({
                       { key: "instrument", header: "Instrument", render: (item) => item.instrument },
                       { key: "candles", header: "Candles", render: (item) => item.candle_count },
                       { key: "trades", header: "Closed trades", render: (item) => numberValue(item.metrics.closed_trade_count) ?? 0 },
-                      { key: "pnl", header: "Total P&L", render: (item) => money(item.metrics.total_pnl) },
+                      { key: "pnl", header: "Total P&L", render: (item) => monetaryValue(item.metrics.total_pnl, item.metrics) },
                     ]}
                   />
                 </Panel>
@@ -887,6 +904,11 @@ export function BacktestsLive({
                 <p>Fees: {result.run.fee_model} · {JSON.stringify(result.run.fee_assumption)}</p>
                 <p>End treatment: {result.run.open_position_treatment}</p>
                 <p>Exposure: wall-clock union across open intervals</p>
+                <p>
+                  Monetary values: {result.metrics.run.account_currency ?? result.metrics.run.monetary_unit_label};
+                  no real account currency is persisted unless explicitly supplied.
+                </p>
+                <p>Price decimals are adaptive display formatting, not broker tick precision.</p>
               </div>
               <p className="text-sm text-[color:var(--text-secondary)]">
                 One-minute OHLC cannot establish tick order or exact sub-minute fills.

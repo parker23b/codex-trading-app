@@ -345,7 +345,18 @@ reserve a future exit fee or hypothetical exit slippage.
 
 Percent-risk sizing uses the expected spread/slippage-adjusted entry fill,
 stop-exit slippage, and configured entry/exit fees. It uses continuous units
-and does not apply broker lot steps, minimum sizes, margin, or financing.
+and does not apply broker lot steps, minimum sizes, margin, or financing. The
+persisted absolute sizing tolerance is `1e-9` account units; non-gap stop
+execution tests require actual simulated net loss to remain within that
+tolerance of the configured risk budget.
+
+Backtests do not currently persist a real account currency. Monetary values in
+the UI are labelled as account units and must not be read as GBP. Price
+decimals are adaptive display formatting, not broker tick precision.
+
+Profit factor is null unless both winning and losing closed trades exist. The
+typed API supplies `NO_CLOSED_TRADES`, `NO_LOSING_TRADES`, or
+`NO_WINNING_TRADES` as the null reason.
 
 Completed runs show a result checksum covering deterministic strategy,
 dataset, assumptions, trades, equity, metrics, warnings, and per-instrument
@@ -353,7 +364,16 @@ results. Database IDs, display name/notes, wall-clock audit timestamps, and
 dataset partition row IDs are excluded. The checksum proves equality of the
 covered persisted projection, not source-build authenticity or broker realism.
 
-Failed runs retain the failure reason and configuration for diagnosis.
+Completed runs must have no failure reason; the API and checksum verifier
+reject inconsistent completed rows. Failed runs retain the failure reason and
+configuration for diagnosis, but do not receive a completed-result manifest or
+checksum.
+
+The Binance still-open-candle filter and staged import
+publication/reconciliation behavior are retained as explicitly reviewed
+dataset-integrity fixes. Their focused provider tests do not count as proof of
+accounting correctness, and replay still makes no provider, broker, strategy,
+or live-trading mutation.
 
 See [backtesting-user-guide.md](backtesting-user-guide.md) for the complete
 operator workflow, availability states, recovery behavior, and current limits.

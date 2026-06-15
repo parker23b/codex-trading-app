@@ -392,7 +392,7 @@ export type BacktestTrade = {
 export type BacktestEquityPoint = {
   timestamp: string;
   cash: number;
-  unrealized_pnl: number;
+  unrealised_pnl: number;
   equity: number;
   drawdown: number;
   drawdown_percent: number;
@@ -412,9 +412,53 @@ export type BacktestWarning = {
   created_at: string;
 };
 
+export type BacktestProfitFactorNullReason =
+  | "NO_CLOSED_TRADES"
+  | "NO_LOSING_TRADES"
+  | "NO_WINNING_TRADES";
+
+export type BacktestRunMetrics = {
+  account_currency: string | null;
+  monetary_unit_label: string;
+  percent_risk_sizing_absolute_tolerance: number;
+  starting_capital: number;
+  realised_pnl: number;
+  unrealised_pnl: number;
+  fees_paid: number;
+  spread_cost: number;
+  slippage_cost: number;
+  net_closed_trade_pnl: number;
+  total_pnl: number;
+  ending_equity: number;
+  ending_cash: number;
+  open_position_value: number;
+  return_pct: number | null;
+  closed_trade_return_pct: number | null;
+  headline_return_includes_unrealised: boolean;
+  closed_trade_count: number;
+  winning_closed_trades: number;
+  losing_closed_trades: number;
+  breakeven_closed_trades: number;
+  closed_trade_win_rate: number | null;
+  closed_trade_net_winning_pnl: number;
+  closed_trade_net_losing_pnl: number;
+  maximum_drawdown: number | null;
+  maximum_drawdown_percentage: number | null;
+  profit_factor: number | null;
+  profit_factor_null_reason: BacktestProfitFactorNullReason | null;
+  average_closed_trade_pnl: number | null;
+  average_winner: number | null;
+  average_loser: number | null;
+  largest_winner: number | null;
+  largest_loser: number | null;
+  wall_clock_exposure_pct: number | null;
+  open_positions_at_end: number;
+  open_position_treatment: string;
+};
+
 export type BacktestMetrics = {
-  run: Record<string, unknown>;
-  by_instrument: Record<string, Record<string, unknown>>;
+  run: BacktestRunMetrics;
+  by_instrument: Record<string, BacktestRunMetrics>;
 };
 
 export type BacktestInstrument = {
@@ -422,7 +466,7 @@ export type BacktestInstrument = {
   provider_instrument: string;
   dataset_partition_id: number;
   candle_count: number;
-  metrics: Record<string, unknown>;
+  metrics: BacktestRunMetrics;
 };
 
 export type StrategyMutationStatus = {

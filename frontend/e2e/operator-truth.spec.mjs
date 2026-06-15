@@ -56,8 +56,13 @@ test("BT-ACCOUNTING-001 backtest results render explicit accounting labels", asy
   ]) {
     await expect(resultSummary.getByText(label, { exact: true })).toBeVisible();
   }
+  await expect(resultSummary).not.toContainText("£");
+  await expect(resultSummary).toContainText("account units");
+  await expect(page.getByText("65000.12", { exact: true })).toBeVisible();
+  await expect(page.getByText("1.08456", { exact: true })).toBeVisible();
   await expect(page.getByText("Result checksum:", { exact: false })).toBeVisible();
   await expect(page.getByText("Exposure: wall-clock union across open intervals")).toBeVisible();
+  await expect(page.getByText(/Price decimals are adaptive display formatting/)).toBeVisible();
 });
 
 test("BT-DATA-001 provider and backtest datetime-local submissions send explicit UTC instants", async ({ browser, request, baseURL }) => {

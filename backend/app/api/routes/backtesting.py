@@ -26,6 +26,16 @@ from app.services.historical_data_service import HistoricalDataService
 router = APIRouter()
 
 
+def _backtest_run_response(run: object) -> BacktestRunResponse:
+    try:
+        return BacktestRunResponse.model_validate(run)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Backtest run has inconsistent persisted result state.",
+        ) from exc
+
+
 def _existing_backtest_service(
     *,
     run_id: str,
@@ -198,7 +208,7 @@ def create_backtest(
         run = BacktestService(
             session, settings=resolve_request_settings(request)
         ).create_and_run(**payload.model_dump())
-        return BacktestRunResponse.model_validate(run)
+        return _backtest_run_response(run)
     except ValueError as exc:
         raise HTTPException(
             status_code=400,
@@ -212,7 +222,7 @@ def list_backtests(
     session: Session = Depends(get_session),
 ) -> list[BacktestRunResponse]:
     return [
-        BacktestRunResponse.model_validate(run)
+        _backtest_run_response(run)
         for run in BacktestService(
             session, settings=resolve_request_settings(request)
         ).list_runs()
@@ -226,7 +236,7 @@ def get_backtest(
     session: Session = Depends(get_session),
 ) -> BacktestRunResponse:
     try:
-        return BacktestRunResponse.model_validate(
+        return _backtest_run_response(
             BacktestService(
                 session, settings=resolve_request_settings(request)
             ).get_run(run_id)

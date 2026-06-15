@@ -10,6 +10,10 @@ from app.backtesting.execution import (
     SimulatedTradeResult,
 )
 
+ACCOUNT_CURRENCY: str | None = None
+MONETARY_UNIT_LABEL = "account units"
+PERCENT_RISK_SIZING_ABSOLUTE_TOLERANCE = 1e-9
+
 
 @dataclass(frozen=True, slots=True)
 class EquitySample:
@@ -37,8 +41,8 @@ def calculate_metrics(
     winners = [trade for trade in trade_rows if trade.net_pnl > 0]
     losers = [trade for trade in trade_rows if trade.net_pnl < 0]
     breakeven = [trade for trade in trade_rows if trade.net_pnl == 0]
-    gross_profit = sum(trade.net_pnl for trade in winners)
-    gross_loss = sum(trade.net_pnl for trade in losers)
+    net_winning_pnl = sum(trade.net_pnl for trade in winners)
+    net_losing_pnl = sum(trade.net_pnl for trade in losers)
     realised_pnl = sum(trade.gross_pnl for trade in trade_rows)
     unrealised_pnl = sum(position.unrealized_pnl for position in open_rows)
     fees_paid = sum(trade.fees for trade in trade_rows) + sum(
@@ -61,7 +65,24 @@ def calculate_metrics(
         ]
     )
     total_period_seconds = max((period_end - period_start).total_seconds(), 0)
+    if not trade_rows:
+        profit_factor = None
+        profit_factor_null_reason = "NO_CLOSED_TRADES"
+    elif not losers:
+        profit_factor = None
+        profit_factor_null_reason = "NO_LOSING_TRADES"
+    elif not winners:
+        profit_factor = None
+        profit_factor_null_reason = "NO_WINNING_TRADES"
+    else:
+        profit_factor = net_winning_pnl / abs(net_losing_pnl)
+        profit_factor_null_reason = None
     return {
+        "account_currency": ACCOUNT_CURRENCY,
+        "monetary_unit_label": MONETARY_UNIT_LABEL,
+        "percent_risk_sizing_absolute_tolerance": (
+            PERCENT_RISK_SIZING_ABSOLUTE_TOLERANCE
+        ),
         "starting_capital": starting_capital,
         "realised_pnl": realised_pnl,
         "unrealised_pnl": unrealised_pnl,
@@ -93,18 +114,19 @@ def calculate_metrics(
         "closed_trade_win_rate": (
             len(winners) / len(trade_rows) * 100 if trade_rows else None
         ),
-        "closed_trade_gross_profit": gross_profit,
-        "closed_trade_gross_loss": gross_loss,
+        "closed_trade_net_winning_pnl": net_winning_pnl,
+        "closed_trade_net_losing_pnl": net_losing_pnl,
         "maximum_drawdown": (max(item[0] for item in drawdowns) if drawdowns else None),
         "maximum_drawdown_percentage": (
             max(item[1] for item in drawdowns) if drawdowns else None
         ),
-        "profit_factor": gross_profit / abs(gross_loss) if gross_loss < 0 else None,
+        "profit_factor": profit_factor,
+        "profit_factor_null_reason": profit_factor_null_reason,
         "average_closed_trade_pnl": (
             net_closed_trade_pnl / len(trade_rows) if trade_rows else None
         ),
-        "average_winner": (gross_profit / len(winners) if winners else None),
-        "average_loser": gross_loss / len(losers) if losers else None,
+        "average_winner": (net_winning_pnl / len(winners) if winners else None),
+        "average_loser": net_losing_pnl / len(losers) if losers else None,
         "largest_winner": (max((trade.net_pnl for trade in winners), default=None)),
         "largest_loser": (min((trade.net_pnl for trade in losers), default=None)),
         "wall_clock_exposure_pct": (

@@ -25,6 +25,7 @@ from app.models.backtest import (
 from app.models.trade import Execution, Position, Trade, TradeIntent
 from app.services.backtest_service import (
     BACKTEST_RESULT_PROJECTION_ONLY_FIELDS,
+    BACKTEST_RESULT_STATUS_CONSTRAINED_FIELDS,
     BACKTEST_RESULT_VERIFICATION_ENVELOPE_FIELDS,
     CANONICAL_BACKTEST_RESULT_MANIFEST_SCHEMA,
     BacktestService,
@@ -207,7 +208,6 @@ def test_result_manifest_schema_and_exclusions_are_explicit(session, tmp_path):
             "created_at",
             "started_at",
             "completed_at",
-            "failure_reason",
         ),
         "trade": ("id", "run_id"),
         "equity": ("id", "run_id"),
@@ -215,6 +215,7 @@ def test_result_manifest_schema_and_exclusions_are_explicit(session, tmp_path):
         "warning": ("id", "run_id", "created_at"),
         "instrument": ("id", "run_id", "dataset_partition_id"),
     }
+    assert BACKTEST_RESULT_STATUS_CONSTRAINED_FIELDS == {"run": ("failure_reason",)}
     assert BACKTEST_RESULT_VERIFICATION_ENVELOPE_FIELDS == {
         "run": ("result_manifest_version", "result_checksum")
     }
@@ -316,6 +317,49 @@ def test_projection_only_run_fields_do_not_change_result_verification(
     session.expire_all()
 
     service.verify_backtest_result_checksum(run.id)
+
+
+def test_completed_run_failure_reason_mutation_fails_verification(session, tmp_path):
+    service, run = _completed_run(session, tmp_path)
+    run.failure_reason = "false operator-visible failure"
+    session.add(run)
+    session.commit()
+
+    with pytest.raises(
+        ValueError,
+        match="Completed backtest result cannot have a failure reason",
+    ):
+        service.verify_backtest_result_checksum(run.id)
+
+
+def test_failed_run_has_explicit_failure_truth_without_completed_manifest(
+    session, tmp_path, monkeypatch
+):
+    repository = JsonlHistoricalDataRepository(tmp_path / "history")
+    dataset = HistoricalDataService(session, repository=repository).import_csv(
+        display_name="fixture",
+        csv_text=_csv(),
+        asset_class="FOREX",
+        venue="TEST",
+        market_type="SPOT_FX",
+    )
+    monkeypatch.setattr(
+        "app.services.backtest_service.BacktestReplayEngine.run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("deterministic replay failure")
+        ),
+    )
+    service = BacktestService(session, repository=repository)
+
+    run = service.create_and_run(**_run_kwargs(dataset.id))
+
+    assert run.status == BacktestRunStatus.FAILED.value
+    assert run.failure_reason == "deterministic replay failure"
+    assert run.result_manifest_version is None
+    assert run.result_checksum is None
+    assert run.result_summary == {}
+    with pytest.raises(ValueError, match="Only completed"):
+        service.verify_backtest_result_checksum(run.id)
 
 
 def test_same_result_in_independent_databases_has_same_checksum(

@@ -103,6 +103,11 @@ ending_equity = ending_cash + unrealised_pnl
 `open_position_value` is gross marked notional and is informational because the
 simulator uses a P&L cash ledger.
 
+There is no persisted real account currency in this phase. The API returns
+`account_currency=null`, and the UI labels monetary values as account units
+rather than GBP. Displayed price decimals adapt to the value; they do not
+represent broker tick precision.
+
 With `MARK_TO_MARKET`, headline total return includes unrealised P&L and the
 result shows the number of positions still open. With `CLOSE_AT_END`, remaining
 positions close at the final candle close. Closed-trade win rate and
@@ -117,7 +122,12 @@ double-count the same time.
 Percent-risk sizing uses the expected executable entry fill, configured
 spread/slippage assumptions, stop distance, and applicable entry/exit fees.
 Sizes are continuous; broker lot steps, minimum sizes, margin, and financing
-are not modeled.
+are not modeled. The persisted absolute comparison tolerance is `1e-9` account
+units.
+
+Profit factor is null when there are no closed trades, no losing closed
+trades, or no winning closed trades. The API reports the corresponding reason
+as `NO_CLOSED_TRADES`, `NO_LOSING_TRADES`, or `NO_WINNING_TRADES`.
 
 ## Verify a Result
 
@@ -132,6 +142,9 @@ They can differ between databases without changing the simulation result.
 Changing any authoritative persisted result field causes public checksum
 verification to fail. The checksum is tamper evidence for the covered
 projection, not a digital signature or proof of broker-grade accuracy.
+Completed rows must have `failure_reason=null`; the API and verifier reject a
+completed row with false failure text. Failed runs keep their failure reason
+but do not receive a completed-result manifest or checksum.
 
 ## Current Limits
 
@@ -145,5 +158,6 @@ projection, not a digital signature or proof of broker-grade accuracy.
 - Percent-risk sizing does not enforce broker lot increments or margin rules.
 - Result checksums do not identify the exact source build unless build
   provenance is separately supplied.
+- Adaptive price formatting is not instrument precision metadata.
 - This data-integrity foundation does not establish full backtesting
   production readiness.

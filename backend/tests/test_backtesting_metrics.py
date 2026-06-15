@@ -207,9 +207,10 @@ def test_drawdown_and_profit_factor_use_closed_trade_equity_semantics():
     metrics = _metrics(trades=trades, ending_cash=105, equity=equity)
 
     assert metrics["closed_trade_win_rate"] == pytest.approx(100 / 3)
-    assert metrics["closed_trade_gross_profit"] == 10
-    assert metrics["closed_trade_gross_loss"] == -5
+    assert metrics["closed_trade_net_winning_pnl"] == 10
+    assert metrics["closed_trade_net_losing_pnl"] == -5
     assert metrics["profit_factor"] == 2
+    assert metrics["profit_factor_null_reason"] is None
     assert metrics["maximum_drawdown"] == 10
     assert metrics["maximum_drawdown_percentage"] == pytest.approx(100 / 11)
 
@@ -218,6 +219,14 @@ def test_profit_factor_is_null_when_there_are_no_losing_closed_trades():
     metrics = _metrics(trades=[_trade(10, 0)], ending_cash=110)
 
     assert metrics["profit_factor"] is None
+    assert metrics["profit_factor_null_reason"] == "NO_LOSING_TRADES"
+
+
+def test_profit_factor_is_null_when_there_are_no_winning_closed_trades():
+    metrics = _metrics(trades=[_trade(-10, 0)], ending_cash=90)
+
+    assert metrics["profit_factor"] is None
+    assert metrics["profit_factor_null_reason"] == "NO_WINNING_TRADES"
 
 
 def test_undefined_closed_trade_metrics_are_null():
@@ -225,11 +234,15 @@ def test_undefined_closed_trade_metrics_are_null():
 
     assert metrics["closed_trade_win_rate"] is None
     assert metrics["profit_factor"] is None
+    assert metrics["profit_factor_null_reason"] == "NO_CLOSED_TRADES"
     assert metrics["average_closed_trade_pnl"] is None
     assert metrics["average_winner"] is None
     assert metrics["average_loser"] is None
     assert metrics["maximum_drawdown"] is None
     assert metrics["maximum_drawdown_percentage"] is None
+    assert metrics["account_currency"] is None
+    assert metrics["monetary_unit_label"] == "account units"
+    assert metrics["percent_risk_sizing_absolute_tolerance"] == 1e-9
 
 
 @pytest.mark.parametrize(

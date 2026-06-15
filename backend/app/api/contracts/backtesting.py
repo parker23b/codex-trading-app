@@ -233,6 +233,12 @@ class BacktestRunResponse(BaseModel):
     result_checksum: str | None
     result_summary: dict[str, Any]
 
+    @model_validator(mode="after")
+    def validate_failure_truth(self) -> "BacktestRunResponse":
+        if self.status == "COMPLETED" and self.failure_reason is not None:
+            raise ValueError("Completed backtest result cannot have a failure reason.")
+        return self
+
 
 class BacktestTradeResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", from_attributes=True)
@@ -265,7 +271,7 @@ class BacktestEquityPointResponse(BaseModel):
 
     timestamp: UtcDateTime
     cash: float
-    unrealized_pnl: float
+    unrealised_pnl: float = Field(validation_alias="unrealized_pnl")
     equity: float
     drawdown: float
     drawdown_percent: float
@@ -287,11 +293,59 @@ class BacktestWarningResponse(BaseModel):
     created_at: UtcDateTime
 
 
+ProfitFactorNullReason = Literal[
+    "NO_CLOSED_TRADES",
+    "NO_LOSING_TRADES",
+    "NO_WINNING_TRADES",
+]
+
+
+class BacktestRunMetricsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    account_currency: str | None
+    monetary_unit_label: str
+    percent_risk_sizing_absolute_tolerance: float
+    starting_capital: float
+    realised_pnl: float
+    unrealised_pnl: float
+    fees_paid: float
+    spread_cost: float
+    slippage_cost: float
+    net_closed_trade_pnl: float
+    total_pnl: float
+    ending_equity: float
+    ending_cash: float
+    open_position_value: float
+    return_pct: float | None
+    closed_trade_return_pct: float | None
+    headline_return_includes_unrealised: bool
+    closed_trade_count: int
+    winning_closed_trades: int
+    losing_closed_trades: int
+    breakeven_closed_trades: int
+    closed_trade_win_rate: float | None
+    closed_trade_net_winning_pnl: float
+    closed_trade_net_losing_pnl: float
+    maximum_drawdown: float | None
+    maximum_drawdown_percentage: float | None
+    profit_factor: float | None
+    profit_factor_null_reason: ProfitFactorNullReason | None
+    average_closed_trade_pnl: float | None
+    average_winner: float | None
+    average_loser: float | None
+    largest_winner: float | None
+    largest_loser: float | None
+    wall_clock_exposure_pct: float | None
+    open_positions_at_end: int
+    open_position_treatment: str
+
+
 class BacktestMetricsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    run: dict[str, Any]
-    by_instrument: dict[str, dict[str, Any]]
+    run: BacktestRunMetricsResponse
+    by_instrument: dict[str, BacktestRunMetricsResponse]
 
 
 class BacktestInstrumentResponse(BaseModel):
@@ -301,4 +355,4 @@ class BacktestInstrumentResponse(BaseModel):
     provider_instrument: str
     dataset_partition_id: int
     candle_count: int
-    metrics: dict[str, Any]
+    metrics: BacktestRunMetricsResponse

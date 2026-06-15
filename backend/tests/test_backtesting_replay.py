@@ -7,6 +7,7 @@ import pytest
 from app.backtesting.candles import HistoricalCandle, PriceBar
 from app.backtesting.clock import SimulatedClock
 from app.backtesting.execution import ExecutionAssumptions
+from app.backtesting.metrics import PERCENT_RISK_SIZING_ABSOLUTE_TOLERANCE
 from app.backtesting.replay import BacktestReplayEngine, ReplayConfiguration
 from app.core.broker import OrderDirection
 from app.strategies.base import PriceUpdate, Strategy
@@ -18,8 +19,14 @@ START = datetime(2026, 1, 1, tzinfo=UTC)
 class ImmediateHoldStrategy(Strategy):
     name = "immediate_hold"
 
-    def __init__(self, *, order_log: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        direction: OrderDirection = OrderDirection.BUY,
+        order_log: list[str] | None = None,
+    ) -> None:
         self.updates: list[float] = []
+        self.direction = direction
         self.order_log = order_log
         self.instrument = ""
         self.in_position = False
@@ -45,7 +52,7 @@ class ImmediateHoldStrategy(Strategy):
         )
 
     def entry_direction(self) -> OrderDirection:
-        return OrderDirection.BUY
+        return self.direction
 
     def on_position_opened(
         self, *, direction: OrderDirection, entry_price: float
@@ -71,6 +78,26 @@ class ShortHoldWithStopStrategy(HoldWithStopStrategy):
 
     def entry_signal_hints(self) -> dict[str, float]:
         return {"stop_loss_price": 110.0}
+
+
+class HoldWithoutStopStrategy(ImmediateHoldStrategy):
+    def should_exit_trade(self) -> bool:
+        return False
+
+
+class SingleRoundTripStrategy(ImmediateHoldStrategy):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.has_entered = False
+
+    def should_enter_trade(self) -> bool:
+        return not self.in_position and not self.has_entered
+
+    def on_position_opened(
+        self, *, direction: OrderDirection, entry_price: float
+    ) -> None:
+        super().on_position_opened(direction=direction, entry_price=entry_price)
+        self.has_entered = True
 
 
 def _candles(instrument: str) -> list[HistoricalCandle]:
@@ -99,6 +126,300 @@ def _run(strategies: dict[str, Strategy]):
         ),
         clock=SimulatedClock(START),
     ).run({instrument: _candles(instrument) for instrument in strategies})
+
+
+def _trade_candles(
+    instrument: str,
+    prices: list[float],
+    *,
+    historical_bid_ask: bool = False,
+) -> list[HistoricalCandle]:
+    rows = []
+    for index, price in enumerate(prices):
+        timestamp = START + timedelta(minutes=index)
+        if historical_bid_ask:
+            rows.append(
+                HistoricalCandle(
+                    timestamp=timestamp,
+                    instrument=instrument,
+                    timeframe="1m",
+                    bid=PriceBar(price - 1, price, price - 2, price - 1),
+                    ask=PriceBar(price + 1, price + 2, price, price + 1),
+                )
+            )
+        else:
+            rows.append(
+                HistoricalCandle(
+                    timestamp=timestamp,
+                    instrument=instrument,
+                    timeframe="1m",
+                    trade=PriceBar(price, price + 1, price - 1, price),
+                )
+            )
+    return rows
+
+
+def _execute_actual_fill_case(
+    *,
+    direction: OrderDirection,
+    terminal_price: float,
+    assumptions: ExecutionAssumptions,
+    historical_bid_ask: bool = False,
+):
+    return BacktestReplayEngine(
+        strategies={"A": ImmediateHoldStrategy(direction=direction)},
+        configuration=ReplayConfiguration(
+            starting_capital=1000,
+            position_sizing_mode="FIXED_UNITS",
+            risk_configuration={"fixed_size": 2, "max_open_positions": 1},
+            execution_assumptions=assumptions,
+            open_position_treatment="CLOSE_AT_END",
+        ),
+        clock=SimulatedClock(START),
+    ).run(
+        {
+            "A": _trade_candles(
+                "A",
+                [100, 100, terminal_price],
+                historical_bid_ask=historical_bid_ask,
+            )
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    (
+        "direction",
+        "terminal_price",
+        "assumptions",
+        "historical_bid_ask",
+        "expected_open",
+        "expected_close",
+        "expected_fees",
+        "expected_spread_cost",
+        "expected_slippage_cost",
+    ),
+    [
+        (
+            OrderDirection.BUY,
+            110,
+            ExecutionAssumptions(spread_model="NONE"),
+            False,
+            100,
+            110,
+            0,
+            0,
+            0,
+        ),
+        (
+            OrderDirection.BUY,
+            90,
+            ExecutionAssumptions(spread_model="NONE"),
+            False,
+            100,
+            90,
+            0,
+            0,
+            0,
+        ),
+        (
+            OrderDirection.SELL,
+            90,
+            ExecutionAssumptions(spread_model="NONE"),
+            False,
+            100,
+            90,
+            0,
+            0,
+            0,
+        ),
+        (
+            OrderDirection.SELL,
+            110,
+            ExecutionAssumptions(spread_model="NONE"),
+            False,
+            100,
+            110,
+            0,
+            0,
+            0,
+        ),
+        (
+            OrderDirection.BUY,
+            110,
+            ExecutionAssumptions(spread_model="FIXED_PRICE", spread_value=2),
+            False,
+            101,
+            109,
+            0,
+            4,
+            0,
+        ),
+        (
+            OrderDirection.BUY,
+            110,
+            ExecutionAssumptions(
+                spread_model="NONE",
+                slippage_model="FIXED_PRICE",
+                slippage_value=0.5,
+            ),
+            False,
+            100.5,
+            109.5,
+            0,
+            0,
+            2,
+        ),
+        (
+            OrderDirection.BUY,
+            110,
+            ExecutionAssumptions(
+                spread_model="NONE",
+                fee_model="PER_UNIT",
+                fee_value=0.25,
+            ),
+            False,
+            100,
+            110,
+            1,
+            0,
+            0,
+        ),
+        (
+            OrderDirection.BUY,
+            110,
+            ExecutionAssumptions(
+                spread_model="NONE",
+                fee_model="FIXED_PER_ORDER",
+                fee_value=3,
+            ),
+            False,
+            100,
+            110,
+            6,
+            0,
+            0,
+        ),
+        (
+            OrderDirection.BUY,
+            110,
+            ExecutionAssumptions(
+                spread_model="NONE",
+                fee_model="BPS_NOTIONAL",
+                fee_value=100,
+            ),
+            False,
+            100,
+            110,
+            4.2,
+            0,
+            0,
+        ),
+        (
+            OrderDirection.BUY,
+            110,
+            ExecutionAssumptions(spread_model="DATASET"),
+            True,
+            101,
+            109,
+            0,
+            4,
+            0,
+        ),
+    ],
+)
+def test_integrated_actual_fill_accounting_identity(
+    direction,
+    terminal_price,
+    assumptions,
+    historical_bid_ask,
+    expected_open,
+    expected_close,
+    expected_fees,
+    expected_spread_cost,
+    expected_slippage_cost,
+):
+    result = _execute_actual_fill_case(
+        direction=direction,
+        terminal_price=terminal_price,
+        assumptions=assumptions,
+        historical_bid_ask=historical_bid_ask,
+    )
+
+    assert len(result.trades) == 1
+    trade = result.trades[0]
+    expected_gross = (
+        (expected_close - expected_open) * 2
+        if direction is OrderDirection.BUY
+        else (expected_open - expected_close) * 2
+    )
+    expected_total = expected_gross - expected_fees
+    assert trade.position.open_price == pytest.approx(expected_open)
+    assert trade.close_price == pytest.approx(expected_close)
+    assert trade.gross_pnl == pytest.approx(expected_gross)
+    assert trade.fees == pytest.approx(expected_fees)
+    assert trade.spread_cost == pytest.approx(expected_spread_cost)
+    assert trade.slippage_cost == pytest.approx(expected_slippage_cost)
+    assert trade.net_pnl == pytest.approx(expected_total)
+    assert result.metrics["realised_pnl"] == pytest.approx(expected_gross)
+    assert result.metrics["unrealised_pnl"] == 0
+    assert result.metrics["fees_paid"] == pytest.approx(expected_fees)
+    assert result.metrics["total_pnl"] == pytest.approx(expected_total)
+    assert result.metrics["ending_cash"] == pytest.approx(1000 + expected_total)
+    assert result.metrics["ending_equity"] == pytest.approx(1000 + expected_total)
+    assert result.metrics["spread_cost"] == pytest.approx(expected_spread_cost)
+    assert result.metrics["slippage_cost"] == pytest.approx(expected_slippage_cost)
+    assert result.metrics["wall_clock_exposure_pct"] == pytest.approx(100 / 3)
+    assert result.metrics["ending_equity"] == pytest.approx(
+        result.metrics["starting_capital"]
+        + result.metrics["realised_pnl"]
+        + result.metrics["unrealised_pnl"]
+        - result.metrics["fees_paid"]
+    )
+
+
+def test_integrated_mixed_closed_and_open_accounting_and_union_exposure():
+    result = BacktestReplayEngine(
+        strategies={
+            "CLOSED": SingleRoundTripStrategy(),
+            "OPEN": HoldWithoutStopStrategy(),
+        },
+        configuration=ReplayConfiguration(
+            starting_capital=1000,
+            position_sizing_mode="FIXED_UNITS",
+            risk_configuration={"fixed_size": 1, "max_open_positions": 2},
+            execution_assumptions=ExecutionAssumptions(spread_model="NONE"),
+            open_position_treatment="MARK_TO_MARKET",
+        ),
+        clock=SimulatedClock(START),
+    ).run(
+        {
+            instrument: _trade_candles(instrument, [100, 100, 105, 110])
+            for instrument in ("CLOSED", "OPEN")
+        }
+    )
+
+    closed = result.trades[0]
+    open_result = result.open_positions[0]
+    expected_realised = closed.gross_pnl
+    expected_unrealised = (
+        open_result.mark_price - open_result.position.open_price
+    ) * open_result.position.size
+    expected_fees = closed.fees + open_result.position.entry_fee
+    assert result.metrics["realised_pnl"] == pytest.approx(expected_realised)
+    assert result.metrics["unrealised_pnl"] == pytest.approx(expected_unrealised)
+    assert result.metrics["fees_paid"] == pytest.approx(expected_fees)
+    assert result.metrics["total_pnl"] == pytest.approx(
+        expected_realised + expected_unrealised - expected_fees
+    )
+    assert result.metrics["ending_cash"] == pytest.approx(
+        1000 + closed.net_pnl - open_result.position.entry_fee
+    )
+    assert result.metrics["ending_equity"] == pytest.approx(
+        result.metrics["ending_cash"] + expected_unrealised
+    )
+    assert result.metrics["open_positions_at_end"] == 1
+    assert result.metrics["wall_clock_exposure_pct"] == pytest.approx(75)
 
 
 def test_replay_is_deterministic_and_executes_signal_at_next_open():
@@ -262,6 +583,165 @@ def test_percent_risk_sizing_uses_executable_fill_slippage_and_fees(
         position.metadata["sizing_projected_stop_loss"]
         <= position.metadata["sizing_risk_budget"] + 1e-9
     )
+
+
+@pytest.mark.parametrize(
+    (
+        "direction",
+        "assumptions",
+        "use_fallback_stop",
+        "max_size",
+    ),
+    [
+        (
+            OrderDirection.BUY,
+            ExecutionAssumptions(
+                spread_model="FIXED_PRICE",
+                spread_value=2,
+                slippage_model="FIXED_PRICE",
+                slippage_value=0.5,
+                fee_model="PER_UNIT",
+                fee_value=0.2,
+            ),
+            False,
+            None,
+        ),
+        (
+            OrderDirection.SELL,
+            ExecutionAssumptions(
+                spread_model="FIXED_PRICE",
+                spread_value=2,
+                slippage_model="FIXED_PRICE",
+                slippage_value=0.5,
+                fee_model="PER_UNIT",
+                fee_value=0.2,
+            ),
+            False,
+            None,
+        ),
+        (
+            OrderDirection.BUY,
+            ExecutionAssumptions(
+                spread_model="NONE",
+                fee_model="FIXED_PER_ORDER",
+                fee_value=2,
+            ),
+            False,
+            None,
+        ),
+        (
+            OrderDirection.BUY,
+            ExecutionAssumptions(
+                spread_model="NONE",
+                fee_model="BPS_NOTIONAL",
+                fee_value=100,
+            ),
+            False,
+            None,
+        ),
+        (
+            OrderDirection.BUY,
+            ExecutionAssumptions(
+                spread_model="NONE",
+                fee_model="PER_UNIT",
+                fee_value=0.2,
+            ),
+            True,
+            None,
+        ),
+        (
+            OrderDirection.BUY,
+            ExecutionAssumptions(
+                spread_model="FIXED_PRICE",
+                spread_value=2,
+                slippage_model="FIXED_PRICE",
+                slippage_value=0.5,
+                fee_model="PER_UNIT",
+                fee_value=0.2,
+            ),
+            False,
+            5,
+        ),
+    ],
+)
+def test_percent_risk_actual_stop_loss_respects_persisted_tolerance(
+    direction,
+    assumptions,
+    use_fallback_stop,
+    max_size,
+):
+    strategy: Strategy
+    if use_fallback_stop:
+        strategy = HoldWithoutStopStrategy(direction=direction)
+    elif direction is OrderDirection.BUY:
+        strategy = HoldWithStopStrategy()
+    else:
+        strategy = ShortHoldWithStopStrategy()
+    stop_candle = (
+        PriceBar(100, 101, 89, 90)
+        if direction is OrderDirection.BUY
+        else PriceBar(100, 111, 99, 110)
+    )
+    candles = [
+        HistoricalCandle(
+            timestamp=START,
+            instrument="A",
+            timeframe="1m",
+            trade=PriceBar(100, 101, 99, 100),
+        ),
+        HistoricalCandle(
+            timestamp=START + timedelta(minutes=1),
+            instrument="A",
+            timeframe="1m",
+            trade=PriceBar(100, 101, 99, 100),
+        ),
+        HistoricalCandle(
+            timestamp=START + timedelta(minutes=2),
+            instrument="A",
+            timeframe="1m",
+            trade=stop_candle,
+        ),
+    ]
+    risk_configuration = {
+        "risk_per_trade_percent": 10,
+        "fallback_stop_percent": 10,
+        "max_open_positions": 1,
+    }
+    if max_size is not None:
+        risk_configuration["max_size"] = max_size
+    result = BacktestReplayEngine(
+        strategies={"A": strategy},
+        configuration=ReplayConfiguration(
+            starting_capital=1000,
+            position_sizing_mode="PERCENT_RISK",
+            risk_configuration=risk_configuration,
+            execution_assumptions=assumptions,
+            open_position_treatment="CLOSE_AT_END",
+        ),
+        clock=SimulatedClock(START),
+    ).run({"A": candles})
+
+    assert len(result.trades) == 1
+    trade = result.trades[0]
+    metadata = trade.position.metadata
+    actual_loss = -trade.net_pnl
+    assert trade.exit_reason == "STOP_LOSS"
+    assert trade.position.stop_loss_price == pytest.approx(
+        metadata["sizing_stop_price"]
+    )
+    assert metadata["sizing_absolute_tolerance"] == (
+        PERCENT_RISK_SIZING_ABSOLUTE_TOLERANCE
+    )
+    assert result.metrics["percent_risk_sizing_absolute_tolerance"] == (
+        PERCENT_RISK_SIZING_ABSOLUTE_TOLERANCE
+    )
+    assert actual_loss == pytest.approx(metadata["sizing_projected_stop_loss"])
+    assert actual_loss <= (
+        metadata["sizing_risk_budget"] + metadata["sizing_absolute_tolerance"]
+    )
+    if max_size is not None:
+        assert trade.position.size == max_size
+        assert actual_loss < metadata["sizing_risk_budget"]
 
 
 def test_end_treatment_uses_final_close_and_open_fees_reduce_equity():

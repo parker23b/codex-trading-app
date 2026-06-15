@@ -30,6 +30,7 @@ test("backtesting client keeps typed dataset and result APIs explicit", () => {
     "BacktestTrade",
     "BacktestEquityPoint",
     "BacktestWarning",
+    "BacktestRunMetrics",
     "BacktestMetrics",
   ]) {
     assert.match(types, new RegExp(`export type ${typeName} =`));
@@ -64,6 +65,11 @@ test("backtesting UI renders empty, failed, warning, provenance, and limitation 
   }
   assert.match(source, /Result checksum/);
   assert.match(source, /Exposure: wall-clock union across open intervals/);
+  assert.match(source, /metrics\.monetary_unit_label/);
+  assert.match(source, /adaptive display formatting, not broker tick precision/);
+  assert.match(source, /function adaptivePrice/);
+  assert.doesNotMatch(source, /currency: "GBP"/);
+  assert.doesNotMatch(source, /\.toFixed\(5\)/);
   assert.doesNotMatch(source, /label: "Ending capital"/);
   assert.doesNotMatch(source, /label: "Net P&L"/);
   assert.match(source, /selectedProvider\.quota_warnings/);

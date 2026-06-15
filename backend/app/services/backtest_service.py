@@ -127,13 +127,15 @@ BACKTEST_RESULT_PROJECTION_ONLY_FIELDS = {
         "created_at",
         "started_at",
         "completed_at",
-        "failure_reason",
     ),
     "trade": ("id", "run_id"),
     "equity": ("id", "run_id"),
     "metric": ("id", "run_id"),
     "warning": ("id", "run_id", "created_at"),
     "instrument": ("id", "run_id", "dataset_partition_id"),
+}
+BACKTEST_RESULT_STATUS_CONSTRAINED_FIELDS = {
+    "run": ("failure_reason",),
 }
 BACKTEST_RESULT_VERIFICATION_ENVELOPE_FIELDS = {
     "run": ("result_manifest_version", "result_checksum"),
@@ -522,6 +524,8 @@ class BacktestService:
         run = self.get_run(run_id)
         if run.status != BacktestRunStatus.COMPLETED.value:
             raise ValueError("Only completed backtest results can be verified.")
+        if run.failure_reason is not None:
+            raise ValueError("Completed backtest result cannot have a failure reason.")
         if run.result_manifest_version != BACKTEST_RESULT_MANIFEST_VERSION:
             raise ValueError("Backtest result manifest version is unsupported.")
         actual = self.result_checksum(run)
@@ -627,6 +631,7 @@ class BacktestService:
         candles_by_instrument: dict[str, list[HistoricalCandle]],
     ) -> None:
         run.status = BacktestRunStatus.COMPLETED.value
+        run.failure_reason = None
         run.completed_at = datetime.now(UTC)
         run.effective_start_at = result.effective_start_at
         run.effective_end_at = result.effective_end_at

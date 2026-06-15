@@ -14,6 +14,7 @@ from app.backtesting.execution import (
     SimulatedTradeResult,
 )
 from app.backtesting.metrics import (
+    PERCENT_RISK_SIZING_ABSOLUTE_TOLERANCE,
     EquitySample,
     calculate_grouped_metrics,
     calculate_metrics,
@@ -193,8 +194,11 @@ class BacktestReplayEngine:
                             direction=pending.decision.direction,
                             size=size,
                             candle=candle,
-                            stop_loss_price=_optional_float(
-                                hints.get("stop_loss_price")
+                            stop_loss_price=(
+                                _optional_float(hints.get("stop_loss_price"))
+                                or _optional_float(
+                                    sizing_metadata.get("sizing_stop_price")
+                                )
                             ),
                             take_profit_price=_optional_float(
                                 hints.get("take_profit_price")
@@ -464,6 +468,7 @@ class BacktestReplayEngine:
             "sizing_stop_price": stop,
             "sizing_risk_budget": risk_amount,
             "sizing_projected_stop_loss": projected_loss,
+            "sizing_absolute_tolerance": (PERCENT_RISK_SIZING_ABSOLUTE_TOLERANCE),
         }
 
     def _current_equity(
