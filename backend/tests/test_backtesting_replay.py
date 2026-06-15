@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from app.backtesting.candles import HistoricalCandle, PriceBar
 from app.backtesting.clock import SimulatedClock
 from app.backtesting.execution import ExecutionAssumptions
@@ -61,6 +63,14 @@ class HoldWithStopStrategy(ImmediateHoldStrategy):
 
     def entry_signal_hints(self) -> dict[str, float]:
         return {"stop_loss_price": 90.0}
+
+
+class ShortHoldWithStopStrategy(HoldWithStopStrategy):
+    def entry_direction(self) -> OrderDirection:
+        return OrderDirection.SELL
+
+    def entry_signal_hints(self) -> dict[str, float]:
+        return {"stop_loss_price": 110.0}
 
 
 def _candles(instrument: str) -> list[HistoricalCandle]:
@@ -128,6 +138,25 @@ def test_shortlist_replay_uses_stable_instrument_order_for_equal_timestamps():
     ]
 
 
+def test_trades_use_stable_secondary_order_for_equal_open_times():
+    result = _run(
+        {
+            "B": ImmediateHoldStrategy(),
+            "A": ImmediateHoldStrategy(),
+        }
+    )
+
+    ordered = [
+        (trade.position.open_time, trade.position.instrument) for trade in result.trades
+    ]
+
+    assert ordered == sorted(ordered)
+    assert ordered[:2] == [
+        (START + timedelta(minutes=1), "A"),
+        (START + timedelta(minutes=1), "B"),
+    ]
+
+
 def test_percent_risk_sizing_at_open_cannot_see_current_candle_close():
     rows = {
         "A": [
@@ -175,7 +204,64 @@ def test_percent_risk_sizing_at_open_cannot_see_current_candle_close():
         clock=SimulatedClock(START),
     ).run(rows)
 
-    assert [position.size for position in result.open_positions] == [10, 10]
+    assert [position.position.size for position in result.open_positions] == [10, 10]
+
+
+@pytest.mark.parametrize(
+    ("strategy", "direction"),
+    [
+        (HoldWithStopStrategy(), OrderDirection.BUY),
+        (ShortHoldWithStopStrategy(), OrderDirection.SELL),
+    ],
+)
+def test_percent_risk_sizing_uses_executable_fill_slippage_and_fees(
+    strategy: Strategy, direction: OrderDirection
+):
+    candles = [
+        HistoricalCandle(
+            timestamp=START + timedelta(minutes=index),
+            instrument="A",
+            timeframe="1m",
+            trade=PriceBar(100, 101, 99, 100),
+        )
+        for index in range(2)
+    ]
+    result = BacktestReplayEngine(
+        strategies={"A": strategy},
+        configuration=ReplayConfiguration(
+            starting_capital=1000,
+            position_sizing_mode="PERCENT_RISK",
+            risk_configuration={
+                "risk_per_trade_percent": 10,
+                "fallback_stop_percent": 1,
+                "max_open_positions": 1,
+            },
+            execution_assumptions=ExecutionAssumptions(
+                spread_model="FIXED_PRICE",
+                spread_value=2,
+                slippage_model="FIXED_PRICE",
+                slippage_value=0.5,
+                fee_model="PER_UNIT",
+                fee_value=0.2,
+            ),
+            open_position_treatment="MARK_TO_MARKET",
+        ),
+        clock=SimulatedClock(START),
+    ).run({"A": candles})
+
+    open_result = result.open_positions[0]
+    position = open_result.position
+    assert position.direction is direction
+    assert position.metadata["sizing_expected_entry_price"] == (
+        101.5 if direction is OrderDirection.BUY else 98.5
+    )
+    assert position.metadata["sizing_projected_stop_loss"] == pytest.approx(100)
+    assert position.metadata["sizing_risk_budget"] == 100
+    assert position.size == pytest.approx(100 / 12.4)
+    assert (
+        position.metadata["sizing_projected_stop_loss"]
+        <= position.metadata["sizing_risk_budget"] + 1e-9
+    )
 
 
 def test_end_treatment_uses_final_close_and_open_fees_reduce_equity():
@@ -215,8 +301,20 @@ def test_end_treatment_uses_final_close_and_open_fees_reduce_equity():
     marked = execute("MARK_TO_MARKET")
     closed = execute("CLOSE_AT_END")
 
-    assert marked.metrics["ending_capital"] == 1007
+    assert marked.metrics["ending_cash"] == 998
+    assert marked.metrics["ending_equity"] == 1007
+    assert marked.metrics["realised_pnl"] == 0
+    assert marked.metrics["unrealised_pnl"] == 9
+    assert marked.metrics["fees_paid"] == 2
+    assert marked.metrics["total_pnl"] == 7
     assert marked.metrics["open_positions_at_end"] == 1
+    assert marked.metrics["headline_return_includes_unrealised"] is True
     assert closed.trades[0].close_price == 110
     assert closed.trades[0].close_time == START + timedelta(minutes=2)
-    assert closed.metrics["ending_capital"] == 1005
+    assert closed.metrics["ending_cash"] == 1005
+    assert closed.metrics["ending_equity"] == 1005
+    assert closed.metrics["realised_pnl"] == 9
+    assert closed.metrics["unrealised_pnl"] == 0
+    assert closed.metrics["fees_paid"] == 4
+    assert closed.metrics["total_pnl"] == 5
+    assert closed.metrics["headline_return_includes_unrealised"] is False

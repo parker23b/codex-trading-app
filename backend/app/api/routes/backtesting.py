@@ -46,6 +46,7 @@ def _dataset_response(
     dataset = service.get_dataset(dataset_id)
     return HistoricalDatasetResponse(
         **dataset.model_dump(),
+        selectable=service.dataset_is_selectable(dataset.id),
         partitions=[
             HistoricalDatasetPartitionResponse.model_validate(partition)
             for partition in service.list_partitions(dataset_id)
@@ -158,7 +159,11 @@ def list_historical_datasets(
 ) -> list[HistoricalDatasetResponse]:
     service = HistoricalDataService(session, settings=resolve_request_settings(request))
     return [
-        HistoricalDatasetResponse(**dataset.model_dump(), partitions=[])
+        HistoricalDatasetResponse(
+            **dataset.model_dump(),
+            selectable=service.dataset_is_selectable(dataset.id),
+            partitions=[],
+        )
         for dataset in service.list_datasets()
     ]
 

@@ -4,8 +4,10 @@ import gzip
 from hashlib import sha256
 import io
 import json
+from dataclasses import dataclass
 from pathlib import Path
 import re
+import shutil
 from typing import Iterable
 
 from app.backtesting.candles import HistoricalCandle, candle_checksum
@@ -26,6 +28,13 @@ class HistoricalDataRepository:
         raise NotImplementedError
 
 
+@dataclass(frozen=True, slots=True)
+class StagedHistoricalPartition:
+    staging_path: str
+    storage_path: str
+    checksum: str
+
+
 class JsonlHistoricalDataRepository(HistoricalDataRepository):
     """Immutable deterministic gzip JSONL storage behind a replaceable boundary."""
 
@@ -41,16 +50,35 @@ class JsonlHistoricalDataRepository(HistoricalDataRepository):
         timeframe: str,
         candles: Iterable[HistoricalCandle],
     ) -> tuple[str, str]:
+        staged = self.stage_partition(
+            dataset_id=dataset_id,
+            instrument=instrument,
+            timeframe=timeframe,
+            candles=candles,
+        )
+        self.publish_partition(staged)
+        return staged.storage_path, staged.checksum
+
+    def stage_partition(
+        self,
+        *,
+        dataset_id: str,
+        instrument: str,
+        timeframe: str,
+        candles: Iterable[HistoricalCandle],
+    ) -> StagedHistoricalPartition:
         rows = sorted(candles, key=lambda candle: candle.timestamp)
         checksum = candle_checksum(rows)
-        relative_path = Path(dataset_id) / (
-            f"{self._safe_name(instrument)}-{self._safe_name(timeframe)}-{checksum[:16]}.jsonl.gz"
+        filename = (
+            f"{self._safe_name(instrument)}-{self._safe_name(timeframe)}-"
+            f"{checksum[:16]}.jsonl.gz"
         )
-        target = (self.root / relative_path).resolve()
-        if self.root not in target.parents:
-            raise ValueError("Historical storage path escaped the configured root.")
-        if target.exists():
-            raise ValueError("Immutable historical partition already exists.")
+        storage_path = Path(dataset_id) / filename
+        staging_path = Path(".staging") / dataset_id / filename
+        target = self._resolve(staging_path)
+        published_target = self._resolve(storage_path)
+        if target.exists() or published_target.exists():
+            raise ValueError("Historical partition already exists.")
         target.parent.mkdir(parents=True, exist_ok=True)
 
         buffer = io.BytesIO()
@@ -64,11 +92,37 @@ class JsonlHistoricalDataRepository(HistoricalDataRepository):
                 )
                 compressed.write(payload.encode("utf-8") + b"\n")
         target.write_bytes(buffer.getvalue())
-        return relative_path.as_posix(), checksum
+        return StagedHistoricalPartition(
+            staging_path=staging_path.as_posix(),
+            storage_path=storage_path.as_posix(),
+            checksum=checksum,
+        )
+
+    def publish_partition(self, staged: StagedHistoricalPartition) -> None:
+        source = self._resolve(Path(staged.staging_path))
+        target = self._resolve(Path(staged.storage_path))
+        if not source.is_file():
+            raise ValueError("Staged historical partition is unavailable.")
+        if target.exists():
+            raise ValueError("Immutable historical partition already exists.")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        source.replace(target)
+
+    def cleanup_dataset(self, dataset_id: str) -> None:
+        for relative in (Path(".staging") / dataset_id, Path(dataset_id)):
+            target = self._resolve(relative)
+            if target.exists():
+                shutil.rmtree(target)
+
+    def _resolve(self, relative_path: Path) -> Path:
+        target = (self.root / relative_path).resolve()
+        if target != self.root and self.root not in target.parents:
+            raise ValueError("Historical storage path escaped the configured root.")
+        return target
 
     def read_partition(self, storage_path: str) -> list[HistoricalCandle]:
-        target = (self.root / storage_path).resolve()
-        if self.root not in target.parents or not target.is_file():
+        target = self._resolve(Path(storage_path))
+        if not target.is_file():
             raise ValueError("Historical partition is unavailable.")
         rows: list[HistoricalCandle] = []
         with gzip.open(target, "rt", encoding="utf-8") as source:
@@ -78,7 +132,7 @@ class JsonlHistoricalDataRepository(HistoricalDataRepository):
         return rows
 
     def physical_checksum(self, storage_path: str) -> str:
-        target = (self.root / storage_path).resolve()
+        target = self._resolve(Path(storage_path))
         return sha256(target.read_bytes()).hexdigest()
 
     @staticmethod

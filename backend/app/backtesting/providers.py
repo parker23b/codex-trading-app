@@ -221,6 +221,7 @@ class BinanceHistoricalMarketDataProvider(HistoricalMarketDataProvider):
         cursor_ms = int(start_at.astimezone(UTC).timestamp() * 1000)
         end_ms = int(end_at.astimezone(UTC).timestamp() * 1000)
         interval_ms = self.TIMEFRAME_MILLISECONDS[timeframe]
+        now_ms = int(datetime.now(UTC).timestamp() * 1000)
         candles: list[HistoricalCandle] = []
         while cursor_ms < end_ms:
             query = urlencode(
@@ -239,8 +240,15 @@ class BinanceHistoricalMarketDataProvider(HistoricalMarketDataProvider):
             if not payload:
                 break
             for row in payload:
+                if len(row) < 7:
+                    raise ValueError(
+                        "Binance kline response is missing its close timestamp."
+                    )
                 opened_at = datetime.fromtimestamp(int(row[0]) / 1000, tz=UTC)
+                closed_at_ms = int(row[6]) + 1
                 if opened_at >= end_at.astimezone(UTC):
+                    continue
+                if closed_at_ms > end_ms or closed_at_ms > now_ms:
                     continue
                 candles.append(
                     HistoricalCandle(

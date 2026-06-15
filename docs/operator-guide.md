@@ -243,7 +243,20 @@ timestamp,instrument,timeframe,bid_open,bid_high,bid_low,bid_close,ask_open,ask_
 
 Only one instrument and one timeframe may appear in a CSV. Timestamps must contain `Z` or an explicit offset. Generic `open,high,low,close` columns are accepted as trade-price OHLC.
 
-For provider import, choose a configured provider, enter internal instrument IDs, timeframe, and UTC date range. Imports are synchronous in this phase. Completed snapshots cannot be modified.
+For provider import, choose a configured provider, enter internal instrument
+IDs, timeframe, and a browser-local date/time range. The UI converts that
+range to explicit UTC instants before submission. Imports are synchronous in
+this phase. Only imports with complete aligned coverage for every requested
+instrument become selectable `READY` snapshots. Partial and failed attempts
+remain visible with warnings and a failure reason.
+
+Dataset status and operational availability are separate. A snapshot is
+selectable only when its immutable status is `READY`, its operational
+availability is `AVAILABLE`, every partition file exists, and public checksum
+verification succeeds. A durable snapshot that fails ambiguous-commit
+reconciliation remains `READY` for provenance but is marked
+`RECOVERY_REQUIRED`, shown for diagnosis, and excluded from selection and
+replay.
 
 ## Inspect coverage
 
@@ -253,11 +266,45 @@ The dataset panel shows:
 - earliest/latest timestamps and candle count;
 - bid, ask, midpoint, or trade components;
 - gaps and warnings;
-- immutable checksum and storage format.
+- append-only status, canonical checksum, and storage format.
+
+`READY` metadata and partition rows are protected from application and direct
+database update/delete paths, including attempts to move a partition into or
+out of a `READY` dataset. Local partition files are checksum-verified; the
+application detects file edits or deletion rather than claiming filesystem
+permissions make the bytes physically immutable. SQLite trigger behavior is
+covered directly. PostgreSQL uses equivalent triggers, but verification
+depends on the separately configured migration rehearsal.
+
+Filesystem publication and the database commit are not one transaction. If
+commit acknowledgement is ambiguous, the importer re-reads the snapshot using
+a fresh database session. Verified durable `READY` snapshots retain their
+files and are treated as successful; confirmed non-ready attempts are cleaned
+and recorded. If reconciliation itself is unavailable or contradictory,
+artifacts are retained and the operator receives a recovery error.
+If durable `READY` metadata exists but a referenced file is missing, corrupt,
+or fails checksum verification, the importer does not delete more artifacts.
+It records the mutable operational state `RECOVERY_REQUIRED` and a reason.
+A retry creates a separate snapshot; it does not repair or reuse the damaged
+snapshot.
+
+The canonical manifest covers all authoritative dataset and partition
+provenance, coverage, identity, storage, warning, and checksum fields.
+Partition `id` and `dataset_id` are covered. The dataset checksum is excluded
+from its own hash because it is the verification envelope; the nested API
+`partitions` property is projection-only because the same rows are already
+represented in the manifest partition section.
+Operational `availability`, `availability_reason`, and
+`availability_updated_at` fields are intentionally excluded from Manifest V3
+because they may change without changing immutable snapshot identity.
 
 ## Run a backtest
 
 Choose exactly one registered strategy, one immutable dataset, one or more dataset instruments, timeframe, range, starting capital, sizing, spread, slippage, fees, and end-of-run treatment. Runs are bounded by `BACKTEST_MAX_CANDLES_PER_RUN`.
+
+Date/time form values are browser-local wall times. The UI converts them to
+explicit UTC instants before submission. Timestamps returned by the backend
+must already contain `Z` or an explicit offset and are rejected if ambiguous.
 
 Use `DATASET` spread only when both bid and ask are present. For midpoint or trade-price data, choose an explicit fixed-price or basis-point spread. A zero synthetic spread is allowed only when intentionally configured and remains visible in the run assumptions.
 
@@ -274,4 +321,39 @@ Use `DATASET` spread only when both bid and ask are present. For midpoint or tra
 - One-minute OHLC is not tick or quote replay and cannot prove exact intraminute fill order.
 - Backtest trades are isolated simulation records, never broker-confirmed executions.
 
+The result summary keeps closed and open performance separate:
+
+- `Realised P&L` is closed fill-to-fill gross P&L.
+- `Unrealised P&L` marks positions left open to the final executable candle
+  side.
+- `Fees paid` includes closed entry/exit fees and entry fees already paid on
+  positions left open.
+- `Total P&L = realised P&L + unrealised P&L - fees paid`.
+- `Ending equity = starting capital + total P&L`.
+- `Ending cash` excludes unrealised P&L. `Open position value` is gross marked
+  notional and is not deducted from the P&L cash ledger.
+- Spread and slippage are embedded in fill prices. Their cost fields are
+  attribution and are not subtracted again.
+- Closed-trade win rate and return exclude positions still open at the end.
+
+`MARK_TO_MARKET` retains positions and includes unrealised P&L in total return.
+`CLOSE_AT_END` closes them at the final candle close. Exposure is the
+wall-clock union of closed and open position intervals, so overlapping
+instruments do not count the same elapsed time twice.
+Open marks use the executable bid/ask or synthetic-spread side but do not
+reserve a future exit fee or hypothetical exit slippage.
+
+Percent-risk sizing uses the expected spread/slippage-adjusted entry fill,
+stop-exit slippage, and configured entry/exit fees. It uses continuous units
+and does not apply broker lot steps, minimum sizes, margin, or financing.
+
+Completed runs show a result checksum covering deterministic strategy,
+dataset, assumptions, trades, equity, metrics, warnings, and per-instrument
+results. Database IDs, display name/notes, wall-clock audit timestamps, and
+dataset partition row IDs are excluded. The checksum proves equality of the
+covered persisted projection, not source-build authenticity or broker realism.
+
 Failed runs retain the failure reason and configuration for diagnosis.
+
+See [backtesting-user-guide.md](backtesting-user-guide.md) for the complete
+operator workflow, availability states, recovery behavior, and current limits.

@@ -48,6 +48,7 @@ def test_bid_ask_spread_slippage_and_fees_are_applied_deterministically():
     )
 
     assert position.open_price == 101.5
+    assert position.entry_spread_cost == 2.0
     assert trade.close_price == 98.5
     assert trade.gross_pnl == -6.0
     assert trade.fees == 4.0

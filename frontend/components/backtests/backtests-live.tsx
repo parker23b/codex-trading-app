@@ -64,12 +64,23 @@ function errorMessage(error: unknown) {
 
 function localInputValue(value?: string | null) {
   if (!value) return "";
-  return utcDate(value).toISOString().slice(0, 16);
+  const parsed = utcDate(value);
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return (
+    `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}` +
+    `T${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`
+  );
 }
 
 function utcDate(value: string) {
-  const includesTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(value);
-  return new Date(includesTimezone ? value : `${value}Z`);
+  if (!/(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) {
+    throw new Error("Backend timestamp must include an explicit UTC offset.");
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error("Backend timestamp is invalid.");
+  }
+  return parsed;
 }
 
 function utcTimestampLabel(value: string) {
@@ -95,14 +106,40 @@ function coverageEndValue(dataset: HistoricalDataset | null) {
     H1: 3600,
   };
   const end = new Date(
-    new Date(dataset.latest_at).getTime() +
+    utcDate(dataset.latest_at).getTime() +
       (seconds[dataset.base_timeframe] ?? 60) * 1000,
   );
   return localInputValue(end.toISOString());
 }
 
-function toIso(value: string) {
-  return utcDate(value).toISOString();
+function localFormValueToUtcIso(value: string) {
+  const match = value.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/,
+  );
+  if (!match) {
+    throw new Error("Local date/time input is invalid.");
+  }
+  const [, year, month, day, hour, minute, second = "0"] = match;
+  const parsed = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second),
+  );
+  if (
+    Number.isNaN(parsed.getTime()) ||
+    parsed.getFullYear() !== Number(year) ||
+    parsed.getMonth() !== Number(month) - 1 ||
+    parsed.getDate() !== Number(day) ||
+    parsed.getHours() !== Number(hour) ||
+    parsed.getMinutes() !== Number(minute) ||
+    parsed.getSeconds() !== Number(second)
+  ) {
+    throw new Error("Local date/time input is invalid in this browser timezone.");
+  }
+  return parsed.toISOString();
 }
 
 function numberValue(value: unknown) {
@@ -145,7 +182,12 @@ export function BacktestsLive({
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
 
-  const readyDatasets = datasets.filter((dataset) => dataset.status === "READY");
+  const readyDatasets = datasets.filter(
+    (dataset) =>
+      dataset.status === "READY" &&
+      dataset.availability === "AVAILABLE" &&
+      dataset.selectable,
+  );
   const configuredProviders = initialProviders.filter((provider) => provider.configured);
   const selectedProvider = initialProviders.find(
     (provider) => provider.provider_id === selectedProviderId,
@@ -270,8 +312,8 @@ export function BacktestsLive({
           .map((item) => item.trim())
           .filter(Boolean),
         timeframe: String(form.get("timeframe")),
-        start_at: toIso(String(form.get("start_at"))),
-        end_at: toIso(String(form.get("end_at"))),
+        start_at: localFormValueToUtcIso(String(form.get("start_at"))),
+        end_at: localFormValueToUtcIso(String(form.get("end_at"))),
         asset_class: String(form.get("asset_class")),
         market_type: String(form.get("market_type")),
         venue: selectedProvider?.venue,
@@ -289,8 +331,13 @@ export function BacktestsLive({
 
   const handleBacktest = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selectedDataset || selectedDataset.status !== "READY") {
-      setError("Select a ready immutable dataset.");
+    if (
+      !selectedDataset ||
+      selectedDataset.status !== "READY" ||
+      selectedDataset.availability !== "AVAILABLE" ||
+      !selectedDataset.selectable
+    ) {
+      setError("Select an available, verified dataset.");
       return;
     }
     const form = new FormData(event.currentTarget);
@@ -307,8 +354,8 @@ export function BacktestsLive({
         dataset_id: selectedDataset.id,
         shortlist: instruments,
         timeframe: String(form.get("timeframe")),
-        start_at: toIso(String(form.get("start_at"))),
-        end_at: toIso(String(form.get("end_at"))),
+        start_at: localFormValueToUtcIso(String(form.get("start_at"))),
+        end_at: localFormValueToUtcIso(String(form.get("end_at"))),
         starting_capital: Number(form.get("starting_capital")),
         position_sizing_mode: String(form.get("position_sizing_mode")),
         risk_configuration: {
@@ -525,8 +572,12 @@ export function BacktestsLive({
           >
             <option value="">Select dataset</option>
             {datasets.map((dataset) => (
-              <option key={dataset.id} value={dataset.id}>
-                {dataset.display_name} · {dataset.status} · {dataset.provider} · {dataset.candle_count} candles
+              <option
+                key={dataset.id}
+                value={dataset.id}
+                disabled={!dataset.selectable}
+              >
+                {dataset.display_name} · {dataset.status} · {dataset.availability} · {dataset.provider} · {dataset.candle_count} candles
               </option>
             ))}
           </select>
@@ -542,6 +593,10 @@ export function BacktestsLive({
               <div>
                 <p>Checksum: <code>{selectedDataset.checksum}</code></p>
                 <p>Status: {selectedDataset.status}</p>
+                <p>Availability: {selectedDataset.availability}</p>
+                {selectedDataset.availability_reason ? (
+                  <p>Availability reason: {selectedDataset.availability_reason}</p>
+                ) : null}
                 <p>Storage: {selectedDataset.storage_format} · {selectedDataset.immutable ? "immutable" : "mutable"}</p>
                 <p>Gaps: {selectedDataset.detected_gaps.length} · warnings: {selectedDataset.warnings.length}</p>
                 {selectedDataset.failure_reason ? (
@@ -648,7 +703,7 @@ export function BacktestsLive({
               <input className={inputClass} name="fixed_size" type="number" min="0.000001" step="any" defaultValue="1" />
               <input className={inputClass} name="max_open_positions" type="number" min="1" step="1" defaultValue="3" />
               <input className={inputClass} name="risk_per_trade_percent" type="number" min="0" step="0.01" defaultValue="0.5" />
-              <input className={inputClass} name="fallback_stop_percent" type="number" min="0.0001" step="0.01" defaultValue="0.5" />
+              <input className={inputClass} name="fallback_stop_percent" type="number" min="0.0001" step="any" defaultValue="0.5" />
               <select className={inputClass} name="open_position_treatment" defaultValue="CLOSE_AT_END">
                 <option>CLOSE_AT_END</option>
                 <option>MARK_TO_MARKET</option>
@@ -698,6 +753,8 @@ export function BacktestsLive({
               disabled={
                 pending !== null ||
                 selectedDataset?.status !== "READY" ||
+                selectedDataset?.availability !== "AVAILABLE" ||
+                !selectedDataset?.selectable ||
                 !selectedStrategy
               }
             >
@@ -742,10 +799,14 @@ export function BacktestsLive({
             <>
               <StatusStrip
                 items={[
-                  { label: "Ending capital", value: money(result.metrics.run.ending_capital), tone: "neutral" },
-                  { label: "Net P&L", value: money(result.metrics.run.net_pnl), tone: (numberValue(result.metrics.run.net_pnl) ?? 0) >= 0 ? "positive" : "negative" },
-                  { label: "Return", value: numberValue(result.metrics.run.percentage_return) == null ? "Undefined" : `${numberValue(result.metrics.run.percentage_return)?.toFixed(2)}%`, tone: "neutral" },
-                  { label: "Trades", value: numberValue(result.metrics.run.total_trades) ?? 0, tone: "neutral" },
+                  { label: "Ending equity", value: money(result.metrics.run.ending_equity), tone: "neutral" },
+                  { label: "Realised P&L", value: money(result.metrics.run.realised_pnl), tone: (numberValue(result.metrics.run.realised_pnl) ?? 0) >= 0 ? "positive" : "negative" },
+                  { label: "Unrealised P&L", value: money(result.metrics.run.unrealised_pnl), tone: (numberValue(result.metrics.run.unrealised_pnl) ?? 0) >= 0 ? "positive" : "negative" },
+                  { label: "Total P&L", value: money(result.metrics.run.total_pnl), tone: (numberValue(result.metrics.run.total_pnl) ?? 0) >= 0 ? "positive" : "negative" },
+                  { label: "Total return", value: numberValue(result.metrics.run.return_pct) == null ? "Undefined" : `${numberValue(result.metrics.run.return_pct)?.toFixed(2)}%`, tone: "neutral" },
+                  { label: "Closed trades", value: numberValue(result.metrics.run.closed_trade_count) ?? 0, tone: "neutral" },
+                  { label: "Closed-trade win rate", value: numberValue(result.metrics.run.closed_trade_win_rate) == null ? "Undefined" : `${numberValue(result.metrics.run.closed_trade_win_rate)?.toFixed(2)}%`, tone: "neutral" },
+                  { label: "Open positions at end", value: numberValue(result.metrics.run.open_positions_at_end) ?? 0, tone: (numberValue(result.metrics.run.open_positions_at_end) ?? 0) > 0 ? "warning" : "neutral" },
                   { label: "Max drawdown", value: money(result.metrics.run.maximum_drawdown), tone: "warning" },
                   { label: "Warnings", value: result.warnings.length, tone: result.warnings.length ? "warning" : "positive" },
                 ]}
@@ -756,9 +817,9 @@ export function BacktestsLive({
                   title="Equity curve"
                   subtitle="Persisted simulated equity; candle-resolution marks only."
                   points={chartPoints}
-                  latestValue={money(result.metrics.run.ending_capital)}
-                  delta={numberValue(result.metrics.run.percentage_return) == null ? undefined : `${numberValue(result.metrics.run.percentage_return)?.toFixed(2)}%`}
-                  tone={(numberValue(result.metrics.run.absolute_return) ?? 0) >= 0 ? "positive" : "negative"}
+                  latestValue={money(result.metrics.run.ending_equity)}
+                  delta={numberValue(result.metrics.run.return_pct) == null ? undefined : `${numberValue(result.metrics.run.return_pct)?.toFixed(2)}%`}
+                  tone={(numberValue(result.metrics.run.total_pnl) ?? 0) >= 0 ? "positive" : "negative"}
                 />
                 <LineChart
                   title="Drawdown"
@@ -781,7 +842,7 @@ export function BacktestsLive({
                       { key: "direction", header: "Side", render: (trade) => trade.direction },
                       { key: "open", header: "Open", render: (trade) => trade.open_price.toFixed(5) },
                       { key: "close", header: "Close", render: (trade) => trade.close_price.toFixed(5) },
-                      { key: "pnl", header: "Net P&L", render: (trade) => money(trade.net_pnl) },
+                      { key: "pnl", header: "Closed trade net P&L", render: (trade) => money(trade.net_pnl) },
                       { key: "reason", header: "Exit", render: (trade) => trade.exit_reason },
                     ]}
                   />
@@ -794,8 +855,8 @@ export function BacktestsLive({
                     columns={[
                       { key: "instrument", header: "Instrument", render: (item) => item.instrument },
                       { key: "candles", header: "Candles", render: (item) => item.candle_count },
-                      { key: "trades", header: "Trades", render: (item) => item.metrics.total_trades ?? 0 },
-                      { key: "pnl", header: "Net P&L", render: (item) => money(item.metrics.net_pnl) },
+                      { key: "trades", header: "Closed trades", render: (item) => numberValue(item.metrics.closed_trade_count) ?? 0 },
+                      { key: "pnl", header: "Total P&L", render: (item) => money(item.metrics.total_pnl) },
                     ]}
                   />
                 </Panel>
@@ -817,17 +878,21 @@ export function BacktestsLive({
             <Panel title="Assumptions and provenance" tone={result.run.pricing_mode.includes("SYNTHETIC") ? "warning" : "neutral"}>
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <p>Dataset: <code>{result.run.dataset_id}</code></p>
-                <p>Checksum: <code>{result.run.dataset_checksum}</code></p>
+                <p>Dataset checksum: <code>{result.run.dataset_checksum}</code></p>
+                <p>Result checksum: <code>{result.run.result_checksum ?? "Unavailable"}</code></p>
                 <p>Pricing: {result.run.pricing_mode}</p>
                 <p>Boundary: {result.run.evaluation_boundary}</p>
                 <p>Spread: {result.run.spread_model} · {JSON.stringify(result.run.spread_assumption)}</p>
                 <p>Slippage: {result.run.slippage_model} · {JSON.stringify(result.run.slippage_assumption)}</p>
                 <p>Fees: {result.run.fee_model} · {JSON.stringify(result.run.fee_assumption)}</p>
                 <p>End treatment: {result.run.open_position_treatment}</p>
+                <p>Exposure: wall-clock union across open intervals</p>
               </div>
               <p className="text-sm text-[color:var(--text-secondary)]">
                 One-minute OHLC cannot establish tick order or exact sub-minute fills.
-                Same-candle stop/target ambiguity is resolved against the strategy.
+                Same-candle stop/target ambiguity uses the less favorable stop.
+                Spread and slippage are embedded in simulated fill prices; fees are
+                deducted separately.
               </p>
             </Panel>
 

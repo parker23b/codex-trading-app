@@ -10,12 +10,14 @@ from uuid import uuid4
 import pytest
 from alembic import command
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.engine import make_url
 from sqlmodel import Session
 
 from app.db.migrations import alembic_config, ensure_database_schema_current
 from app.db.schema import load_sqlmodel_metadata
 from app.models.runtime_leadership import RuntimeLease
+from app.models.backtest import HistoricalDataset, HistoricalDatasetPartition
 from app.services import runtime_leadership_service
 from app.services.allocation_admission_lock import allocation_admission_lock
 from app.services.runtime_leadership_service import (
@@ -162,7 +164,7 @@ def test_postgres_migrations_apply_to_empty_database():
                 "trade",
                 "tradeintent",
             }.issubset(set(inspector.get_table_names()))
-            assert version == "20260612_01"
+            assert version == "20260615_01"
         finally:
             engine.dispose()
 
@@ -177,6 +179,112 @@ def test_postgres_migrated_schema_matches_current_sqlmodel_metadata():
                 filtered_diffs = filtered_metadata_diffs(connection, metadata)
 
             assert filtered_diffs == []
+        finally:
+            engine.dispose()
+
+
+def test_postgres_ready_partition_reparenting_is_blocked_in_both_directions():
+    with _temporary_postgres_database() as database_url:
+        engine = _upgrade_database(database_url)
+        ready_id = f"ready-{uuid4().hex}"
+        mutable_id = f"mutable-{uuid4().hex}"
+        now = datetime.now(UTC)
+
+        try:
+            with Session(engine) as session:
+                ready = HistoricalDataset(
+                    id=ready_id,
+                    display_name="ready",
+                    provider="CSV",
+                    venue="TEST",
+                    market_type="SPOT_FX",
+                    asset_class="FOREX",
+                    base_timeframe="1m",
+                    status="IMPORTING",
+                )
+                mutable = HistoricalDataset(
+                    id=mutable_id,
+                    display_name="mutable",
+                    provider="CSV",
+                    venue="TEST",
+                    market_type="SPOT_FX",
+                    asset_class="FOREX",
+                    base_timeframe="1m",
+                    status="IMPORTING",
+                    immutable=False,
+                )
+                session.add(ready)
+                session.add(mutable)
+                session.add(
+                    HistoricalDatasetPartition(
+                        dataset_id=ready_id,
+                        instrument="READY_FX",
+                        provider_instrument="READY_FX",
+                        timeframe="1m",
+                        earliest_at=now,
+                        latest_at=now,
+                        candle_count=1,
+                        checksum="a" * 64,
+                        storage_path="ready/partition.jsonl.gz",
+                    )
+                )
+                session.add(
+                    HistoricalDatasetPartition(
+                        dataset_id=mutable_id,
+                        instrument="MUTABLE_FX",
+                        provider_instrument="MUTABLE_FX",
+                        timeframe="1m",
+                        earliest_at=now,
+                        latest_at=now,
+                        candle_count=1,
+                        checksum="b" * 64,
+                        storage_path="mutable/partition.jsonl.gz",
+                    )
+                )
+                session.commit()
+                ready.status = "READY"
+                session.add(ready)
+                session.commit()
+
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        """
+                        UPDATE historical_dataset
+                        SET availability = 'RECOVERY_REQUIRED',
+                            availability_reason = 'rehearsal recovery state',
+                            availability_updated_at = :updated_at
+                        WHERE id = :ready_id
+                        """
+                    ),
+                    {"ready_id": ready_id, "updated_at": now},
+                )
+            with pytest.raises(DBAPIError, match="historical datasets are immutable"):
+                with engine.begin() as connection:
+                    connection.execute(
+                        text(
+                            "UPDATE historical_dataset "
+                            "SET venue = 'MUTATED' WHERE id = :ready_id"
+                        ),
+                        {"ready_id": ready_id},
+                    )
+
+            statements = (
+                (
+                    "UPDATE historical_dataset_partition "
+                    "SET dataset_id = :ready_id WHERE dataset_id = :mutable_id",
+                    {"ready_id": ready_id, "mutable_id": mutable_id},
+                ),
+                (
+                    "UPDATE historical_dataset_partition "
+                    "SET dataset_id = :mutable_id WHERE dataset_id = :ready_id",
+                    {"ready_id": ready_id, "mutable_id": mutable_id},
+                ),
+            )
+            for statement, parameters in statements:
+                with pytest.raises(DBAPIError, match="partitions are immutable"):
+                    with engine.begin() as connection:
+                        connection.execute(text(statement), parameters)
         finally:
             engine.dispose()
 
@@ -287,7 +395,7 @@ def test_postgres_versioned_upgrade_rehearses_baseline_to_head_transition():
                     text("SELECT version_num FROM alembic_version")
                 ).scalar_one()
 
-            assert version == "20260612_01"
+            assert version == "20260615_01"
             assert "observabilitystate" in inspector.get_table_names()
         finally:
             engine.dispose()

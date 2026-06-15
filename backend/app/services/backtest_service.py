@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
+import json
 from math import isfinite
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from sqlmodel import Session, select
@@ -15,7 +18,11 @@ from app.backtesting.candles import (
 from app.backtesting.clock import SimulatedClock
 from app.backtesting.execution import ExecutionAssumptions
 from app.backtesting.metrics import equity_drawdown
-from app.backtesting.replay import BacktestReplayEngine, ReplayConfiguration
+from app.backtesting.replay import (
+    BacktestReplayEngine,
+    ReplayConfiguration,
+    ReplayResult,
+)
 from app.backtesting.storage import JsonlHistoricalDataRepository
 from app.core.config import Settings, get_settings
 from app.models.backtest import (
@@ -31,6 +38,106 @@ from app.models.backtest import (
 )
 from app.services.historical_data_service import HistoricalDataService
 from app.strategies.registry import strategy_registry
+
+
+BACKTEST_RESULT_MANIFEST_VERSION = "BACKTEST_RESULT_MANIFEST_V1"
+BACKTEST_ACCOUNTING_MODEL_VERSION = "EXECUTABLE_FILL_ACCOUNTING_V1"
+CANONICAL_BACKTEST_RESULT_MANIFEST_SCHEMA = {
+    "manifest_version": BACKTEST_RESULT_MANIFEST_VERSION,
+    "accounting_model": BACKTEST_ACCOUNTING_MODEL_VERSION,
+    "run": (
+        "strategy_identifier",
+        "strategy_version",
+        "strategy_configuration",
+        "dataset_id",
+        "dataset_checksum",
+        "shortlist",
+        "timeframe",
+        "requested_start_at",
+        "requested_end_at",
+        "effective_start_at",
+        "effective_end_at",
+        "starting_capital",
+        "position_sizing_mode",
+        "risk_configuration",
+        "spread_model",
+        "spread_assumption",
+        "slippage_model",
+        "slippage_assumption",
+        "fee_model",
+        "fee_assumption",
+        "open_position_treatment",
+        "pricing_mode",
+        "evaluation_boundary",
+        "status",
+        "result_summary",
+    ),
+    "trade": (
+        "deterministic_sequence",
+        "instrument",
+        "direction",
+        "size",
+        "open_price",
+        "close_price",
+        "open_time",
+        "close_time",
+        "gross_pnl",
+        "fees",
+        "spread_cost",
+        "slippage_cost",
+        "net_pnl",
+        "exit_reason",
+        "stop_loss_price",
+        "take_profit_price",
+        "conservative_ambiguity",
+        "pricing_mode",
+        "details",
+    ),
+    "equity": (
+        "timestamp",
+        "cash",
+        "unrealised_pnl",
+        "equity",
+        "drawdown",
+        "drawdown_percent",
+        "open_position_count",
+    ),
+    "metric": ("scope", "metric_key", "value"),
+    "warning": (
+        "deterministic_sequence",
+        "code",
+        "severity",
+        "message",
+        "instrument",
+        "timestamp",
+        "details",
+    ),
+    "instrument": (
+        "instrument",
+        "provider_instrument",
+        "candle_count",
+        "metrics",
+    ),
+}
+BACKTEST_RESULT_PROJECTION_ONLY_FIELDS = {
+    "run": (
+        "id",
+        "name",
+        "notes",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "failure_reason",
+    ),
+    "trade": ("id", "run_id"),
+    "equity": ("id", "run_id"),
+    "metric": ("id", "run_id"),
+    "warning": ("id", "run_id", "created_at"),
+    "instrument": ("id", "run_id", "dataset_partition_id"),
+}
+BACKTEST_RESULT_VERIFICATION_ENVELOPE_FIELDS = {
+    "run": ("result_manifest_version", "result_checksum"),
+}
 
 
 class BacktestService:
@@ -74,7 +181,7 @@ class BacktestService:
         fee_assumption: dict[str, object],
         open_position_treatment: str,
     ) -> BacktestRun:
-        dataset = self.datasets.get_dataset(dataset_id)
+        dataset = self.datasets.verify_dataset_checksum(dataset_id)
         metadata = strategy_registry.get_metadata(strategy_identifier)
         resolved = strategy_registry.resolve_profile(strategy_identifier, profile_name)
         allowed_parameters = {definition.key for definition in metadata.parameters}
@@ -206,7 +313,11 @@ class BacktestService:
             self.session.exec(
                 select(BacktestTrade)
                 .where(BacktestTrade.run_id == run_id)
-                .order_by(BacktestTrade.open_time)
+                .order_by(
+                    BacktestTrade.open_time,
+                    BacktestTrade.instrument,
+                    BacktestTrade.deterministic_sequence,
+                )
             ).all()
         )
 
@@ -224,14 +335,12 @@ class BacktestService:
             self.session.exec(
                 select(BacktestWarning)
                 .where(BacktestWarning.run_id == run_id)
-                .order_by(BacktestWarning.created_at)
+                .order_by(BacktestWarning.deterministic_sequence)
             ).all()
         )
 
     def metrics(self, run_id: str) -> dict[str, object]:
-        rows = self.session.exec(
-            select(BacktestMetric).where(BacktestMetric.run_id == run_id)
-        ).all()
+        rows = self._metric_rows(run_id)
         return {
             "run": {row.metric_key: row.value for row in rows if row.scope == "RUN"},
             "by_instrument": {
@@ -252,6 +361,173 @@ class BacktestService:
                 .order_by(BacktestRunInstrument.instrument)
             ).all()
         )
+
+    def canonical_result_manifest(
+        self,
+        run: BacktestRun,
+        *,
+        trades: list[BacktestTrade] | None = None,
+        equity: list[BacktestEquityPoint] | None = None,
+        metrics: list[BacktestMetric] | None = None,
+        warnings: list[BacktestWarning] | None = None,
+        instruments: list[BacktestRunInstrument] | None = None,
+    ) -> dict[str, object]:
+        trade_rows = trades if trades is not None else self.trades(run.id)
+        equity_rows = equity if equity is not None else self.equity(run.id)
+        metric_rows = metrics if metrics is not None else self._metric_rows(run.id)
+        warning_rows = warnings if warnings is not None else self.warnings(run.id)
+        instrument_rows = (
+            instruments if instruments is not None else self.instruments(run.id)
+        )
+        return {
+            "manifest_version": BACKTEST_RESULT_MANIFEST_VERSION,
+            "accounting_model": BACKTEST_ACCOUNTING_MODEL_VERSION,
+            "run": {
+                "strategy_identifier": run.strategy_identifier,
+                "strategy_version": run.strategy_version,
+                "strategy_configuration": run.strategy_configuration,
+                "dataset_id": run.dataset_id,
+                "dataset_checksum": run.dataset_checksum,
+                "shortlist": sorted(run.shortlist),
+                "timeframe": run.timeframe,
+                "requested_start_at": self._canonical_timestamp(run.requested_start_at),
+                "requested_end_at": self._canonical_timestamp(run.requested_end_at),
+                "effective_start_at": self._canonical_timestamp(run.effective_start_at),
+                "effective_end_at": self._canonical_timestamp(run.effective_end_at),
+                "starting_capital": run.starting_capital,
+                "position_sizing_mode": run.position_sizing_mode,
+                "risk_configuration": run.risk_configuration,
+                "spread_model": run.spread_model,
+                "spread_assumption": run.spread_assumption,
+                "slippage_model": run.slippage_model,
+                "slippage_assumption": run.slippage_assumption,
+                "fee_model": run.fee_model,
+                "fee_assumption": run.fee_assumption,
+                "open_position_treatment": run.open_position_treatment,
+                "pricing_mode": run.pricing_mode,
+                "evaluation_boundary": run.evaluation_boundary,
+                "status": run.status,
+                "result_summary": run.result_summary,
+            },
+            "trades": [
+                {
+                    "deterministic_sequence": row.deterministic_sequence,
+                    "instrument": row.instrument,
+                    "direction": row.direction,
+                    "size": row.size,
+                    "open_price": row.open_price,
+                    "close_price": row.close_price,
+                    "open_time": self._canonical_timestamp(row.open_time),
+                    "close_time": self._canonical_timestamp(row.close_time),
+                    "gross_pnl": row.gross_pnl,
+                    "fees": row.fees,
+                    "spread_cost": row.spread_cost,
+                    "slippage_cost": row.slippage_cost,
+                    "net_pnl": row.net_pnl,
+                    "exit_reason": row.exit_reason,
+                    "stop_loss_price": row.stop_loss_price,
+                    "take_profit_price": row.take_profit_price,
+                    "conservative_ambiguity": row.conservative_ambiguity,
+                    "pricing_mode": row.pricing_mode,
+                    "details": row.details,
+                }
+                for row in sorted(
+                    trade_rows,
+                    key=lambda item: (
+                        item.open_time,
+                        item.instrument,
+                        item.deterministic_sequence,
+                    ),
+                )
+            ],
+            "equity": [
+                {
+                    "timestamp": self._canonical_timestamp(row.timestamp),
+                    "cash": row.cash,
+                    "unrealised_pnl": row.unrealized_pnl,
+                    "equity": row.equity,
+                    "drawdown": row.drawdown,
+                    "drawdown_percent": row.drawdown_percent,
+                    "open_position_count": row.open_position_count,
+                }
+                for row in sorted(equity_rows, key=lambda item: item.timestamp)
+            ],
+            "metrics": [
+                {
+                    "scope": row.scope,
+                    "metric_key": row.metric_key,
+                    "value": row.value,
+                }
+                for row in sorted(
+                    metric_rows,
+                    key=lambda item: (item.scope, item.metric_key),
+                )
+            ],
+            "warnings": [
+                {
+                    "deterministic_sequence": row.deterministic_sequence,
+                    "code": row.code,
+                    "severity": row.severity,
+                    "message": row.message,
+                    "instrument": row.instrument,
+                    "timestamp": self._canonical_timestamp(row.timestamp),
+                    "details": row.details,
+                }
+                for row in sorted(
+                    warning_rows,
+                    key=lambda item: item.deterministic_sequence,
+                )
+            ],
+            "instruments": [
+                {
+                    "instrument": row.instrument,
+                    "provider_instrument": row.provider_instrument,
+                    "candle_count": row.candle_count,
+                    "metrics": row.metrics,
+                }
+                for row in sorted(
+                    instrument_rows,
+                    key=lambda item: item.instrument,
+                )
+            ],
+        }
+
+    def result_checksum(
+        self,
+        run: BacktestRun,
+        *,
+        trades: list[BacktestTrade] | None = None,
+        equity: list[BacktestEquityPoint] | None = None,
+        metrics: list[BacktestMetric] | None = None,
+        warnings: list[BacktestWarning] | None = None,
+        instruments: list[BacktestRunInstrument] | None = None,
+    ) -> str:
+        payload = self.canonical_result_manifest(
+            run,
+            trades=trades,
+            equity=equity,
+            metrics=metrics,
+            warnings=warnings,
+            instruments=instruments,
+        )
+        encoded = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        return sha256(encoded).hexdigest()
+
+    def verify_backtest_result_checksum(self, run_id: str) -> BacktestRun:
+        run = self.get_run(run_id)
+        if run.status != BacktestRunStatus.COMPLETED.value:
+            raise ValueError("Only completed backtest results can be verified.")
+        if run.result_manifest_version != BACKTEST_RESULT_MANIFEST_VERSION:
+            raise ValueError("Backtest result manifest version is unsupported.")
+        actual = self.result_checksum(run)
+        if not run.result_checksum or actual != run.result_checksum:
+            raise ValueError(f"Backtest result checksum mismatch for '{run.id}'.")
+        return run
 
     def _validate_and_load(
         self,
@@ -346,7 +622,7 @@ class BacktestService:
     def _persist_result(
         self,
         run: BacktestRun,
-        result,
+        result: ReplayResult,
         partitions: dict[str, HistoricalDatasetPartition],
         candles_by_instrument: dict[str, list[HistoricalCandle]],
     ) -> None:
@@ -359,53 +635,79 @@ class BacktestService:
             if len(result.pricing_modes) == 1
             else "MIXED:" + ",".join(result.pricing_modes)
         )
-        run.result_summary = dict(result.metrics)
+        run.result_manifest_version = BACKTEST_RESULT_MANIFEST_VERSION
+        run.result_summary = {
+            **result.metrics,
+            "accounting_model": BACKTEST_ACCOUNTING_MODEL_VERSION,
+            "open_positions": [
+                {
+                    "instrument": item.position.instrument,
+                    "direction": item.position.direction.value,
+                    "size": item.position.size,
+                    "open_time": self._canonical_timestamp(item.position.open_time),
+                    "open_price": item.position.open_price,
+                    "mark_time": self._canonical_timestamp(item.mark_time),
+                    "mark_price": item.mark_price,
+                    "unrealised_pnl": item.unrealized_pnl,
+                    "open_position_value": item.open_position_value,
+                    "entry_fee": item.position.entry_fee,
+                    "entry_spread_cost": item.position.entry_spread_cost,
+                    "entry_slippage_cost": item.position.entry_slippage_cost,
+                    "stop_loss_price": item.position.stop_loss_price,
+                    "take_profit_price": item.position.take_profit_price,
+                    "pricing_mode": item.pricing_mode,
+                    "details": item.position.metadata,
+                }
+                for item in result.open_positions
+            ],
+        }
         self.session.add(run)
 
-        for trade in result.trades:
-            self.session.add(
-                BacktestTrade(
-                    run_id=run.id,
-                    instrument=trade.position.instrument,
-                    direction=trade.position.direction.value,
-                    size=trade.position.size,
-                    open_price=trade.position.open_price,
-                    close_price=trade.close_price,
-                    open_time=trade.position.open_time,
-                    close_time=trade.close_time,
-                    gross_pnl=trade.gross_pnl,
-                    fees=trade.fees,
-                    spread_cost=trade.spread_cost,
-                    slippage_cost=trade.slippage_cost,
-                    net_pnl=trade.net_pnl,
-                    exit_reason=trade.exit_reason,
-                    stop_loss_price=trade.position.stop_loss_price,
-                    take_profit_price=trade.position.take_profit_price,
-                    conservative_ambiguity=trade.conservative_ambiguity,
-                    pricing_mode=trade.pricing_mode,
-                    details=trade.position.metadata,
-                )
+        trade_rows = [
+            BacktestTrade(
+                run_id=run.id,
+                deterministic_sequence=sequence,
+                instrument=trade.position.instrument,
+                direction=trade.position.direction.value,
+                size=trade.position.size,
+                open_price=trade.position.open_price,
+                close_price=trade.close_price,
+                open_time=trade.position.open_time,
+                close_time=trade.close_time,
+                gross_pnl=trade.gross_pnl,
+                fees=trade.fees,
+                spread_cost=trade.spread_cost,
+                slippage_cost=trade.slippage_cost,
+                net_pnl=trade.net_pnl,
+                exit_reason=trade.exit_reason,
+                stop_loss_price=trade.position.stop_loss_price,
+                take_profit_price=trade.position.take_profit_price,
+                conservative_ambiguity=trade.conservative_ambiguity,
+                pricing_mode=trade.pricing_mode,
+                details=trade.position.metadata,
             )
-        for sample, drawdown, drawdown_percent in equity_drawdown(result.equity):
-            self.session.add(
-                BacktestEquityPoint(
-                    run_id=run.id,
-                    timestamp=sample.timestamp,
-                    cash=sample.cash,
-                    unrealized_pnl=sample.unrealized_pnl,
-                    equity=sample.equity,
-                    drawdown=drawdown,
-                    drawdown_percent=drawdown_percent,
-                    open_position_count=sample.open_position_count,
-                )
+            for sequence, trade in enumerate(result.trades, start=1)
+        ]
+        equity_rows = [
+            BacktestEquityPoint(
+                run_id=run.id,
+                timestamp=sample.timestamp,
+                cash=sample.cash,
+                unrealized_pnl=sample.unrealized_pnl,
+                equity=sample.equity,
+                drawdown=drawdown,
+                drawdown_percent=drawdown_percent,
+                open_position_count=sample.open_position_count,
             )
-        for key, value in result.metrics.items():
-            self.session.add(
-                BacktestMetric(run_id=run.id, scope="RUN", metric_key=key, value=value)
-            )
-        for instrument, metrics in result.metrics_by_instrument.items():
-            for key, value in metrics.items():
-                self.session.add(
+            for sample, drawdown, drawdown_percent in equity_drawdown(result.equity)
+        ]
+        metric_rows = [
+            BacktestMetric(run_id=run.id, scope="RUN", metric_key=key, value=value)
+            for key, value in sorted(result.metrics.items())
+        ]
+        for instrument, metrics in sorted(result.metrics_by_instrument.items()):
+            for key, value in sorted(metrics.items()):
+                metric_rows.append(
                     BacktestMetric(
                         run_id=run.id,
                         scope=f"INSTRUMENT:{instrument}",
@@ -413,58 +715,110 @@ class BacktestService:
                         value=value,
                     )
                 )
-        for warning in result.warnings:
-            self.session.add(
-                BacktestWarning(
-                    run_id=run.id,
-                    code=warning.code,
-                    message=warning.message,
-                    instrument=warning.instrument,
-                    timestamp=warning.timestamp,
-                    details=warning.details,
-                )
-            )
+
+        warning_values: list[dict[str, Any]] = [
+            {
+                "code": warning.code,
+                "message": warning.message,
+                "instrument": warning.instrument,
+                "timestamp": warning.timestamp,
+                "details": warning.details,
+            }
+            for warning in result.warnings
+        ]
         for partition in partitions.values():
             for gap in partition.detected_gaps:
-                self.session.add(
-                    BacktestWarning(
-                        run_id=run.id,
-                        code="DATASET_GAP",
-                        message=(
+                warning_values.append(
+                    {
+                        "code": "DATASET_GAP",
+                        "message": (
                             "The selected historical partition contains missing "
                             "candles within its stored coverage."
                         ),
-                        instrument=partition.instrument,
-                        details=dict(gap),
-                    )
+                        "instrument": partition.instrument,
+                        "timestamp": None,
+                        "details": dict(gap),
+                    }
                 )
         if any(
             "bid" not in partition.price_components
             or "ask" not in partition.price_components
             for partition in partitions.values()
         ):
-            self.session.add(
-                BacktestWarning(
-                    run_id=run.id,
-                    code="SYNTHETIC_SPREAD",
-                    message=(
+            warning_values.append(
+                {
+                    "code": "SYNTHETIC_SPREAD",
+                    "message": (
                         "Execution used an explicit synthetic spread because the "
                         "dataset does not contain complete bid/ask candles."
                     ),
-                )
+                    "instrument": None,
+                    "timestamp": None,
+                    "details": {},
+                }
             )
-        for instrument, partition in sorted(partitions.items()):
-            self.session.add(
-                BacktestRunInstrument(
-                    run_id=run.id,
-                    instrument=instrument,
-                    provider_instrument=partition.provider_instrument,
-                    dataset_partition_id=partition.id or 0,
-                    candle_count=len(candles_by_instrument[instrument]),
-                    metrics=result.metrics_by_instrument.get(instrument, {}),
-                )
+        warning_values.sort(
+            key=lambda item: (
+                self._canonical_timestamp(item["timestamp"]) or "",
+                str(item["instrument"] or ""),
+                str(item["code"]),
+                str(item["message"]),
+                json.dumps(
+                    item["details"],
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ),
             )
+        )
+        warning_rows = [
+            BacktestWarning(
+                run_id=run.id,
+                deterministic_sequence=sequence,
+                code=str(item["code"]),
+                message=str(item["message"]),
+                instrument=(
+                    str(item["instrument"]) if item["instrument"] is not None else None
+                ),
+                timestamp=item["timestamp"],
+                details=dict(item["details"]),
+            )
+            for sequence, item in enumerate(warning_values, start=1)
+        ]
+        instrument_rows = [
+            BacktestRunInstrument(
+                run_id=run.id,
+                instrument=instrument,
+                provider_instrument=partition.provider_instrument,
+                dataset_partition_id=partition.id or 0,
+                candle_count=len(candles_by_instrument[instrument]),
+                metrics=result.metrics_by_instrument.get(instrument, {}),
+            )
+            for instrument, partition in sorted(partitions.items())
+        ]
+        self.session.add_all(
+            [
+                *trade_rows,
+                *equity_rows,
+                *metric_rows,
+                *warning_rows,
+                *instrument_rows,
+            ]
+        )
+        self.session.flush()
+        self.session.expire_all()
+        run.result_checksum = self.result_checksum(run)
+        self.session.add(run)
         self.session.commit()
+
+    def _metric_rows(self, run_id: str) -> list[BacktestMetric]:
+        return list(
+            self.session.exec(
+                select(BacktestMetric)
+                .where(BacktestMetric.run_id == run_id)
+                .order_by(BacktestMetric.scope, BacktestMetric.metric_key)
+            ).all()
+        )
 
     @staticmethod
     def _validate_configuration(
@@ -567,3 +921,9 @@ class BacktestService:
         if value.tzinfo is None:
             return value.replace(tzinfo=UTC)
         return value.astimezone(UTC)
+
+    @staticmethod
+    def _canonical_timestamp(value: datetime | None) -> str | None:
+        if value is None:
+            return None
+        return BacktestService._stored_utc(value).isoformat().replace("+00:00", "Z")

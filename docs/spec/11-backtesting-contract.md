@@ -1,13 +1,13 @@
 # Backtesting contract
 
-This specification defines the first production-quality historical simulation phase. It covers manually triggered, exactly-one-strategy runs across one or more shortlisted instruments. It does not define multi-strategy portfolio simulation.
+This specification defines the first historical simulation phase. It covers manually triggered, exactly-one-strategy runs across one or more shortlisted instruments. It does not claim production readiness and does not define multi-strategy portfolio simulation.
 
 ## Architecture
 
 ```text
 External provider or CSV
   -> explicit ingestion action
-  -> immutable local dataset snapshot
+  -> append-only dataset metadata and checksum-verified local files
   -> UTC-normalized instrument partitions
   -> chronological candle replay
   -> production Strategy implementation
@@ -27,6 +27,7 @@ The physical MVP partition format is deterministic gzip JSONL. `HistoricalDataRe
 | BT-REPLAY-001 | Replay MUST NOT create or mutate live `TradeIntent`, `Execution`, `Position`, `Trade`, runtime, reconciliation, allocation-alert, telemetry, deployment, or broker state. | P0 | Persistence isolation tests and separate backtest tables. |
 | BT-REPLAY-002 | Replay MUST process events in timestamp order with stable instrument ordering, inject event time, evaluate at candle close, execute new decisions at the next candle open, and prevent future candle access. Identical inputs MUST produce identical results. | P0 | Determinism, same-timestamp ordering, next-open, simulated-clock, and no-look-ahead tests. |
 | BT-EXEC-001 | Simulation MUST persist its pricing mode and spread, slippage, fee, sizing, and end-of-run assumptions. Historical bid/ask executes buys at ask and sells at bid. Mid/trade-only data requires explicit synthetic spread. Same-candle stop/target ambiguity uses the less favorable valid result. | P1 | Execution tests, warnings, run configuration persistence. |
+| BT-RESULT-001 | Completed result accounting MUST separate realised, unrealised, fee, fill-cost, cash, equity, open-position, and closed-trade values; ordering and the canonical result checksum MUST be deterministic. | P1 | Accounting identity, ordering, public checksum mutation, independent-database, API, and browser-label tests. |
 | BT-API-001 | Dataset and backtest routes MUST use explicit typed contracts. Run creation is a bounded simulation mutation, not a broker mutation. Result reads MUST remain passive. | P1 | Route inventory and API contract tests. |
 | BT-UI-001 | The operator UI MUST show dataset provenance/checksum, pricing mode, assumptions, warnings, failures, venue specificity, and candle-resolution limitations without implying broker-grade or tick-level precision. | P1 | Frontend contract/render tests and browser verification. |
 | BT-TEST-001 | Critical replay behavior MUST have focused behavioral tests, including determinism, no-look-ahead, provider isolation, live-table isolation, execution costs, conservative ambiguity, metrics, ingestion validation, and typed API results. | P1 | Named backend and frontend test suites. |
@@ -74,11 +75,124 @@ Intentionally excluded:
   paid entry fees even when the position remains open.
 - One-minute OHLC does not establish tick ordering. Optional OANDA five-second data reduces but does not eliminate quote-order ambiguity.
 
+## Result accounting and reproducibility
+
+The simulation uses a P&L cash ledger rather than deducting full position
+notional. Spread and slippage are embedded in executable entry/exit fill
+prices. Their reported cost fields are attribution values and are not
+subtracted a second time. Fees are separate cash charges.
+
+```text
+realised_pnl = sum(closed fill-to-fill gross P&L)
+unrealised_pnl = sum(open entry-fill-to-final-executable-mark P&L)
+fees_paid = closed entry/exit fees + open entry fees
+net_closed_trade_pnl = realised_pnl - closed-trade fees
+total_pnl = realised_pnl + unrealised_pnl - fees_paid
+ending_cash = starting_capital + realised_pnl - fees_paid
+ending_equity = ending_cash + unrealised_pnl
+              = starting_capital + total_pnl
+return_pct = total_pnl / starting_capital * 100
+```
+
+`open_position_value` is gross marked notional and is informational; it is not
+deducted from cash. Headline return includes unrealised P&L only when
+`MARK_TO_MARKET` leaves positions open. `CLOSE_AT_END` closes at the final
+available candle close and reports zero open positions and unrealised P&L.
+Closed-trade return and win rate exclude open positions.
+Open marks use the directionally executable bid/ask or synthetic-spread side,
+but do not reserve a hypothetical future exit fee or exit slippage; only costs
+already incurred are included.
+
+Exposure is wall-clock exposure: the union of all position-open intervals
+divided by the interval from the first replay candle open to the final mark.
+Overlapping instruments do not double-count time. Open-at-end positions run
+through the final mark.
+
+Percent-risk sizing solves against the expected executable entry fill,
+configured entry and stop-exit slippage, and modeled entry/exit fees. A
+strategy stop is used when supplied; otherwise the fallback stop percentage is
+measured from the executable entry fill. The simulator permits continuous
+position sizes and does not model broker lot steps, minimum sizes, margin, or
+financing.
+
+Completed runs persist `BACKTEST_RESULT_MANIFEST_V1`. Its canonical projection
+covers strategy and dataset identity, configuration and assumptions, final
+status, accounting summary and open-position marks, deterministic trades,
+equity, metrics, warnings, and per-instrument results. Trades order by
+`(open_time, instrument, deterministic_sequence)`; equity orders by timestamp;
+warnings use deterministic sequence; instruments and metrics use lexical keys.
+
+The checksum excludes run and row primary keys, run name/notes, wall-clock
+creation/start/completion timestamps, warning creation timestamps, and
+`dataset_partition_id`. Those are database or display projections, not
+simulation output. `result_manifest_version` and `result_checksum` are the
+verification envelope. The public verifier reconstructs the persisted
+projection and rejects authoritative-field mutation. Equal inputs copied into
+independent databases produce the same checksum even when run IDs and
+wall-clock timestamps differ.
+
 Derived candles require complete, UTC epoch-aligned source buckets. Partial
 buckets are rejected rather than silently incorporating candles outside the
 requested range. Dataset identity covers provider provenance, instrument
 mappings, coverage metadata, partition checksums, detected gaps, and warnings;
 all of it is re-verified before replay.
+
+## Dataset publication and completeness
+
+- Provider requests are aligned outward to UTC timeframe boundaries. The
+  original requested start/end and the aligned actual coverage remain distinct
+  manifest fields.
+- Every requested instrument must reach both aligned boundaries, contain the
+  requested timeframe and instrument identity, and carry matching
+  provider/venue/instrument provenance. Empty, truncated, internally gapped, or
+  still-open responses are not published as `READY`.
+- Partitions are written under a staging path first. Partition rows and final
+  dataset metadata are committed only after every instrument validates and all
+  partition hashes and the canonical manifest checksum are available.
+- Filesystem publication and database commit cannot be one physical
+  transaction. A commit exception is reconciled through a fresh database
+  session before any cleanup: a durable `READY` snapshot is accepted only when
+  every partition file and the manifest checksum verify; a confirmed non-ready
+  import is cleaned and recorded as `PARTIAL` or `FAILED`. If the database
+  outcome cannot be read or verified, artifacts are retained and an explicit
+  recovery error is raised rather than risking deletion of files referenced by
+  durable metadata. This is compensating publication, not a claim of a
+  distributed transaction.
+- `READY` dataset and partition updates/deletes are blocked by application
+  service policy and database triggers. Partition updates are rejected when
+  either the old or new parent dataset is `READY`, preventing reparenting into
+  or out of a completed snapshot. Direct file tampering is detected by
+  partition and manifest verification rather than prevented by filesystem
+  permissions.
+- Manifest V3 defines dataset and partition identity in code. It covers dataset
+  identity, provenance, requested and actual coverage, counts, UTC rule,
+  components, completeness, gaps, warnings, import metadata, storage format,
+  and immutable status. It also covers partition row ID, parent dataset ID,
+  instrument mappings, timeframe, coverage, counts, components, partition
+  checksum, storage path, gaps, warnings, and source metadata. The dataset
+  `checksum` is intentionally outside its own hash as the verification
+  envelope; the API's nested `partitions` property is projection-only because
+  the canonical partition array is already a top-level manifest section.
+- Dataset operational availability is separate from immutable Manifest V3
+  identity. `availability`, `availability_reason`, and
+  `availability_updated_at` are mutable operational fields intentionally
+  excluded from the checksum. Selection and replay require `status=READY`,
+  `availability=AVAILABLE`, existing partition files, and successful public
+  checksum verification.
+- If ambiguous publication leaves durable `READY` metadata whose files or
+  checksum do not verify, reconciliation retains the remaining artifacts,
+  marks the snapshot `RECOVERY_REQUIRED`, records the reason, and raises a
+  recovery error. The snapshot remains visible for diagnosis but cannot be
+  selected or replayed. Retry creates a new snapshot ID.
+- SQLite restores UTC awareness in the ORM/API layer because SQLite does not
+  preserve timezone offsets as a native datetime type. PostgreSQL uses
+  `TIMESTAMP WITH TIME ZONE`; the migration interprets legacy backtesting
+  timestamps as UTC. PostgreSQL trigger behavior remains dependent on the
+  environment-gated migration rehearsal.
+- Backend timestamps require `Z` or an explicit offset. Browser
+  `datetime-local` values are separately interpreted in the browser timezone
+  and converted to explicit UTC instants before API submission; backend values
+  are never repaired by appending `Z`.
 
 ## Provider posture
 
@@ -107,8 +221,14 @@ existing-credentials validation path, not a dependency for general app use.
 - Synchronous runs are bounded by `BACKTEST_MAX_CANDLES_PER_RUN`.
 - JSONL gzip is used instead of Parquet in this phase to avoid adding a large columnar runtime dependency.
 - IG ingestion currently uses the existing recent-history adapter and is intentionally limited.
+- Completeness validation has no provider-specific exchange calendar. A range
+  containing absent timeframe boundaries, including scheduled closures, is
+  conservatively retained as partial rather than called complete.
 - Binance ingestion currently uses deterministic paginated REST. Automatic
   daily/monthly archive ingestion is not yet implemented, so very large
   backfills remain a documented next slice.
 - The MVP does not model partial fills, order books, latency distributions, tick paths, margin, financing, or corporate actions.
+- Result checksums detect mutation and prove equality of the covered
+  projection; they are not signatures and do not establish source-build
+  provenance.
 - Future work may add Parquet partitions, quote/tick replay, walk-forward tests, parameter sweeps, benchmark comparisons, and whole-system multi-strategy simulation without changing dataset identity or strategy reuse rules.

@@ -304,7 +304,11 @@ export type HistoricalDataset = {
   market_type: string;
   asset_class: string;
   base_timeframe: string;
-  status: "IMPORTING" | "READY" | "FAILED" | string;
+  status: "IMPORTING" | "PARTIAL" | "READY" | "FAILED" | string;
+  availability: "AVAILABLE" | "RECOVERY_REQUIRED" | "UNAVAILABLE" | string;
+  availability_reason?: string | null;
+  availability_updated_at?: string | null;
+  selectable: boolean;
   earliest_at?: string | null;
   latest_at?: string | null;
   candle_count: number;
@@ -356,12 +360,15 @@ export type BacktestRun = {
   started_at?: string | null;
   completed_at?: string | null;
   failure_reason?: string | null;
+  result_manifest_version?: string | null;
+  result_checksum?: string | null;
   result_summary: Record<string, unknown>;
 };
 
 export type BacktestTrade = {
   id: number;
   run_id: string;
+  deterministic_sequence: number;
   instrument: string;
   direction: string;
   size: number;
@@ -395,6 +402,7 @@ export type BacktestEquityPoint = {
 export type BacktestWarning = {
   id: number;
   run_id: string;
+  deterministic_sequence: number;
   code: string;
   severity: string;
   message: string;
@@ -405,8 +413,8 @@ export type BacktestWarning = {
 };
 
 export type BacktestMetrics = {
-  run: Record<string, number | null>;
-  by_instrument: Record<string, Record<string, number | null>>;
+  run: Record<string, unknown>;
+  by_instrument: Record<string, Record<string, unknown>>;
 };
 
 export type BacktestInstrument = {
@@ -414,7 +422,7 @@ export type BacktestInstrument = {
   provider_instrument: string;
   dataset_partition_id: number;
   candle_count: number;
-  metrics: Record<string, number | null>;
+  metrics: Record<string, unknown>;
 };
 
 export type StrategyMutationStatus = {

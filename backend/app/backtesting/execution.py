@@ -52,6 +52,16 @@ class SimulatedTradeResult:
     pricing_mode: str
 
 
+@dataclass(frozen=True, slots=True)
+class SimulatedOpenPositionResult:
+    position: SimulatedPosition
+    mark_time: datetime
+    mark_price: float
+    unrealized_pnl: float
+    open_position_value: float
+    pricing_mode: str
+
+
 class SimulatedExecutionAdapter:
     def __init__(self, assumptions: ExecutionAssumptions) -> None:
         self._validate_assumptions(assumptions)
@@ -69,16 +79,11 @@ class SimulatedExecutionAdapter:
         take_profit_price: float | None,
         metadata: dict[str, Any] | None = None,
     ) -> SimulatedPosition:
-        reference = self._reference_price(candle, at="open")
-        executable, spread_cost = self._execution_price(
+        reference, fill, fee, spread_cost, slippage_cost = self.entry_projection(
             candle=candle,
             direction=direction,
-            at="open",
+            size=size,
         )
-        fill, slippage_cost = self._apply_slippage(
-            executable, direction=direction, size=size
-        )
-        fee = self._fee(fill, size)
         return SimulatedPosition(
             id=next(self._position_ids),
             instrument=instrument,
@@ -88,12 +93,69 @@ class SimulatedExecutionAdapter:
             open_price=fill,
             entry_reference_price=reference,
             entry_fee=fee,
-            entry_spread_cost=spread_cost * size,
+            entry_spread_cost=spread_cost,
             entry_slippage_cost=slippage_cost,
             stop_loss_price=stop_loss_price,
             take_profit_price=take_profit_price,
             metadata=dict(metadata or {}),
         )
+
+    def entry_projection(
+        self,
+        *,
+        candle: HistoricalCandle,
+        direction: OrderDirection,
+        size: float,
+    ) -> tuple[float, float, float, float, float]:
+        reference = self._reference_price(candle, at="open")
+        executable, spread_per_unit = self._execution_price(
+            candle=candle,
+            direction=direction,
+            at="open",
+        )
+        fill, slippage_cost = self._apply_slippage(
+            executable, direction=direction, size=size
+        )
+        return (
+            reference,
+            fill,
+            self._fee(fill, size),
+            spread_per_unit * size,
+            slippage_cost,
+        )
+
+    def projected_stop_loss(
+        self,
+        *,
+        candle: HistoricalCandle,
+        direction: OrderDirection,
+        stop_loss_price: float,
+        size: float,
+    ) -> float:
+        if size <= 0:
+            return 0.0
+        _, entry_fill, entry_fee, _, _ = self.entry_projection(
+            candle=candle,
+            direction=direction,
+            size=size,
+        )
+        close_direction = (
+            OrderDirection.SELL
+            if direction is OrderDirection.BUY
+            else OrderDirection.BUY
+        )
+        stop_fill, _ = self._apply_slippage(
+            stop_loss_price,
+            direction=close_direction,
+            size=size,
+        )
+        exit_fee = self._fee(stop_fill, size)
+        price_loss = (
+            (entry_fill - stop_fill) * size
+            if direction is OrderDirection.BUY
+            else (stop_fill - entry_fill) * size
+        )
+        return max(price_loss, 0.0) + entry_fee + exit_fee
 
     def close_position(
         self,
@@ -204,6 +266,28 @@ class SimulatedExecutionAdapter:
     ) -> float:
         bar = self._exit_bar(candle, position.direction)
         return getattr(bar, at)
+
+    def mark_open_position(
+        self,
+        *,
+        position: SimulatedPosition,
+        candle: HistoricalCandle,
+        mark_time: datetime,
+    ) -> SimulatedOpenPositionResult:
+        mark = self.mark_price(position=position, candle=candle)
+        unrealized = (
+            (mark - position.open_price) * position.size
+            if position.direction is OrderDirection.BUY
+            else (position.open_price - mark) * position.size
+        )
+        return SimulatedOpenPositionResult(
+            position=position,
+            mark_time=mark_time,
+            mark_price=mark,
+            unrealized_pnl=unrealized,
+            open_position_value=abs(mark * position.size),
+            pricing_mode=self.pricing_mode(candle),
+        )
 
     def pricing_mode(self, candle: HistoricalCandle) -> str:
         if candle.bid is not None and candle.ask is not None:

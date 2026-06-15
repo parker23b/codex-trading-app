@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, Literal
+from datetime import UTC, datetime
+from typing import Annotated, Any, Literal
 
 from pydantic import (
+    AfterValidator,
     AwareDatetime,
     BaseModel,
     ConfigDict,
@@ -11,6 +12,15 @@ from pydantic import (
     FiniteFloat,
     model_validator,
 )
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        raise ValueError("Backend response timestamp must be timezone-aware.")
+    return value.astimezone(UTC)
+
+
+UtcDateTime = Annotated[datetime, AfterValidator(_as_utc)]
 
 
 class HistoricalProviderCapabilitiesResponse(BaseModel):
@@ -75,8 +85,8 @@ class HistoricalDatasetPartitionResponse(BaseModel):
     instrument: str
     provider_instrument: str
     timeframe: str
-    earliest_at: datetime
-    latest_at: datetime
+    earliest_at: UtcDateTime
+    latest_at: UtcDateTime
     candle_count: int
     price_components: list[str]
     volume_available: bool
@@ -98,13 +108,17 @@ class HistoricalDatasetResponse(BaseModel):
     asset_class: str
     base_timeframe: str
     status: str
-    earliest_at: datetime | None
-    latest_at: datetime | None
+    availability: str
+    availability_reason: str | None
+    availability_updated_at: UtcDateTime | None
+    selectable: bool
+    earliest_at: UtcDateTime | None
+    latest_at: UtcDateTime | None
     candle_count: int
     timezone_rule: str
     price_components: list[str]
     volume_available: bool
-    imported_at: datetime
+    imported_at: UtcDateTime
     checksum: str | None
     completeness_status: str
     detected_gaps: list[dict[str, Any]]
@@ -194,10 +208,10 @@ class BacktestRunResponse(BaseModel):
     dataset_checksum: str
     shortlist: list[str]
     timeframe: str
-    requested_start_at: datetime
-    requested_end_at: datetime
-    effective_start_at: datetime | None
-    effective_end_at: datetime | None
+    requested_start_at: UtcDateTime
+    requested_end_at: UtcDateTime
+    effective_start_at: UtcDateTime | None
+    effective_end_at: UtcDateTime | None
     starting_capital: float
     position_sizing_mode: str
     risk_configuration: dict[str, Any]
@@ -211,10 +225,12 @@ class BacktestRunResponse(BaseModel):
     pricing_mode: str
     evaluation_boundary: str
     status: str
-    created_at: datetime
-    started_at: datetime | None
-    completed_at: datetime | None
+    created_at: UtcDateTime
+    started_at: UtcDateTime | None
+    completed_at: UtcDateTime | None
     failure_reason: str | None
+    result_manifest_version: str | None
+    result_checksum: str | None
     result_summary: dict[str, Any]
 
 
@@ -223,13 +239,14 @@ class BacktestTradeResponse(BaseModel):
 
     id: int
     run_id: str
+    deterministic_sequence: int
     instrument: str
     direction: str
     size: float
     open_price: float
     close_price: float
-    open_time: datetime
-    close_time: datetime
+    open_time: UtcDateTime
+    close_time: UtcDateTime
     gross_pnl: float
     fees: float
     spread_cost: float
@@ -246,7 +263,7 @@ class BacktestTradeResponse(BaseModel):
 class BacktestEquityPointResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", from_attributes=True)
 
-    timestamp: datetime
+    timestamp: UtcDateTime
     cash: float
     unrealized_pnl: float
     equity: float
@@ -260,13 +277,14 @@ class BacktestWarningResponse(BaseModel):
 
     id: int
     run_id: str
+    deterministic_sequence: int
     code: str
     severity: str
     message: str
     instrument: str | None
-    timestamp: datetime | None
+    timestamp: UtcDateTime | None
     details: dict[str, Any]
-    created_at: datetime
+    created_at: UtcDateTime
 
 
 class BacktestMetricsResponse(BaseModel):

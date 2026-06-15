@@ -9,11 +9,13 @@ from app.backtesting.clock import SimulatedClock
 from app.backtesting.execution import (
     ExecutionAssumptions,
     SimulatedExecutionAdapter,
+    SimulatedOpenPositionResult,
     SimulatedPosition,
     SimulatedTradeResult,
 )
 from app.backtesting.metrics import (
     EquitySample,
+    calculate_grouped_metrics,
     calculate_metrics,
 )
 from app.core.broker import OrderDirection
@@ -50,7 +52,7 @@ class ReplayResult:
     metrics: dict[str, object]
     metrics_by_instrument: dict[str, dict[str, object]]
     warnings: list[ReplayWarning]
-    open_positions: list[SimulatedPosition]
+    open_positions: list[SimulatedOpenPositionResult]
     effective_start_at: datetime
     effective_end_at: datetime
     pricing_modes: tuple[str, ...]
@@ -146,7 +148,7 @@ class BacktestReplayEngine:
                 strategy = self.strategies[instrument]
                 if instrument in pending_entries and instrument not in positions:
                     pending = pending_entries.pop(instrument)
-                    size = self._position_size(
+                    size, sizing_metadata = self._position_size(
                         decision=pending.decision,
                         candle=candle,
                         equity=self._current_equity(
@@ -197,7 +199,10 @@ class BacktestReplayEngine:
                             take_profit_price=_optional_float(
                                 hints.get("take_profit_price")
                             ),
-                            metadata={"signal_at": pending.created_at.isoformat()},
+                            metadata={
+                                "signal_at": pending.created_at.isoformat(),
+                                **sizing_metadata,
+                            },
                         )
                         positions[instrument] = position
                         cash -= position.entry_fee
@@ -308,49 +313,70 @@ class BacktestReplayEngine:
                 )
             )
 
-        ending_equity = equity[-1].equity
+        open_position_results = [
+            self.execution.mark_open_position(
+                position=positions[instrument],
+                candle=latest_candles[instrument],
+                mark_time=final_timestamp,
+            )
+            for instrument in sorted(positions)
+        ]
         metrics = calculate_metrics(
             starting_capital=self.configuration.starting_capital,
-            ending_capital=ending_equity,
+            ending_cash=cash,
             trades=trades,
             equity=equity,
-            open_positions_at_end=len(positions),
+            open_positions=open_position_results,
+            period_start=timestamps[0],
+            period_end=final_timestamp,
+            open_position_treatment=self.configuration.open_position_treatment,
         )
-        trades_by_instrument = {
-            instrument: [
-                trade for trade in trades if trade.position.instrument == instrument
-            ]
-            for instrument in sorted(self.strategies)
-        }
-        grouped_metrics: dict[str, dict[str, object]] = {}
+        grouped_metrics = calculate_grouped_metrics(
+            starting_capital=self.configuration.starting_capital,
+            trades=trades,
+            open_positions=open_position_results,
+            period_start=timestamps[0],
+            period_end=final_timestamp,
+            open_position_treatment=self.configuration.open_position_treatment,
+        )
         for instrument in sorted(self.strategies):
-            instrument_trades = trades_by_instrument[instrument]
-            pnl = sum(trade.net_pnl for trade in instrument_trades)
-            position = positions.get(instrument)
-            if position is not None:
-                mark = self.execution.mark_price(
-                    position=position,
-                    candle=latest_candles[instrument],
-                )
-                pnl += (
-                    (mark - position.open_price) * position.size
-                    if position.direction is OrderDirection.BUY
-                    else (position.open_price - mark) * position.size
-                ) - position.entry_fee
-            grouped_metrics[instrument] = calculate_metrics(
-                starting_capital=self.configuration.starting_capital,
-                ending_capital=self.configuration.starting_capital + pnl,
-                trades=instrument_trades,
-                equity=[],
-                open_positions_at_end=int(position is not None),
+            grouped_metrics.setdefault(
+                instrument,
+                calculate_metrics(
+                    starting_capital=self.configuration.starting_capital,
+                    ending_cash=self.configuration.starting_capital,
+                    trades=[],
+                    equity=[],
+                    open_positions=[],
+                    period_start=timestamps[0],
+                    period_end=final_timestamp,
+                    open_position_treatment=self.configuration.open_position_treatment,
+                ),
             )
         return ReplayResult(
-            trades=trades,
-            equity=equity,
+            trades=sorted(
+                trades,
+                key=lambda trade: (
+                    trade.position.open_time,
+                    trade.position.instrument,
+                    trade.position.id,
+                    trade.close_time,
+                    trade.exit_reason,
+                ),
+            ),
+            equity=sorted(equity, key=lambda sample: sample.timestamp),
             metrics=metrics,
             metrics_by_instrument=grouped_metrics,
-            warnings=warnings,
-            open_positions=[positions[key] for key in sorted(positions)],
+            warnings=sorted(
+                warnings,
+                key=lambda warning: (
+                    warning.timestamp or final_timestamp,
+                    warning.instrument or "",
+                    warning.code,
+                    warning.message,
+                ),
+            ),
+            open_positions=open_position_results,
             effective_start_at=timestamps[0],
             effective_end_at=final_timestamp,
             pricing_modes=tuple(sorted(pricing_modes)),
@@ -362,28 +388,83 @@ class BacktestReplayEngine:
         decision: StrategyDecision,
         candle: HistoricalCandle,
         equity: float,
-    ) -> float:
+    ) -> tuple[float, dict[str, object]]:
         mode = self.configuration.position_sizing_mode
         risk = self.configuration.risk_configuration
         if mode == "FIXED_UNITS":
-            return float(risk.get("fixed_size", 1.0))
+            return float(risk.get("fixed_size", 1.0)), {}
         if mode != "PERCENT_RISK":
             raise ValueError(f"Unsupported position sizing mode '{mode}'.")
-        reference = self.execution._reference_price(candle, at="open")
+        if decision.direction is None:
+            return 0.0, {}
+        _, entry_fill, _, _, _ = self.execution.entry_projection(
+            candle=candle,
+            direction=decision.direction,
+            size=1.0,
+        )
         stop = _optional_float(decision.hints.get("stop_loss_price"))
         if stop is None:
             fallback_percent = float(risk.get("fallback_stop_percent", 0.5))
-            stop_distance = reference * fallback_percent / 100
-        else:
-            stop_distance = abs(reference - stop)
-        if stop_distance <= 0:
-            return 0.0
+            stop_distance = entry_fill * fallback_percent / 100
+            stop = (
+                entry_fill - stop_distance
+                if decision.direction is OrderDirection.BUY
+                else entry_fill + stop_distance
+            )
+        if (
+            stop <= 0
+            or (decision.direction is OrderDirection.BUY and stop >= entry_fill)
+            or (decision.direction is OrderDirection.SELL and stop <= entry_fill)
+        ):
+            return 0.0, {}
         risk_amount = equity * float(risk.get("risk_per_trade_percent", 0.5)) / 100
-        size = risk_amount / stop_distance
         max_size = risk.get("max_size")
-        if max_size is not None:
-            size = min(size, float(max_size))
-        return max(size, 0.0)
+        upper = (
+            float(max_size)
+            if max_size is not None
+            else max(
+                risk_amount / abs(entry_fill - stop),
+                1.0,
+            )
+        )
+        if max_size is None:
+            while (
+                self.execution.projected_stop_loss(
+                    candle=candle,
+                    direction=decision.direction,
+                    stop_loss_price=stop,
+                    size=upper,
+                )
+                <= risk_amount
+                and upper < 1e18
+            ):
+                upper *= 2
+        lower = 0.0
+        for _ in range(80):
+            candidate = (lower + upper) / 2
+            projected_loss = self.execution.projected_stop_loss(
+                candle=candle,
+                direction=decision.direction,
+                stop_loss_price=stop,
+                size=candidate,
+            )
+            if projected_loss <= risk_amount:
+                lower = candidate
+            else:
+                upper = candidate
+        size = max(lower, 0.0)
+        projected_loss = self.execution.projected_stop_loss(
+            candle=candle,
+            direction=decision.direction,
+            stop_loss_price=stop,
+            size=size,
+        )
+        return size, {
+            "sizing_expected_entry_price": entry_fill,
+            "sizing_stop_price": stop,
+            "sizing_risk_budget": risk_amount,
+            "sizing_projected_stop_loss": projected_loss,
+        }
 
     def _current_equity(
         self,

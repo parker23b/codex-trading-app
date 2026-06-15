@@ -181,6 +181,7 @@ Useful backend startup checks:
 
 - [docs/readiness.md](docs/readiness.md) - current safety posture, blockers, and safe local usage
 - [docs/operator-guide.md](docs/operator-guide.md) - setup, environment, app surfaces, and smoke checks
+- [docs/backtesting-user-guide.md](docs/backtesting-user-guide.md) - historical imports, dataset availability, result accounting/checksums, backtest operation, and recovery limits
 - [docs/architecture.md](docs/architecture.md) - backend/frontend/service boundaries and state ownership
 - [docs/trade-lifecycle.md](docs/trade-lifecycle.md) - intent-first trade lifecycle and recovery/reconciliation model
 - [docs/backend-api-routes.md](docs/backend-api-routes.md) - generated implementation route reference and classification notes
