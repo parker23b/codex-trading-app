@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
@@ -11,6 +11,7 @@ from app.api.contracts.allocation import (
     AllocationIntentResponse,
 )
 from app.api.audit import persist_required_domain_event
+from app.api.auth import build_operator_audit_context, resolve_request_settings
 from app.db.session import get_session
 from app.models.allocation_alert import AllocationAlert
 from app.services.allocation_alert_service import AllocationAlertService
@@ -20,6 +21,7 @@ router = APIRouter(prefix="/allocation")
 
 
 class AlertActionRequest(BaseModel):
+    # Deprecated compatibility field. HTTP attribution is server-derived.
     actor_id: str = Field(default="operator")
 
 
@@ -179,14 +181,19 @@ def list_allocation_alerts(
 def acknowledge_allocation_alert(
     alert_id: int,
     payload: AlertActionRequest,
+    request: Request,
     session: Session = Depends(get_session),
 ) -> AllocationAlertMutationResponse:
+    operator_context = build_operator_audit_context(
+        request, settings=resolve_request_settings(request)
+    )
+    actor_id = str(operator_context["actor_id"])
     existing = AllocationAlertService(session).trade_service.get_allocation_alert(
         alert_id
     )
     previous_state = existing.state if existing is not None else None
     alert = AllocationAlertService(session).acknowledge_alert(
-        alert_id, actor_id=payload.actor_id
+        alert_id, actor_id=actor_id
     )
     if alert is None:
         raise HTTPException(
@@ -198,7 +205,7 @@ def acknowledge_allocation_alert(
         alert=alert,
         action="acknowledge",
         previous_state=previous_state or "UNKNOWN",
-        actor_id=payload.actor_id,
+        actor_id=actor_id,
     )
     return AllocationAlertMutationResponse.model_validate(
         {
@@ -215,15 +222,18 @@ def acknowledge_allocation_alert(
 def resolve_allocation_alert(
     alert_id: int,
     payload: AlertActionRequest,
+    request: Request,
     session: Session = Depends(get_session),
 ) -> AllocationAlertMutationResponse:
+    operator_context = build_operator_audit_context(
+        request, settings=resolve_request_settings(request)
+    )
+    actor_id = str(operator_context["actor_id"])
     existing = AllocationAlertService(session).trade_service.get_allocation_alert(
         alert_id
     )
     previous_state = existing.state if existing is not None else None
-    alert = AllocationAlertService(session).resolve_alert(
-        alert_id, actor_id=payload.actor_id
-    )
+    alert = AllocationAlertService(session).resolve_alert(alert_id, actor_id=actor_id)
     if alert is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -234,7 +244,7 @@ def resolve_allocation_alert(
         alert=alert,
         action="resolve",
         previous_state=previous_state or "UNKNOWN",
-        actor_id=payload.actor_id,
+        actor_id=actor_id,
     )
     return AllocationAlertMutationResponse.model_validate(
         {"id": alert.id, "state": alert.state, "resolved_at": alert.resolved_at}

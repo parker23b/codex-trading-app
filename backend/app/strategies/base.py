@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from app.backtesting.clock import Clock, SystemClock
 from app.core.broker import BrokerMarketDetails
 from app.core.broker import OrderDirection
 
@@ -62,6 +63,15 @@ class Strategy(ABC):
     """
 
     name: str
+
+    def bind_clock(self, clock: Clock) -> None:
+        self._clock = clock
+
+    def current_time(self) -> datetime:
+        clock = getattr(self, "_clock", None)
+        if clock is None:
+            clock = SystemClock()
+        return clock.now()
 
     @abstractmethod
     def on_price_update(self, data: PriceUpdate) -> None:

@@ -6,6 +6,12 @@ import {
   AllocationIntent,
   RiskAllocationChart,
   AimeeSnapshotResponse,
+  BacktestEquityPoint,
+  BacktestInstrument,
+  BacktestMetrics,
+  BacktestRun,
+  BacktestTrade,
+  BacktestWarning,
   BrokerAuthStatus,
   BrokerEnvironmentStatus,
   CoverageSummary,
@@ -15,6 +21,8 @@ import {
   Execution,
   FeedState,
   FeedStateResponse,
+  HistoricalDataset,
+  HistoricalProviderCapabilities,
   LiveChartResponse,
   MarketCatalogueResponse,
   MarketCategory,
@@ -609,6 +617,124 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
 
 export async function getStrategies(): Promise<StrategyDefinition[]> {
   return request<StrategyDefinition[]>("/strategies");
+}
+
+export async function getHistoricalProviders(): Promise<HistoricalProviderCapabilities[]> {
+  return request<HistoricalProviderCapabilities[]>("/historical-data/providers");
+}
+
+export async function getHistoricalDatasets(): Promise<HistoricalDataset[]> {
+  return request<HistoricalDataset[]>("/historical-data/datasets");
+}
+
+export async function getHistoricalDataset(datasetId: string): Promise<HistoricalDataset> {
+  return request<HistoricalDataset>(`/historical-data/datasets/${encodeURIComponent(datasetId)}`);
+}
+
+export async function importHistoricalCsv(payload: {
+  display_name: string;
+  csv_text: string;
+  asset_class: string;
+  venue: string;
+  market_type: string;
+  source_identifier?: string | null;
+  source_metadata?: Record<string, unknown>;
+}): Promise<HistoricalDataset> {
+  return request<HistoricalDataset>("/historical-data/imports/csv", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    timeoutMs: 120000,
+  });
+}
+
+export async function importHistoricalProviderData(payload: {
+  display_name: string;
+  provider_id: string;
+  instruments: string[];
+  timeframe: string;
+  start_at: string;
+  end_at: string;
+  asset_class: string;
+  market_type: string;
+  venue?: string | null;
+}): Promise<HistoricalDataset> {
+  return request<HistoricalDataset>("/historical-data/imports", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    timeoutMs: 120000,
+  });
+}
+
+export async function createBacktest(payload: {
+  name?: string | null;
+  notes?: string | null;
+  strategy_identifier: string;
+  profile_name?: string | null;
+  strategy_parameters?: Record<string, number>;
+  dataset_id: string;
+  shortlist: string[];
+  timeframe: string;
+  start_at: string;
+  end_at: string;
+  warmup_mode: "NONE" | "CANDLE_COUNT";
+  warmup_candle_count: number;
+  allow_insufficient_warmup: boolean;
+  starting_capital: number;
+  position_sizing_mode: string;
+  risk_configuration: Record<string, number>;
+  spread_model: string;
+  spread_assumption: Record<string, number>;
+  slippage_model: string;
+  slippage_assumption: Record<string, number>;
+  fee_model: string;
+  fee_assumption: Record<string, number>;
+  open_position_treatment: string;
+}): Promise<BacktestRun> {
+  return request<BacktestRun>("/backtests", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    timeoutMs: 120000,
+  });
+}
+
+export async function getBacktests(): Promise<BacktestRun[]> {
+  return request<BacktestRun[]>("/backtests");
+}
+
+export async function getBacktest(runId: string): Promise<BacktestRun> {
+  return request<BacktestRun>(`/backtests/${encodeURIComponent(runId)}`, {
+    timeoutMs: 12000,
+  });
+}
+
+export async function getBacktestMetrics(runId: string): Promise<BacktestMetrics> {
+  return request<BacktestMetrics>(`/backtests/${encodeURIComponent(runId)}/metrics`, {
+    timeoutMs: 12000,
+  });
+}
+
+export async function getBacktestTrades(runId: string): Promise<BacktestTrade[]> {
+  return request<BacktestTrade[]>(`/backtests/${encodeURIComponent(runId)}/trades`, {
+    timeoutMs: 12000,
+  });
+}
+
+export async function getBacktestEquity(runId: string): Promise<BacktestEquityPoint[]> {
+  return request<BacktestEquityPoint[]>(`/backtests/${encodeURIComponent(runId)}/equity`, {
+    timeoutMs: 12000,
+  });
+}
+
+export async function getBacktestWarnings(runId: string): Promise<BacktestWarning[]> {
+  return request<BacktestWarning[]>(`/backtests/${encodeURIComponent(runId)}/warnings`, {
+    timeoutMs: 12000,
+  });
+}
+
+export async function getBacktestInstruments(runId: string): Promise<BacktestInstrument[]> {
+  return request<BacktestInstrument[]>(`/backtests/${encodeURIComponent(runId)}/instruments`, {
+    timeoutMs: 12000,
+  });
 }
 
 export async function getMarketOverview(category: MarketCategory = "forex"): Promise<MarketCategoryOverviewResponse> {

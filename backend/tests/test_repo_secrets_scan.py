@@ -28,6 +28,7 @@ def test_policy_loads_expected_sensitive_keys():
 
     assert "IG_PASSWORD" in policy.sensitive_env_keys
     assert "OPERATOR_API_TOKEN" in policy.sensitive_env_keys
+    assert "OPERATOR_API_CREDENTIALS" in policy.sensitive_env_keys
     assert policy.max_scan_bytes >= 100_000
 
 

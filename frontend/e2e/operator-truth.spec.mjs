@@ -27,6 +27,142 @@ async function waitForAimeeSnapshotLog(request) {
     .toBeTruthy();
 }
 
+test("BT-DATA-001 backtests page renders explicit UTC timestamps without repairing ambiguous values", async ({ page, request }) => {
+  await setScenario(request, "backtests-utc-dataset");
+
+  await page.goto("/backtests");
+
+  await expect(page.getByText("2026-01-01T00:00:00Z to 2026-01-01T00:05:00+00:00")).toBeVisible();
+  const runForm = page.locator("form").filter({
+    has: page.locator('select[name="strategy_identifier"]'),
+  });
+  await expect(runForm.locator('input[name="start_at"]')).toHaveValue("2026-01-01T00:00");
+  await expect(runForm.locator('input[name="end_at"]')).toHaveValue("2026-01-01T00:06");
+});
+
+test("BT-ACCOUNTING-001 backtest results render explicit accounting labels", async ({ page, request }) => {
+  await setScenario(request, "backtests-utc-dataset");
+
+  await page.goto("/backtests");
+  const resultSummary = page.getByLabel("System status strip").last();
+
+  for (const label of [
+    "Ending equity",
+    "Realised P&L",
+    "Unrealised P&L",
+    "Total P&L",
+    "Closed-trade win rate",
+    "Open positions at end",
+  ]) {
+    await expect(resultSummary.getByText(label, { exact: true })).toBeVisible();
+  }
+  await expect(resultSummary).not.toContainText("£");
+  await expect(resultSummary).toContainText("account units");
+  await expect(page.getByText("65000.12", { exact: true })).toBeVisible();
+  await expect(page.getByText("1.08456", { exact: true })).toBeVisible();
+  await expect(page.getByText("Result checksum:", { exact: false })).toBeVisible();
+  await expect(page.getByText("Exposure: wall-clock union across open intervals")).toBeVisible();
+  await expect(page.getByText(/Price decimals are adaptive display formatting/)).toBeVisible();
+  await expect(page.getByText(/Warm-up: CANDLE_COUNT · 2 candles · insufficient · degraded/)).toBeVisible();
+  await expect(page.getByText(/Warm-up warning: TEST_FX · 1 of 2 candles/)).toBeVisible();
+});
+
+test("BT-WARMUP-FAIL-001 failed strict warm-up renders diagnostics without analytics requests", async ({ page, request }) => {
+  await setScenario(request, "backtests-strict-warmup-failed");
+
+  await page.goto("/backtests");
+
+  await expect(page.getByText("Run did not produce analytics")).toBeVisible();
+  await expect(page.getByText(/ALPHA_FX supplied 0 of 2 required warm-up candles/).first()).toBeVisible();
+  await expect(page.getByText(/BETA_FX supplied 0 of 2 required warm-up candles/).first()).toBeVisible();
+  await expect(page.getByText(/Warm-up error: ALPHA_FX · 0 of 2 candles/)).toBeVisible();
+  await expect(page.getByText(/Warm-up error: BETA_FX · 0 of 2 candles/)).toBeVisible();
+  await expect(page.getByText("Warm-up consumed", { exact: true })).toBeVisible();
+  await expect(page.getByText("Completed-run monetary metrics are unavailable for this run status.")).toBeVisible();
+
+  const requests = await getRequests(request);
+  for (const suffix of ["/metrics", "/trades", "/equity"]) {
+    expect(
+      requests.some(
+        (entry) =>
+          entry.pathname === `/backtests/run-strict-warmup-failed${suffix}`,
+      ),
+    ).toBeFalsy();
+  }
+});
+
+test("BT-DATA-001 provider and backtest datetime-local submissions send explicit UTC instants", async ({ browser, request, baseURL }) => {
+  await setScenario(request, "backtests-utc-dataset");
+  const context = await browser.newContext({
+    baseURL,
+    timezoneId: "America/New_York",
+  });
+  const page = await context.newPage();
+
+  try {
+    await page.goto("/backtests");
+
+    const providerForm = page.locator("form").filter({
+      has: page.getByRole("button", { name: "Request provider import" }),
+    });
+    await providerForm.locator('input[name="display_name"]').fill("Provider UTC");
+    await providerForm.locator('input[name="instruments"]').fill("TEST_FX");
+    await providerForm.locator('input[name="start_at"]').fill("2026-01-01T00:00");
+    await providerForm.locator('input[name="end_at"]').fill("2026-01-01T01:00");
+    await providerForm.getByRole("button", { name: "Request provider import" }).click();
+
+    await expect
+      .poll(async () => {
+        const requests = await getRequests(request);
+        return requests.find(
+          (entry) =>
+            entry.method === "POST" &&
+            entry.pathname === "/historical-data/imports",
+        )?.body;
+      })
+      .toMatchObject({
+        start_at: "2026-01-01T05:00:00.000Z",
+        end_at: "2026-01-01T06:00:00.000Z",
+      });
+
+    const runForm = page.locator("form").filter({
+      has: page.locator('select[name="strategy_identifier"]'),
+    });
+    await expect(runForm.locator('input[name="start_at"]')).toHaveValue(
+      "2025-12-31T19:00",
+    );
+    await runForm.locator('input[name="start_at"]').fill("2026-01-02T00:00");
+    await runForm.locator('input[name="end_at"]').fill("2026-01-02T00:06");
+    const runButton = runForm.getByRole("button", { name: "Start manual backtest" });
+    await expect(runButton).toBeEnabled();
+    const invalidFields = await runForm.evaluate((form) =>
+      Array.from(form.elements)
+        .filter((element) => "checkValidity" in element && !element.checkValidity())
+        .map((element) => ({
+          name: element.getAttribute("name"),
+          value: "value" in element ? element.value : null,
+          message: "validationMessage" in element ? element.validationMessage : null,
+        })),
+    );
+    assert.deepEqual(invalidFields, []);
+    await runButton.click();
+
+    await expect
+      .poll(async () => {
+        const requests = await getRequests(request);
+        return requests.find(
+          (entry) => entry.method === "POST" && entry.pathname === "/backtests",
+        )?.body;
+      })
+      .toMatchObject({
+        start_at: "2026-01-02T05:00:00.000Z",
+        end_at: "2026-01-02T05:06:00.000Z",
+      });
+  } finally {
+    await context.close();
+  }
+});
+
 test("AUDIT-UI-006 dashboard shows stale feed truth and keeps simulated closes distinct from broker-confirmed closes", async ({ page, request }) => {
   await setScenario(request, "dashboard-stale-truth");
 

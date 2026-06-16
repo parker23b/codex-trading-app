@@ -258,6 +258,238 @@ export type StrategyDefinition = {
   parameters: StrategyParameter[];
 };
 
+export type HistoricalProviderCapabilities = {
+  provider_id: string;
+  venue: string;
+  supported_asset_classes: string[];
+  supported_market_types: string[];
+  available_timeframes: string[];
+  midpoint_ohlc: boolean;
+  bid_ohlc: boolean;
+  ask_ohlc: boolean;
+  trade_price_ohlc: boolean;
+  volume: boolean;
+  spread_must_be_simulated: boolean;
+  maximum_records_per_request: number | null;
+  authentication: string;
+  instrument_mapping_examples: Record<string, string>;
+  quota_warnings: string[];
+  configured: boolean;
+  configuration_warning?: string | null;
+};
+
+export type HistoricalDatasetPartition = {
+  id: number;
+  dataset_id: string;
+  instrument: string;
+  provider_instrument: string;
+  timeframe: string;
+  earliest_at: string;
+  latest_at: string;
+  candle_count: number;
+  price_components: string[];
+  volume_available: boolean;
+  checksum: string;
+  detected_gaps: Array<Record<string, unknown>>;
+  warnings: Array<Record<string, unknown>>;
+  source_metadata: Record<string, unknown>;
+};
+
+export type HistoricalDataset = {
+  id: string;
+  display_name: string;
+  provider: string;
+  source_identifier?: string | null;
+  venue: string;
+  market_type: string;
+  asset_class: string;
+  base_timeframe: string;
+  status: "IMPORTING" | "PARTIAL" | "READY" | "FAILED" | string;
+  availability: "AVAILABLE" | "RECOVERY_REQUIRED" | "UNAVAILABLE" | string;
+  availability_reason?: string | null;
+  availability_updated_at?: string | null;
+  selectable: boolean;
+  earliest_at?: string | null;
+  latest_at?: string | null;
+  candle_count: number;
+  timezone_rule: string;
+  price_components: string[];
+  volume_available: boolean;
+  imported_at: string;
+  checksum?: string | null;
+  completeness_status: string;
+  detected_gaps: Array<Record<string, unknown>>;
+  warnings: Array<Record<string, unknown>>;
+  source_metadata: Record<string, unknown>;
+  import_parameters: Record<string, unknown>;
+  failure_reason?: string | null;
+  storage_format: string;
+  immutable: boolean;
+  partitions: HistoricalDatasetPartition[];
+};
+
+export type BacktestRun = {
+  id: string;
+  name?: string | null;
+  notes?: string | null;
+  strategy_identifier: string;
+  strategy_version: string;
+  strategy_configuration: Record<string, unknown>;
+  dataset_id: string;
+  dataset_checksum: string;
+  shortlist: string[];
+  timeframe: string;
+  requested_start_at: string;
+  requested_end_at: string;
+  warmup_mode: "NONE" | "CANDLE_COUNT";
+  warmup_candle_count: number;
+  allow_insufficient_warmup: boolean;
+  warmup_start_at: string;
+  trading_start_at: string;
+  warmup_sufficient: boolean;
+  warmup_degraded: boolean;
+  warmup_warnings: BacktestWarmupWarning[];
+  effective_start_at?: string | null;
+  effective_end_at?: string | null;
+  starting_capital: number;
+  position_sizing_mode: string;
+  risk_configuration: Record<string, unknown>;
+  spread_model: string;
+  spread_assumption: Record<string, unknown>;
+  slippage_model: string;
+  slippage_assumption: Record<string, unknown>;
+  fee_model: string;
+  fee_assumption: Record<string, unknown>;
+  open_position_treatment: string;
+  pricing_mode: string;
+  evaluation_boundary: string;
+  status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | string;
+  created_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  failure_reason?: string | null;
+  result_manifest_version?: string | null;
+  result_checksum?: string | null;
+  result_summary: Record<string, unknown>;
+};
+
+export type BacktestWarmupWarning = {
+  code: "INSUFFICIENT_WARMUP";
+  severity: "WARNING" | "ERROR";
+  instrument_id: string;
+  requested_warmup_candles: number;
+  available_warmup_candles: number;
+  message: string;
+  first_available_at?: string | null;
+  trading_start_at?: string | null;
+};
+
+export type BacktestTrade = {
+  id: number;
+  run_id: string;
+  deterministic_sequence: number;
+  instrument: string;
+  direction: string;
+  size: number;
+  open_price: number;
+  close_price: number;
+  open_time: string;
+  close_time: string;
+  gross_pnl: number;
+  fees: number;
+  spread_cost: number;
+  slippage_cost: number;
+  net_pnl: number;
+  exit_reason: string;
+  stop_loss_price?: number | null;
+  take_profit_price?: number | null;
+  conservative_ambiguity: boolean;
+  pricing_mode: string;
+  details: Record<string, unknown>;
+};
+
+export type BacktestEquityPoint = {
+  timestamp: string;
+  cash: number;
+  unrealised_pnl: number;
+  equity: number;
+  drawdown: number;
+  drawdown_percent: number;
+  open_position_count: number;
+};
+
+export type BacktestWarning = {
+  id: number;
+  run_id: string;
+  deterministic_sequence: number;
+  code: string;
+  severity: string;
+  message: string;
+  instrument?: string | null;
+  timestamp?: string | null;
+  details: Record<string, unknown>;
+  created_at: string;
+};
+
+export type BacktestProfitFactorNullReason =
+  | "NO_CLOSED_TRADES"
+  | "NO_LOSING_TRADES"
+  | "NO_WINNING_TRADES";
+
+export type BacktestRunMetrics = {
+  account_currency: string | null;
+  monetary_unit_label: string;
+  percent_risk_sizing_absolute_tolerance: number;
+  starting_capital: number;
+  realised_pnl: number;
+  unrealised_pnl: number;
+  fees_paid: number;
+  spread_cost: number;
+  slippage_cost: number;
+  net_closed_trade_pnl: number;
+  total_pnl: number;
+  ending_equity: number;
+  ending_cash: number;
+  open_position_value: number;
+  return_pct: number | null;
+  closed_trade_return_pct: number | null;
+  headline_return_includes_unrealised: boolean;
+  closed_trade_count: number;
+  winning_closed_trades: number;
+  losing_closed_trades: number;
+  breakeven_closed_trades: number;
+  closed_trade_win_rate: number | null;
+  closed_trade_net_winning_pnl: number;
+  closed_trade_net_losing_pnl: number;
+  maximum_drawdown: number | null;
+  maximum_drawdown_percentage: number | null;
+  profit_factor: number | null;
+  profit_factor_null_reason: BacktestProfitFactorNullReason | null;
+  average_closed_trade_pnl: number | null;
+  average_winner: number | null;
+  average_loser: number | null;
+  largest_winner: number | null;
+  largest_loser: number | null;
+  wall_clock_exposure_pct: number | null;
+  open_positions_at_end: number;
+  open_position_treatment: string;
+};
+
+export type BacktestMetrics = {
+  run: BacktestRunMetrics;
+  by_instrument: Record<string, BacktestRunMetrics>;
+};
+
+export type BacktestInstrument = {
+  instrument: string;
+  provider_instrument: string;
+  dataset_partition_id: number;
+  candle_count: number;
+  warmup_candles_consumed: number;
+  first_tradable_at: string;
+  metrics: BacktestRunMetrics | null;
+};
+
 export type StrategyMutationStatus = {
   status: "started" | "stopped";
   strategy?: string | null;
@@ -574,6 +806,9 @@ export type ControlPlaneSummary = {
   exit_block_reason?: string | null;
   open_risk_management_state?: OpenRiskManagementState | string;
   open_risk_management_reason?: string | null;
+  open_risk_authority_version?: number | null;
+  open_risk_authority_updated_at?: string | null;
+  open_risk_reconciliation_status?: string | null;
   counts: Record<string, number>;
   misaligned_count: number;
   families: ControlPlaneFamily[];
@@ -667,6 +902,24 @@ export type OperationalTelemetry = {
   exit_block_reason?: string | null;
   open_risk_management_state?: OpenRiskManagementState | string;
   open_risk_management_reason?: string | null;
+  open_risk_authority_version?: number | null;
+  open_risk_authority_updated_at?: string | null;
+  open_risk_reconciliation_status?: string | null;
+  broker_resilience?: {
+    read_max_attempts?: number;
+    circuit_failure_threshold?: number;
+    circuit_cooldown_seconds?: number;
+    circuits?: Record<
+      string,
+      {
+        consecutive_failures?: number;
+        opened_until?: number | null;
+        last_failure_at?: number | null;
+        last_success_at?: number | null;
+        open?: boolean;
+      }
+    >;
+  };
   audit_write_degraded?: boolean;
   polling_fallback_active?: boolean;
   polling_fallback_active_instrument_count?: number;

@@ -195,15 +195,19 @@ Expected behavior:
 
 ## Retry, backoff, and circuit-breaker expectations
 
-A centralized broker retry/backoff/circuit-breaker policy is not yet clearly identifiable. Until one exists:
+`ResilientBroker` is the centralized broker-neutral policy:
 
-- broker metadata failures must block new entries;
+- position, account, market-data, and sizing reads are retry-safe operation classes;
+- retry-safe reads use bounded exponential backoff with jitter;
+- each read class has observable circuit state and cooldown;
+- broker metadata failures still block new entries;
 - entry admission and submission MUST fail closed on broker metadata, market status, sizing, account, or order errors unless an explicit degraded-entry mode is specified and tested;
 - order submission failures must create explicit execution failure/manual-review evidence;
-- ambiguous order outcomes must trigger reconciliation/manual-review rather than duplicate blind retries;
+- order and close mutations are never automatically retried by the resilience wrapper;
+- ambiguous mutation outcomes must trigger reconciliation/manual-review rather than duplicate blind retries;
 - close paths MUST keep open risk visible and mark execution/manual-review/reconciliation-needed state when close confirmation is unsafe or ambiguous;
 - close failures must keep open risk visible and exit-capable where possible;
-- repeated broker failures must surface in health, domain events, alerts, or operator-visible degraded state;
+- repeated broker read failures and circuit state must surface through operational telemetry;
 - retry behavior must preserve client request id correlation where supported.
 
 ## Broker construction and dependency boundary
@@ -231,8 +235,7 @@ Direct `get_broker()` usage outside composition/root wiring should be audited. I
 - Whether all broker mutations use stable client request ids and persist them for reconciliation.
 - Whether simulated fills/closes are clearly distinguished from broker-confirmed live truth in all backend read models and frontend surfaces.
 - Whether direct `get_broker()` use is acceptable everywhere it appears or should be replaced with dependency injection/composition boundaries.
-- Whether broker retry behavior could duplicate orders or closes when broker confirmation is ambiguous.
-- Whether a centralized broker retry/backoff/circuit-breaker policy exists or needs to be introduced.
+- Whether a future broker can prove mutation idempotency strongly enough to support an explicit mutation retry policy without weakening the current single-attempt default.
 - Whether broker read DTO provenance is uniformly available for allocation, execution, reconciliation, runtime, and operator UI decisions.
 
 ## Required tests
@@ -240,6 +243,8 @@ Direct `get_broker()` usage outside composition/root wiring should be audited. I
 - Contract tests proving broker DTOs can represent accepted, rejected, filled, partial-fill, pending, timeout, rate-limit, and ambiguous confirmation states.
 - Tests proving no broker mutation can be reached without lifecycle authority.
 - Tests proving ambiguous order/close outcomes create manual-review or reconciliation-needed state instead of silent success/failure.
+- Shared adapter capability-conformance tests plus retry-safe read backoff/circuit tests.
+- Tests proving mutation transport failures result in exactly one adapter invocation.
 - Tests proving client request ids are generated, persisted, passed to broker calls, and visible in execution/reconciliation evidence where supported.
 - Tests proving simulated fills/closes are marked as simulated/local and not broker-confirmed.
 - Tests proving operator-critical read models include freshness/provenance for broker-derived price, market, sizing, position, and risk data.

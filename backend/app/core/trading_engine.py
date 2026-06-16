@@ -8,6 +8,10 @@ from uuid import uuid4
 from app.core.broker import Broker
 from app.core.logging import get_logger
 from app.core.signals import EntrySignal, ExitSignal, SignalKind
+from app.core.strategy_evaluation import (
+    StrategyDecisionKind,
+    evaluate_strategy_update,
+)
 from app.models.trade import Position
 from app.strategies.base import PriceUpdate, Strategy
 
@@ -65,14 +69,17 @@ class TradingEngine:
                 "spread": update.spread,
             },
         )
-        self.strategy.on_price_update(update)
+        decision = evaluate_strategy_update(
+            strategy=self.strategy,
+            update=update,
+            has_open_position=self.current_position is not None,
+            runtime_mode=self.runtime_mode,
+        )
 
-        if (
-            self.runtime_mode != "EXITS_ONLY"
-            and self.current_position is None
-            and self.strategy.should_enter_trade()
-        ):
-            direction = self.strategy.entry_direction()
+        if decision is not None and decision.kind is StrategyDecisionKind.ENTRY:
+            if decision.direction is None:
+                raise ValueError("Entry strategy decision did not include a direction.")
+            direction = decision.direction
             logger.info(
                 "Strategy entry candidate emitted",
                 extra={
@@ -102,9 +109,9 @@ class TradingEngine:
                 market_status=update.market_status,
                 tradable=update.tradable,
             )
-            return self._apply_entry_signal_hints(signal)
+            return self._apply_entry_signal_hints(signal, hints=decision.hints)
 
-        if self.current_position is not None and self.strategy.should_exit_trade():
+        if decision is not None and decision.kind is StrategyDecisionKind.EXIT:
             logger.info(
                 "Strategy exit candidate emitted",
                 extra={
@@ -145,8 +152,13 @@ class TradingEngine:
         )
         return None
 
-    def _apply_entry_signal_hints(self, signal: EntrySignal) -> EntrySignal:
-        hints = self.strategy.entry_signal_hints() or {}
+    def _apply_entry_signal_hints(
+        self,
+        signal: EntrySignal,
+        *,
+        hints: dict[str, Any] | None = None,
+    ) -> EntrySignal:
+        hints = hints if hints is not None else self.strategy.entry_signal_hints() or {}
         if not hints:
             return signal
         strategy_metadata = dict(signal.strategy_metadata)

@@ -5,7 +5,11 @@ from fastapi import HTTPException
 from fastapi.routing import APIRoute
 from starlette.requests import Request
 
-from app.api.auth import require_operator_identity, requires_operator_auth
+from app.api.auth import (
+    require_operator_identity,
+    require_operator_scope,
+    requires_operator_auth,
+)
 from app.api.router import build_api_router
 from app.core.config import Settings, get_settings
 from app.main import app
@@ -103,7 +107,12 @@ def test_audit_sec_001_write_on_read_refresh_routes_require_operator_auth_policy
 
 
 def test_audit_sec_001_production_like_operator_mutation_rejects_missing_token():
-    settings = Settings(app_env="production", operator_api_token="expected-token")
+    settings = Settings(
+        app_env="production",
+        operator_api_credentials={
+            "alice": {"token": "expected-token", "scopes": ["operate"]}
+        },
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         require_operator_identity(_request(), settings=settings)
@@ -113,7 +122,12 @@ def test_audit_sec_001_production_like_operator_mutation_rejects_missing_token()
 
 
 def test_audit_sec_001_production_like_operator_mutation_rejects_invalid_token():
-    settings = Settings(app_env="production", operator_api_token="expected-token")
+    settings = Settings(
+        app_env="production",
+        operator_api_credentials={
+            "alice": {"token": "expected-token", "scopes": ["operate"]}
+        },
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         require_operator_identity(
@@ -136,14 +150,95 @@ def test_audit_sec_001_production_like_operator_mutation_requires_configured_tok
 
 
 def test_audit_sec_001_operator_mutation_accepts_configured_bearer_token():
-    settings = Settings(app_env="production", operator_api_token="expected-token")
+    settings = Settings(
+        app_env="production",
+        operator_api_credentials={
+            "alice": {"token": "expected-token", "scopes": ["operate"]}
+        },
+    )
 
     actor_id = require_operator_identity(
         _request(headers={"Authorization": "Bearer expected-token"}),
         settings=settings,
     )
 
-    assert actor_id == "operator"
+    assert actor_id == "alice"
+
+
+def test_audit_sec_004_production_rejects_legacy_shared_token():
+    settings = Settings(app_env="production", operator_api_token="expected-token")
+
+    with pytest.raises(HTTPException) as exc_info:
+        require_operator_identity(
+            _request(headers={"Authorization": "Bearer expected-token"}),
+            settings=settings,
+        )
+
+    assert exc_info.value.status_code == 503
+    assert "Named operator credentials" in exc_info.value.detail
+
+
+def test_audit_sec_004_disabled_named_credential_is_revoked():
+    settings = Settings(
+        app_env="production",
+        operator_api_credentials={
+            "alice": {
+                "token": "expected-token",
+                "scopes": ["operate"],
+                "enabled": False,
+            }
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        require_operator_identity(
+            _request(headers={"Authorization": "Bearer expected-token"}),
+            settings=settings,
+        )
+
+    assert exc_info.value.status_code == 403
+
+
+def test_audit_sec_004_dealing_action_requires_deal_scope():
+    settings = Settings(
+        app_env="production",
+        operator_api_credentials={
+            "alice": {"token": "expected-token", "scopes": ["operate"]}
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        require_operator_scope(
+            _request(
+                path="/strategy/start",
+                headers={"Authorization": "Bearer expected-token"},
+            ),
+            required_scope="deal",
+            settings=settings,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert "'deal' scope" in exc_info.value.detail
+
+
+def test_audit_sec_004_admin_scope_can_authorize_privileged_action():
+    settings = Settings(
+        app_env="production",
+        operator_api_credentials={
+            "risk-admin": {"token": "admin-token", "scopes": ["admin"]}
+        },
+    )
+
+    principal = require_operator_scope(
+        _request(
+            path="/control-plane/operator-state",
+            headers={"Authorization": "Bearer admin-token"},
+        ),
+        required_scope="admin",
+        settings=settings,
+    )
+
+    assert principal.actor_id == "risk-admin"
 
 
 def test_audit_sec_001_cors_does_not_allow_credentialed_localhost_regex():

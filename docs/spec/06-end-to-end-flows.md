@@ -342,3 +342,13 @@ FLOW-EXIT-001 expected steps:
 - Can AIMEE passive refresh call mutation-like review endpoints or persist advisory records?
 - Are recovery/adoption/reconciliation states visible and distinguishable from normal strategy-owned lifecycle?
 - Which frontend-derived summaries could upgrade stale, fallback, provisional, unknown, or degraded backend state?
+# FLOW-BACKTEST-001 - Manual single-strategy backtest
+
+1. The operator explicitly imports provider data or uploads a CSV.
+2. The backend validates and writes an immutable local dataset snapshot.
+3. The operator selects one registered strategy, configuration, dataset ID, shortlist, range, and execution assumptions.
+4. The bounded synchronous replay orders candles by timestamp and instrument, evaluates production strategy code at candle close, and executes at the next open.
+5. Simulation-specific trades, equity, metrics, warnings, assumptions, and failures are persisted.
+6. Passive result routes and `/backtests` render the persisted truth.
+
+No step calls a provider during replay or mutates live trading lifecycle state.

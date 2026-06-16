@@ -8,6 +8,16 @@ import pytest
 from sqlmodel import Session, select
 
 from app.models.allocation_alert import AllocationAlert
+from app.models.backtest import (
+    BacktestEquityPoint,
+    BacktestMetric,
+    BacktestRun,
+    BacktestRunInstrument,
+    BacktestTrade,
+    BacktestWarning,
+    HistoricalDataset,
+    HistoricalDatasetPartition,
+)
 from app.models.domain_event import DomainEvent
 from app.models.operator_control import OperatorControlState
 from app.models.review import GeneratedReviewRecord
@@ -34,9 +44,17 @@ from app.services.health_service import get_health_service
 TRACKED_MODELS = (
     AllocationAlert,
     AllocationCycle,
+    BacktestEquityPoint,
+    BacktestMetric,
+    BacktestRun,
+    BacktestRunInstrument,
+    BacktestTrade,
+    BacktestWarning,
     DomainEvent,
     Execution,
     GeneratedReviewRecord,
+    HistoricalDataset,
+    HistoricalDatasetPartition,
     OperatorControlState,
     OperatorShortlistEntry,
     Position,
@@ -390,6 +408,9 @@ def _seed_http_read_state(session: Session) -> dict[str, Any]:
         ("/reviews/trades/{trade_id}/postmortem", None),
         ("/reviews/history", None),
         ("/reviews/history/{review_id}", None),
+        ("/historical-data/providers", None),
+        ("/historical-data/datasets", None),
+        ("/backtests", None),
     ],
 )
 def test_audit_test_001_passive_get_routes_do_not_write_state(
@@ -749,4 +770,4 @@ def test_audit_test_016_allocation_alert_http_error_preserves_alert_transition(
         "detail": "Allocation alert was acknowledged, but durable audit persistence failed."
     }
     assert alert.state == "ACKNOWLEDGED"
-    assert alert.acknowledged_by == "risk-operator"
+    assert alert.acknowledged_by == "operator"

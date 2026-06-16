@@ -52,6 +52,7 @@ class StrategyMetadata:
     family_name: str | None = None
     supported_asset_classes: tuple[str, ...] = ()
     parameter_profiles: tuple[StrategyParameterProfile, ...] = ()
+    implementation_version: str = "1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,7 +165,7 @@ strategy_registry.register(
                 key="exit_threshold", label="Exit Threshold", value=0.0004, step=0.0001
             ),
         ),
-        supported_asset_classes=("FOREX", "INDICES"),
+        supported_asset_classes=("FOREX", "INDICES", "CRYPTO"),
         parameter_profiles=(
             StrategyParameterProfile(
                 name="default",

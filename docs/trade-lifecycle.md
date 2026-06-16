@@ -29,7 +29,7 @@ Compatibility note: legacy execution statuses such as `SIGNAL_GENERATED`, `RISK_
 4. The linked local `Position` is closed.
 5. The linked `TradeIntent` moves to the appropriate closed lifecycle state.
 
-Failed, partial, rejected, and ambiguous close paths have targeted tests preserving open-risk authority and manual-review state. The remaining architecture gap is that open-risk management ownership is split across position, deployment, runtime, and derived operational-state records (`AUDIT-ARCH-002`).
+Failed, partial, rejected, and ambiguous close paths have targeted tests preserving open-risk authority and manual-review state. System-level ownership now lives in the versioned `OpenRiskAuthority` aggregate; position, runtime, deployment, recovery, and reconciliation writers refresh it, while deployment fields remain family-level compatibility projections.
 
 ## Same-Instrument Exclusivity
 

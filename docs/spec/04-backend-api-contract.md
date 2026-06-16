@@ -32,6 +32,15 @@ Routes currently labelled with softer terms such as `Read/projection`, `Read by 
 | API-011 | Routes with unknown frontend consumers must be marked `Needs confirmation` and audited as used, compatibility-only, dev-only, stale, or removable. Unknown consumer status must not be treated as evidence that the route is unused. | Frontend API client/code search and route usage audit. | P2 | Medium |
 | API-012 | Operator-visible broker environment and dealing status MUST come from a backend-owned typed contract. Frontend code must not infer environment from URLs, regexes, or fallback literals. Invalid or unavailable broker-environment truth must fail closed visibly. | Typed response model, route tests, frontend type/client tests, and browser coverage for the primary shell status. | P0 | High |
 
+Operator authentication and authorization:
+
+- Production-like environments require named server-side operator credentials.
+- The authenticated credential determines `actor_id`; payload/query `actor_id` values are not authoritative.
+- Credentials carry `operate`, `deal`, and/or `admin` scopes. Runtime starts require `deal`; control-plane override, reconcile, governance, and test-only mutations require `admin`; ordinary mutations require `operate`.
+- Disabled credential records are revoked immediately on configuration reload/restart.
+- The legacy shared `OPERATOR_API_TOKEN` is local-development compatibility only and is rejected as the sole production-like credential.
+- Internet-facing deployments should replace static credentials with an external OIDC authorization-code flow and short-lived sessions. The scope model remains the backend authorization boundary.
+
 ## Route documentation standards
 
 Every route should document:
@@ -201,3 +210,27 @@ They must be unavailable in production-like operation unless explicitly protecte
 - Which routes marked with unknown frontend consumer are actually used, compatibility-only, dev-only, stale, or removable?
 - Are `/testing/*` routes gated away from production-like operation?
 - Can any API route trigger broker mutation without approved intent, known open risk, recovery/reconciliation authority, or explicit operator action?
+# Historical data and backtest routes
+
+The typed route inventory includes:
+
+- `GET /historical-data/providers` and `GET /historical-data/providers/{provider_id}` as passive capability reads.
+- `POST /historical-data/imports` and `POST /historical-data/imports/csv` as explicit ingestion mutations.
+- `GET /historical-data/imports/{dataset_id}`, `GET /historical-data/datasets`, and `GET /historical-data/datasets/{dataset_id}` as passive provenance/coverage reads.
+- `POST /backtests` as a bounded synchronous simulation mutation.
+- `GET /backtests` and the run configuration, metrics, trades, equity, warnings, and instrument routes as passive reads.
+
+A backtest references an immutable dataset ID and checksum. It never accepts a provider/date range as a replay source.
+Run creation also accepts typed warm-up configuration:
+`warmup_mode=NONE|CANDLE_COUNT`, non-negative `warmup_candle_count`, and an
+explicit `allow_insufficient_warmup` policy. Run and instrument responses expose
+effective warm-up/trading boundaries, sufficiency/degraded truth, warnings,
+consumed counts, and first tradable timestamps.
+
+`warmup_warnings` is a typed array with stable fields: `code`, `severity`,
+`instrument_id`, `requested_warmup_candles`, `available_warmup_candles`,
+`message`, optional `first_available_at`, and optional `trading_start_at`.
+Strict insufficient warm-up returns a persisted `FAILED` run with all requested
+instrument diagnostics. Its warning and instrument routes remain readable;
+metrics, trades, and equity are completed-run analytics and return `409` for a
+failed run.

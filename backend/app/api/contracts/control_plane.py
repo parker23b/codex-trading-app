@@ -141,6 +141,9 @@ class ControlPlaneSummaryResponse(BaseModel):
     exit_block_reason: str | None = None
     open_risk_management_state: str
     open_risk_management_reason: str | None = None
+    open_risk_authority_version: int | None = None
+    open_risk_authority_updated_at: datetime | None = None
+    open_risk_reconciliation_status: str | None = None
     families: list[ControlPlaneFamilyResponse] = Field(default_factory=list)
     counts: dict[str, int] = Field(default_factory=dict)
     misaligned_count: int

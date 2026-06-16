@@ -17,6 +17,7 @@ from app.core.broker import (
     AccountType,
     Broker,
     BrokerAccountSummary,
+    BrokerCapabilities,
     BrokerError,
     BrokerExecutionSource,
     BrokerMarketDetails,
@@ -150,6 +151,17 @@ class IGBroker(Broker):
     @property
     def account_type(self) -> AccountType:
         return self._account_type
+
+    @property
+    def capabilities(self) -> BrokerCapabilities:
+        return BrokerCapabilities(
+            supports_client_request_id=True,
+            supports_order_confirmation=True,
+            supports_batch_market_details=True,
+            supports_exact_risk_sizing=True,
+            supports_streaming=True,
+            supports_simulated_execution=True,
+        )
 
     @property
     def environment(self) -> BrokerEnvironment:

@@ -100,12 +100,26 @@ def main() -> int:
             errors,
         )
 
-    expected_open_findings = {
+    verified_p1_findings = {
         "AUDIT-ARCH-002": "P1",
         "AUDIT-SEC-004": "P1",
         "AUDIT-BROKER-006": "P1",
-        "AUDIT-ARCH-003": "P1",
     }
+    for finding_id, severity in verified_p1_findings.items():
+        require(
+            audit_current,
+            rf"\|\s*`{re.escape(finding_id)}`\s*\|\s*{severity}\s*\|\s*Verified\s*\|",
+            f"audit-status current risk register must classify {finding_id} as verified {severity}.",
+            errors,
+        )
+        require(
+            matrix_current,
+            re.escape(finding_id),
+            f"coverage-matrix current section must reference {finding_id}.",
+            errors,
+        )
+
+    expected_open_findings = {"AUDIT-ARCH-003": "P1"}
     for finding_id, severity in expected_open_findings.items():
         require(
             audit_current,

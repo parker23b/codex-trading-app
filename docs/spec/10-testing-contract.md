@@ -189,11 +189,13 @@ A lower line coverage suite with strong behavioural coverage of P0/P1 invariants
 - `FLOW-ENTRY-001`: approved intent success; rejected/stale/budget-blocked/broker-metadata-failed candidates create no broker order; broker failure/partial/ambiguous outcome preserves audit/operator visibility.
 - `FLOW-EXIT-001`: successful close; close failure; partial close; ambiguous close; open risk remains visible and managed/manual-review.
 - `FLOW-RECOVERY-001`: startup recovery; unmatched broker position adoption; broker-missing local position reconciliation; recovery state distinguishable from normal strategy-owned state.
+- `STATE-010`: versioned open-risk authority for managed, exits-only, unmanaged, reconciliation-unavailable, deployment, restart/recovery, and operator-visible freshness/version fields.
 - `ARCH-014`: reconciliation still runs with an empty active watchlist and remains a leader-owned lifespan task.
 - `ARCH-015` / `BROKER-017`: stale generation cannot renew, release, or mutate; canonical real broker mutation requires the active generation; production-dialect takeover waits for an in-flight fenced mutation.
 - `FLOW-GOVERNANCE-001`: approval vs autonomy vs deployment vs runtime separation; emergency stop; mismatch; open-risk preservation.
 - `FLOW-RISK-001`: budgets; stale/broker failure; sizing normalization; risk confidence; alert persistence; reservation/live-risk transitions; overlapping allocation cycles on distinct worker/database connections.
 - `FLOW-MARKET-DATA-001`: stream healthy; fallback polling; stale stream; disconnected broker/feed; UI degraded display.
+- `TEST-015`: shared adapter capability contract, bounded jittered read retry/circuit behavior, and exact single-attempt mutation behavior.
 - `FLOW-AIMEE-001`: passive snapshot no writes; forbidden services not called; frontend passive refresh uses only `/aimee/snapshot`.
 - `FLOW-COVERAGE-001`: watchlist/shortlist vs streaming vs entry eligibility; cap/cooldown; protective pins; stale stream display.
 - `FLOW-BROKER-ENV-001`: canonical demo/live IG gateway classification, live-dealing acknowledgement, backend-owned environment status contract, frontend banner truth, and no credentialed request before URL validation.
@@ -258,3 +260,6 @@ A lower line coverage suite with strong behavioural coverage of P0/P1 invariants
 - Are test-only routes and frontend testing controls gated away from production-like operation?
 - Is coverage percentage being used without spec/flow evidence mapping?
 - Does every fixed P0/P1 bug have a regression test that would fail against the original bug?
+# Backtesting test contract
+
+Backtesting tests must prove deterministic reruns, no future-candle access, next-open execution, stable same-timestamp ordering, strategy reuse through the shared evaluator, provider pagination, immutable checksums, UTC normalization, resampling alignment, live-table isolation, provider-call isolation, execution costs, bid/ask behavior, synthetic spread validation, conservative ambiguity, metrics, typed APIs, and truthful frontend limitation rendering.

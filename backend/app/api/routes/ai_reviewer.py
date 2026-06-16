@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from app.api.audit import persist_required_domain_event
+from app.api.auth import build_operator_audit_context, resolve_request_settings
 from app.api.errors import operator_error_detail
 from app.db.session import get_session
 from app.reviewer.models import (
@@ -234,8 +235,12 @@ def get_trade_postmortem(
 @router.post("/questions", response_model=OperationalQuestionReviewResponse)
 def answer_operational_question(
     payload: OperationalQuestionRequest,
+    request: Request,
     session: Session = Depends(get_session),
 ) -> OperationalQuestionReviewResponse:
+    operator_context = build_operator_audit_context(
+        request, settings=resolve_request_settings(request)
+    )
     response = AIReviewerService(session).answer_operational_question(
         payload.question, strategy_name=payload.strategy_name
     )
@@ -246,7 +251,7 @@ def answer_operational_question(
         source="api.reviews.questions",
         title="Advisory review persisted",
         failure_detail="Advisory review was persisted, but durable audit persistence failed.",
-        actor_id=payload.actor_id,
+        actor_id=str(operator_context["actor_id"]),
         strategy_name=_strategy_name_from_review(response),
         question=payload.question,
     )

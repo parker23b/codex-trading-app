@@ -26,6 +26,7 @@ const links = [
   { href: "/markets", label: "Investigate" },
   { href: "/events", label: "Events" },
   { href: "/strategies", label: "Strategies" },
+  { href: "/backtests", label: "Backtests" },
 ];
 
 function errorMessage(error: unknown, fallback: string) {
