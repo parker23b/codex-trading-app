@@ -221,3 +221,16 @@ The typed route inventory includes:
 - `GET /backtests` and the run configuration, metrics, trades, equity, warnings, and instrument routes as passive reads.
 
 A backtest references an immutable dataset ID and checksum. It never accepts a provider/date range as a replay source.
+Run creation also accepts typed warm-up configuration:
+`warmup_mode=NONE|CANDLE_COUNT`, non-negative `warmup_candle_count`, and an
+explicit `allow_insufficient_warmup` policy. Run and instrument responses expose
+effective warm-up/trading boundaries, sufficiency/degraded truth, warnings,
+consumed counts, and first tradable timestamps.
+
+`warmup_warnings` is a typed array with stable fields: `code`, `severity`,
+`instrument_id`, `requested_warmup_candles`, `available_warmup_candles`,
+`message`, optional `first_available_at`, and optional `trading_start_at`.
+Strict insufficient warm-up returns a persisted `FAILED` run with all requested
+instrument diagnostics. Its warning and instrument routes remain readable;
+metrics, trades, and equity are completed-run analytics and return `409` for a
+failed run.

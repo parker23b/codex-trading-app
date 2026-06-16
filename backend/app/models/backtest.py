@@ -189,6 +189,20 @@ class BacktestRun(SQLModel, table=True):
         sa_column=Column(UTCDateTime(), nullable=False)
     )
     requested_end_at: datetime = Field(sa_column=Column(UTCDateTime(), nullable=False))
+    warmup_mode: str = Field(default="NONE")
+    warmup_candle_count: int = Field(default=0)
+    allow_insufficient_warmup: bool = Field(default=False)
+    warmup_start_at: datetime | None = Field(
+        default=None, sa_column=Column(UTCDateTime(), nullable=True)
+    )
+    trading_start_at: datetime | None = Field(
+        default=None, sa_column=Column(UTCDateTime(), nullable=True)
+    )
+    warmup_sufficient: bool = Field(default=True)
+    warmup_degraded: bool = Field(default=False)
+    warmup_warnings: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSON, nullable=False)
+    )
     effective_start_at: datetime | None = Field(
         default=None, sa_column=Column(UTCDateTime(), nullable=True)
     )
@@ -238,6 +252,8 @@ class BacktestRunInstrument(SQLModel, table=True):
     provider_instrument: str
     dataset_partition_id: int
     candle_count: int = 0
+    warmup_candles_consumed: int = 0
+    first_tradable_at: datetime = Field(sa_column=Column(UTCDateTime(), nullable=False))
     metrics: dict[str, Any] = Field(
         default_factory=dict, sa_column=Column(JSON, nullable=False)
     )

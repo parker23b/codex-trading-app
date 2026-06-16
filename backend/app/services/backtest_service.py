@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 import json
@@ -40,10 +41,12 @@ from app.services.historical_data_service import HistoricalDataService
 from app.strategies.registry import strategy_registry
 
 
-BACKTEST_RESULT_MANIFEST_VERSION = "BACKTEST_RESULT_MANIFEST_V1"
+BACKTEST_RESULT_MANIFEST_V1 = "BACKTEST_RESULT_MANIFEST_V1"
+BACKTEST_RESULT_MANIFEST_V2 = "BACKTEST_RESULT_MANIFEST_V2"
+BACKTEST_RESULT_MANIFEST_VERSION = BACKTEST_RESULT_MANIFEST_V2
 BACKTEST_ACCOUNTING_MODEL_VERSION = "EXECUTABLE_FILL_ACCOUNTING_V1"
-CANONICAL_BACKTEST_RESULT_MANIFEST_SCHEMA = {
-    "manifest_version": BACKTEST_RESULT_MANIFEST_VERSION,
+CANONICAL_BACKTEST_RESULT_MANIFEST_V1_SCHEMA = {
+    "manifest_version": BACKTEST_RESULT_MANIFEST_V1,
     "accounting_model": BACKTEST_ACCOUNTING_MODEL_VERSION,
     "run": (
         "strategy_identifier",
@@ -119,6 +122,93 @@ CANONICAL_BACKTEST_RESULT_MANIFEST_SCHEMA = {
         "metrics",
     ),
 }
+CANONICAL_BACKTEST_RESULT_MANIFEST_SCHEMA = {
+    "manifest_version": BACKTEST_RESULT_MANIFEST_VERSION,
+    "accounting_model": BACKTEST_ACCOUNTING_MODEL_VERSION,
+    "run": (
+        "strategy_identifier",
+        "strategy_version",
+        "strategy_configuration",
+        "dataset_id",
+        "dataset_checksum",
+        "shortlist",
+        "timeframe",
+        "requested_start_at",
+        "requested_end_at",
+        "warmup_mode",
+        "warmup_candle_count",
+        "allow_insufficient_warmup",
+        "warmup_start_at",
+        "trading_start_at",
+        "warmup_sufficient",
+        "warmup_degraded",
+        "warmup_warnings",
+        "effective_start_at",
+        "effective_end_at",
+        "starting_capital",
+        "position_sizing_mode",
+        "risk_configuration",
+        "spread_model",
+        "spread_assumption",
+        "slippage_model",
+        "slippage_assumption",
+        "fee_model",
+        "fee_assumption",
+        "open_position_treatment",
+        "pricing_mode",
+        "evaluation_boundary",
+        "status",
+        "result_summary",
+    ),
+    "trade": (
+        "deterministic_sequence",
+        "instrument",
+        "direction",
+        "size",
+        "open_price",
+        "close_price",
+        "open_time",
+        "close_time",
+        "gross_pnl",
+        "fees",
+        "spread_cost",
+        "slippage_cost",
+        "net_pnl",
+        "exit_reason",
+        "stop_loss_price",
+        "take_profit_price",
+        "conservative_ambiguity",
+        "pricing_mode",
+        "details",
+    ),
+    "equity": (
+        "timestamp",
+        "cash",
+        "unrealised_pnl",
+        "equity",
+        "drawdown",
+        "drawdown_percent",
+        "open_position_count",
+    ),
+    "metric": ("scope", "metric_key", "value"),
+    "warning": (
+        "deterministic_sequence",
+        "code",
+        "severity",
+        "message",
+        "instrument",
+        "timestamp",
+        "details",
+    ),
+    "instrument": (
+        "instrument",
+        "provider_instrument",
+        "candle_count",
+        "warmup_candles_consumed",
+        "first_tradable_at",
+        "metrics",
+    ),
+}
 BACKTEST_RESULT_PROJECTION_ONLY_FIELDS = {
     "run": (
         "id",
@@ -140,6 +230,47 @@ BACKTEST_RESULT_STATUS_CONSTRAINED_FIELDS = {
 BACKTEST_RESULT_VERIFICATION_ENVELOPE_FIELDS = {
     "run": ("result_manifest_version", "result_checksum"),
 }
+
+
+@dataclass(frozen=True, slots=True)
+class WarmupInstrumentPreparation:
+    warmup_candles_consumed: int
+    first_tradable_at: datetime
+    trading_candle_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class WarmupWarning:
+    code: str
+    severity: str
+    instrument_id: str
+    requested_warmup_candles: int
+    available_warmup_candles: int
+    message: str
+    first_available_at: datetime | None
+    trading_start_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class WarmupPreparation:
+    warmup_start_at: datetime
+    trading_start_at: datetime
+    sufficient: bool
+    degraded: bool
+    warnings: tuple[WarmupWarning, ...]
+    instruments: dict[str, WarmupInstrumentPreparation]
+
+
+class InsufficientWarmupError(ValueError):
+    def __init__(
+        self,
+        *,
+        preparation: WarmupPreparation,
+        partitions: dict[str, HistoricalDatasetPartition],
+    ) -> None:
+        self.preparation = preparation
+        self.partitions = partitions
+        super().__init__("; ".join(warning.message for warning in preparation.warnings))
 
 
 class BacktestService:
@@ -182,6 +313,9 @@ class BacktestService:
         fee_model: str,
         fee_assumption: dict[str, object],
         open_position_treatment: str,
+        warmup_mode: str = "NONE",
+        warmup_candle_count: int = 0,
+        allow_insufficient_warmup: bool = False,
     ) -> BacktestRun:
         dataset = self.datasets.verify_dataset_checksum(dataset_id)
         metadata = strategy_registry.get_metadata(strategy_identifier)
@@ -217,6 +351,8 @@ class BacktestService:
             fee_model=fee_model,
             fee_assumption=fee_assumption,
             open_position_treatment=open_position_treatment,
+            warmup_mode=warmup_mode,
+            warmup_candle_count=warmup_candle_count,
         )
         run = BacktestRun(
             id=str(uuid4()),
@@ -234,6 +370,11 @@ class BacktestService:
             timeframe=timeframe,
             requested_start_at=self._utc(start_at),
             requested_end_at=self._utc(end_at),
+            warmup_mode=warmup_mode,
+            warmup_candle_count=warmup_candle_count,
+            allow_insufficient_warmup=allow_insufficient_warmup,
+            warmup_start_at=self._utc(start_at),
+            trading_start_at=self._utc(start_at),
             starting_capital=starting_capital,
             position_sizing_mode=position_sizing_mode,
             risk_configuration=dict(risk_configuration),
@@ -249,10 +390,17 @@ class BacktestService:
         self.session.add(run)
         self.session.commit()
         try:
-            candles, partitions = self._validate_and_load(
+            candles, partitions, warmup = self._validate_and_load(
                 run=run,
                 supported_asset_classes=metadata.supported_asset_classes,
             )
+            run.warmup_start_at = warmup.warmup_start_at
+            run.trading_start_at = warmup.trading_start_at
+            run.warmup_sufficient = warmup.sufficient
+            run.warmup_degraded = warmup.degraded
+            run.warmup_warnings = [
+                self._warmup_warning_payload(item) for item in warmup.warnings
+            ]
             run.status = BacktestRunStatus.RUNNING.value
             run.started_at = datetime.now(UTC)
             self.session.add(run)
@@ -279,11 +427,14 @@ class BacktestService:
                         fee_value=float(fee_assumption.get("value", 0.0)),
                     ),
                     open_position_treatment=open_position_treatment,
+                    trading_start_at=warmup.trading_start_at,
+                    warmup_mode=warmup_mode,
+                    warmup_candle_count=warmup_candle_count,
                 ),
-                clock=SimulatedClock(self._stored_utc(run.requested_start_at)),
+                clock=SimulatedClock(warmup.warmup_start_at),
             )
             result = engine.run(candles)
-            self._persist_result(run, result, partitions, candles)
+            self._persist_result(run, result, partitions, warmup)
         except Exception as exc:
             self.session.rollback()
             persisted_run = self.session.get(BacktestRun, run.id)
@@ -291,6 +442,20 @@ class BacktestService:
                 run = persisted_run
             run.status = BacktestRunStatus.FAILED.value
             run.failure_reason = str(exc)
+            if isinstance(exc, InsufficientWarmupError):
+                warmup = exc.preparation
+                run.warmup_start_at = warmup.warmup_start_at
+                run.trading_start_at = warmup.trading_start_at
+                run.warmup_sufficient = warmup.sufficient
+                run.warmup_degraded = warmup.degraded
+                run.warmup_warnings = [
+                    self._warmup_warning_payload(item) for item in warmup.warnings
+                ]
+                self._persist_failed_warmup_diagnostics(
+                    run,
+                    partitions=exc.partitions,
+                    warmup=warmup,
+                )
             run.completed_at = datetime.now(UTC)
             self.session.add(run)
             self.session.commit()
@@ -368,6 +533,7 @@ class BacktestService:
         self,
         run: BacktestRun,
         *,
+        manifest_version: str | None = None,
         trades: list[BacktestTrade] | None = None,
         equity: list[BacktestEquityPoint] | None = None,
         metrics: list[BacktestMetric] | None = None,
@@ -381,36 +547,56 @@ class BacktestService:
         instrument_rows = (
             instruments if instruments is not None else self.instruments(run.id)
         )
+        resolved_manifest_version = manifest_version or BACKTEST_RESULT_MANIFEST_VERSION
+        if resolved_manifest_version not in {
+            BACKTEST_RESULT_MANIFEST_V1,
+            BACKTEST_RESULT_MANIFEST_V2,
+        }:
+            raise ValueError("Backtest result manifest version is unsupported.")
+        run_manifest = {
+            "strategy_identifier": run.strategy_identifier,
+            "strategy_version": run.strategy_version,
+            "strategy_configuration": run.strategy_configuration,
+            "dataset_id": run.dataset_id,
+            "dataset_checksum": run.dataset_checksum,
+            "shortlist": sorted(run.shortlist),
+            "timeframe": run.timeframe,
+            "requested_start_at": self._canonical_timestamp(run.requested_start_at),
+            "requested_end_at": self._canonical_timestamp(run.requested_end_at),
+            "effective_start_at": self._canonical_timestamp(run.effective_start_at),
+            "effective_end_at": self._canonical_timestamp(run.effective_end_at),
+            "starting_capital": run.starting_capital,
+            "position_sizing_mode": run.position_sizing_mode,
+            "risk_configuration": run.risk_configuration,
+            "spread_model": run.spread_model,
+            "spread_assumption": run.spread_assumption,
+            "slippage_model": run.slippage_model,
+            "slippage_assumption": run.slippage_assumption,
+            "fee_model": run.fee_model,
+            "fee_assumption": run.fee_assumption,
+            "open_position_treatment": run.open_position_treatment,
+            "pricing_mode": run.pricing_mode,
+            "evaluation_boundary": run.evaluation_boundary,
+            "status": run.status,
+            "result_summary": run.result_summary,
+        }
+        if resolved_manifest_version == BACKTEST_RESULT_MANIFEST_V2:
+            run_manifest = {
+                **dict(list(run_manifest.items())[:9]),
+                "warmup_mode": run.warmup_mode,
+                "warmup_candle_count": run.warmup_candle_count,
+                "allow_insufficient_warmup": run.allow_insufficient_warmup,
+                "warmup_start_at": self._canonical_timestamp(run.warmup_start_at),
+                "trading_start_at": self._canonical_timestamp(run.trading_start_at),
+                "warmup_sufficient": run.warmup_sufficient,
+                "warmup_degraded": run.warmup_degraded,
+                "warmup_warnings": run.warmup_warnings,
+                **dict(list(run_manifest.items())[9:]),
+            }
         return {
-            "manifest_version": BACKTEST_RESULT_MANIFEST_VERSION,
+            "manifest_version": resolved_manifest_version,
             "accounting_model": BACKTEST_ACCOUNTING_MODEL_VERSION,
-            "run": {
-                "strategy_identifier": run.strategy_identifier,
-                "strategy_version": run.strategy_version,
-                "strategy_configuration": run.strategy_configuration,
-                "dataset_id": run.dataset_id,
-                "dataset_checksum": run.dataset_checksum,
-                "shortlist": sorted(run.shortlist),
-                "timeframe": run.timeframe,
-                "requested_start_at": self._canonical_timestamp(run.requested_start_at),
-                "requested_end_at": self._canonical_timestamp(run.requested_end_at),
-                "effective_start_at": self._canonical_timestamp(run.effective_start_at),
-                "effective_end_at": self._canonical_timestamp(run.effective_end_at),
-                "starting_capital": run.starting_capital,
-                "position_sizing_mode": run.position_sizing_mode,
-                "risk_configuration": run.risk_configuration,
-                "spread_model": run.spread_model,
-                "spread_assumption": run.spread_assumption,
-                "slippage_model": run.slippage_model,
-                "slippage_assumption": run.slippage_assumption,
-                "fee_model": run.fee_model,
-                "fee_assumption": run.fee_assumption,
-                "open_position_treatment": run.open_position_treatment,
-                "pricing_mode": run.pricing_mode,
-                "evaluation_boundary": run.evaluation_boundary,
-                "status": run.status,
-                "result_summary": run.result_summary,
-            },
+            "run": run_manifest,
             "trades": [
                 {
                     "deterministic_sequence": row.deterministic_sequence,
@@ -481,12 +667,25 @@ class BacktestService:
                 )
             ],
             "instruments": [
-                {
-                    "instrument": row.instrument,
-                    "provider_instrument": row.provider_instrument,
-                    "candle_count": row.candle_count,
-                    "metrics": row.metrics,
-                }
+                (
+                    {
+                        "instrument": row.instrument,
+                        "provider_instrument": row.provider_instrument,
+                        "candle_count": row.candle_count,
+                        "warmup_candles_consumed": row.warmup_candles_consumed,
+                        "first_tradable_at": self._canonical_timestamp(
+                            row.first_tradable_at
+                        ),
+                        "metrics": row.metrics,
+                    }
+                    if resolved_manifest_version == BACKTEST_RESULT_MANIFEST_V2
+                    else {
+                        "instrument": row.instrument,
+                        "provider_instrument": row.provider_instrument,
+                        "candle_count": row.candle_count,
+                        "metrics": row.metrics,
+                    }
+                )
                 for row in sorted(
                     instrument_rows,
                     key=lambda item: item.instrument,
@@ -498,6 +697,7 @@ class BacktestService:
         self,
         run: BacktestRun,
         *,
+        manifest_version: str | None = None,
         trades: list[BacktestTrade] | None = None,
         equity: list[BacktestEquityPoint] | None = None,
         metrics: list[BacktestMetric] | None = None,
@@ -506,6 +706,7 @@ class BacktestService:
     ) -> str:
         payload = self.canonical_result_manifest(
             run,
+            manifest_version=manifest_version,
             trades=trades,
             equity=equity,
             metrics=metrics,
@@ -526,9 +727,15 @@ class BacktestService:
             raise ValueError("Only completed backtest results can be verified.")
         if run.failure_reason is not None:
             raise ValueError("Completed backtest result cannot have a failure reason.")
-        if run.result_manifest_version != BACKTEST_RESULT_MANIFEST_VERSION:
+        if run.result_manifest_version not in {
+            BACKTEST_RESULT_MANIFEST_V1,
+            BACKTEST_RESULT_MANIFEST_V2,
+        }:
             raise ValueError("Backtest result manifest version is unsupported.")
-        actual = self.result_checksum(run)
+        actual = self.result_checksum(
+            run,
+            manifest_version=run.result_manifest_version,
+        )
         if not run.result_checksum or actual != run.result_checksum:
             raise ValueError(f"Backtest result checksum mismatch for '{run.id}'.")
         return run
@@ -541,6 +748,7 @@ class BacktestService:
     ) -> tuple[
         dict[str, list[HistoricalCandle]],
         dict[str, HistoricalDatasetPartition],
+        WarmupPreparation,
     ]:
         dataset = self.datasets.verify_dataset_checksum(run.dataset_id)
         if dataset.status != DatasetStatus.READY.value or not dataset.checksum:
@@ -580,6 +788,9 @@ class BacktestService:
             )
 
         candles_by_instrument: dict[str, list[HistoricalCandle]] = {}
+        warmup_instruments: dict[str, WarmupInstrumentPreparation] = {}
+        warmup_warnings: list[WarmupWarning] = []
+        warmup_starts: list[datetime] = []
         total_candles = 0
         for instrument in sorted(run.shortlist):
             partition = partitions[instrument]
@@ -593,17 +804,64 @@ class BacktestService:
                 raise ValueError(
                     f"Requested date range is not covered for {instrument}."
                 )
+            required_warmup_count = (
+                run.warmup_candle_count if run.warmup_mode == "CANDLE_COUNT" else 0
+            )
+            required_warmup_start = requested_start - timedelta(
+                seconds=target_seconds * required_warmup_count
+            )
+            load_start = max(
+                required_warmup_start,
+                self._ceil_timeframe_boundary(
+                    self._stored_utc(partition.earliest_at), target_seconds
+                ),
+            )
             candles = [
                 candle
                 for candle in self.datasets.load_partition(partition)
-                if requested_start <= candle.timestamp.astimezone(UTC) < requested_end
+                if load_start <= candle.timestamp.astimezone(UTC) < requested_end
             ]
             if run.timeframe != partition.timeframe:
                 candles = resample_candles(candles, run.timeframe)
-            if not candles:
+            trading_candles = [
+                candle
+                for candle in candles
+                if requested_start <= candle.timestamp.astimezone(UTC) < requested_end
+            ]
+            if not trading_candles:
                 raise ValueError(
                     f"Requested date range produced no candles for {instrument}."
                 )
+            warmup_candidates = [
+                candle
+                for candle in candles
+                if candle.timestamp.astimezone(UTC) < requested_start
+            ]
+            warmup_candles = (
+                warmup_candidates[-required_warmup_count:]
+                if required_warmup_count
+                else []
+            )
+            if len(warmup_candles) < required_warmup_count:
+                warning = WarmupWarning(
+                    code="INSUFFICIENT_WARMUP",
+                    severity=("WARNING" if run.allow_insufficient_warmup else "ERROR"),
+                    instrument_id=instrument,
+                    requested_warmup_candles=required_warmup_count,
+                    available_warmup_candles=len(warmup_candles),
+                    message=(
+                        f"{instrument} supplied {len(warmup_candles)} of "
+                        f"{required_warmup_count} required warm-up candles."
+                    ),
+                    first_available_at=(
+                        warmup_candidates[0].timestamp.astimezone(UTC)
+                        if warmup_candidates
+                        else None
+                    ),
+                    trading_start_at=requested_start,
+                )
+                warmup_warnings.append(warning)
+            candles = [*warmup_candles, *trading_candles]
             components = set(candles[0].available_components)
             if (
                 not {"bid", "ask"}.issubset(components)
@@ -613,22 +871,48 @@ class BacktestService:
                     f"{instrument} lacks bid/ask candles; configure a synthetic spread."
                 )
             candles_by_instrument[instrument] = candles
+            first_tradable_at = trading_candles[0].timestamp.astimezone(UTC)
+            warmup_instruments[instrument] = WarmupInstrumentPreparation(
+                warmup_candles_consumed=len(warmup_candles),
+                first_tradable_at=first_tradable_at,
+                trading_candle_count=len(trading_candles),
+            )
+            warmup_starts.append(
+                warmup_candles[0].timestamp.astimezone(UTC)
+                if warmup_candles
+                else requested_start
+            )
             total_candles += len(candles)
         if total_candles > self.settings.backtest_max_candles_per_run:
             raise ValueError(
                 f"Run contains {total_candles} candles, exceeding the synchronous "
                 f"limit of {self.settings.backtest_max_candles_per_run}."
             )
-        return candles_by_instrument, {
+        sufficient = not warmup_warnings
+        selected_partitions = {
             instrument: partitions[instrument] for instrument in run.shortlist
         }
+        warmup = WarmupPreparation(
+            warmup_start_at=min(warmup_starts),
+            trading_start_at=requested_start,
+            sufficient=sufficient,
+            degraded=not sufficient and run.allow_insufficient_warmup,
+            warnings=tuple(warmup_warnings),
+            instruments=warmup_instruments,
+        )
+        if warmup_warnings and not run.allow_insufficient_warmup:
+            raise InsufficientWarmupError(
+                preparation=warmup,
+                partitions=selected_partitions,
+            )
+        return candles_by_instrument, selected_partitions, warmup
 
     def _persist_result(
         self,
         run: BacktestRun,
         result: ReplayResult,
         partitions: dict[str, HistoricalDatasetPartition],
-        candles_by_instrument: dict[str, list[HistoricalCandle]],
+        warmup: WarmupPreparation,
     ) -> None:
         run.status = BacktestRunStatus.COMPLETED.value
         run.failure_reason = None
@@ -731,6 +1015,26 @@ class BacktestService:
             }
             for warning in result.warnings
         ]
+        warning_values.extend(
+            {
+                "code": item.code,
+                "severity": item.severity,
+                "message": item.message,
+                "instrument": item.instrument_id,
+                "timestamp": item.trading_start_at,
+                "details": {
+                    "requested_warmup_candles": item.requested_warmup_candles,
+                    "available_warmup_candles": item.available_warmup_candles,
+                    "first_available_at": self._canonical_timestamp(
+                        item.first_available_at
+                    ),
+                    "trading_start_at": self._canonical_timestamp(
+                        item.trading_start_at
+                    ),
+                },
+            }
+            for item in warmup.warnings
+        )
         for partition in partitions.values():
             for gap in partition.detected_gaps:
                 warning_values.append(
@@ -781,6 +1085,7 @@ class BacktestService:
                 run_id=run.id,
                 deterministic_sequence=sequence,
                 code=str(item["code"]),
+                severity=str(item.get("severity", "warning")),
                 message=str(item["message"]),
                 instrument=(
                     str(item["instrument"]) if item["instrument"] is not None else None
@@ -796,7 +1101,11 @@ class BacktestService:
                 instrument=instrument,
                 provider_instrument=partition.provider_instrument,
                 dataset_partition_id=partition.id or 0,
-                candle_count=len(candles_by_instrument[instrument]),
+                candle_count=warmup.instruments[instrument].trading_candle_count,
+                warmup_candles_consumed=(
+                    warmup.instruments[instrument].warmup_candles_consumed
+                ),
+                first_tradable_at=warmup.instruments[instrument].first_tradable_at,
                 metrics=result.metrics_by_instrument.get(instrument, {}),
             )
             for instrument, partition in sorted(partitions.items())
@@ -825,6 +1134,67 @@ class BacktestService:
             ).all()
         )
 
+    def _persist_failed_warmup_diagnostics(
+        self,
+        run: BacktestRun,
+        *,
+        partitions: dict[str, HistoricalDatasetPartition],
+        warmup: WarmupPreparation,
+    ) -> None:
+        warning_rows = [
+            BacktestWarning(
+                run_id=run.id,
+                deterministic_sequence=sequence,
+                code=warning.code,
+                severity=warning.severity,
+                message=warning.message,
+                instrument=warning.instrument_id,
+                timestamp=warning.trading_start_at,
+                details={
+                    "requested_warmup_candles": warning.requested_warmup_candles,
+                    "available_warmup_candles": warning.available_warmup_candles,
+                    "first_available_at": self._canonical_timestamp(
+                        warning.first_available_at
+                    ),
+                    "trading_start_at": self._canonical_timestamp(
+                        warning.trading_start_at
+                    ),
+                },
+            )
+            for sequence, warning in enumerate(warmup.warnings, start=1)
+        ]
+        instrument_rows = [
+            BacktestRunInstrument(
+                run_id=run.id,
+                instrument=instrument,
+                provider_instrument=partition.provider_instrument,
+                dataset_partition_id=partition.id or 0,
+                candle_count=warmup.instruments[instrument].trading_candle_count,
+                warmup_candles_consumed=(
+                    warmup.instruments[instrument].warmup_candles_consumed
+                ),
+                first_tradable_at=warmup.instruments[instrument].first_tradable_at,
+                metrics={},
+            )
+            for instrument, partition in sorted(partitions.items())
+        ]
+        self.session.add_all([*warning_rows, *instrument_rows])
+
+    def _warmup_warning_payload(
+        self,
+        warning: WarmupWarning,
+    ) -> dict[str, object]:
+        return {
+            "code": warning.code,
+            "severity": warning.severity,
+            "instrument_id": warning.instrument_id,
+            "requested_warmup_candles": warning.requested_warmup_candles,
+            "available_warmup_candles": warning.available_warmup_candles,
+            "message": warning.message,
+            "first_available_at": self._canonical_timestamp(warning.first_available_at),
+            "trading_start_at": self._canonical_timestamp(warning.trading_start_at),
+        }
+
     @staticmethod
     def _validate_configuration(
         *,
@@ -841,6 +1211,8 @@ class BacktestService:
         fee_model: str,
         fee_assumption: dict[str, object],
         open_position_treatment: str,
+        warmup_mode: str,
+        warmup_candle_count: int,
     ) -> None:
         if timeframe not in TIMEFRAME_SECONDS:
             raise ValueError(f"Unsupported backtest timeframe '{timeframe}'.")
@@ -848,6 +1220,12 @@ class BacktestService:
         normalized_end = BacktestService._utc(end_at)
         if normalized_start >= normalized_end:
             raise ValueError("Backtest start must be before end.")
+        if warmup_mode not in {"NONE", "CANDLE_COUNT"}:
+            raise ValueError(f"Unsupported warm-up mode '{warmup_mode}'.")
+        if warmup_candle_count < 0 or not float(warmup_candle_count).is_integer():
+            raise ValueError("warmup_candle_count must be a non-negative whole number.")
+        if warmup_mode == "NONE" and warmup_candle_count != 0:
+            raise ValueError("NONE warm-up mode requires warmup_candle_count=0.")
         if not isfinite(starting_capital) or starting_capital <= 0:
             raise ValueError("Starting capital must be finite and positive.")
         if position_sizing_mode not in {"FIXED_UNITS", "PERCENT_RISK"}:
@@ -932,3 +1310,11 @@ class BacktestService:
         if value is None:
             return None
         return BacktestService._stored_utc(value).isoformat().replace("+00:00", "Z")
+
+    @staticmethod
+    def _ceil_timeframe_boundary(value: datetime, timeframe_seconds: int) -> datetime:
+        epoch = int(value.timestamp())
+        remainder = epoch % timeframe_seconds
+        if value.microsecond or remainder:
+            epoch += timeframe_seconds - remainder
+        return datetime.fromtimestamp(epoch, tz=UTC)

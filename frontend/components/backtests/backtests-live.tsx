@@ -46,7 +46,7 @@ type Props = {
 
 type ResultBundle = {
   run: BacktestRun;
-  metrics: BacktestMetrics;
+  metrics: BacktestMetrics | null;
   trades: BacktestTrade[];
   equity: BacktestEquityPoint[];
   warnings: BacktestWarning[];
@@ -249,12 +249,29 @@ export function BacktestsLive({
     setPending("result");
     try {
       const run = await getBacktest(runId);
-      const metrics = await getBacktestMetrics(runId);
-      const trades = await getBacktestTrades(runId);
-      const equity = await getBacktestEquity(runId);
-      const warnings = await getBacktestWarnings(runId);
-      const instruments = await getBacktestInstruments(runId);
-      setResult({ run, metrics, trades, equity, warnings, instruments });
+      if (run.status === "COMPLETED") {
+        const [metrics, trades, equity, warnings, instruments] = await Promise.all([
+          getBacktestMetrics(runId),
+          getBacktestTrades(runId),
+          getBacktestEquity(runId),
+          getBacktestWarnings(runId),
+          getBacktestInstruments(runId),
+        ]);
+        setResult({ run, metrics, trades, equity, warnings, instruments });
+      } else {
+        const [warnings, instruments] = await Promise.all([
+          getBacktestWarnings(runId),
+          getBacktestInstruments(runId),
+        ]);
+        setResult({
+          run,
+          metrics: null,
+          trades: [],
+          equity: [],
+          warnings,
+          instruments,
+        });
+      }
       setError(null);
     } catch (reason) {
       setError(errorMessage(reason));
@@ -373,6 +390,9 @@ export function BacktestsLive({
         timeframe: String(form.get("timeframe")),
         start_at: localFormValueToUtcIso(String(form.get("start_at"))),
         end_at: localFormValueToUtcIso(String(form.get("end_at"))),
+        warmup_mode: String(form.get("warmup_mode")) as "NONE" | "CANDLE_COUNT",
+        warmup_candle_count: Number(form.get("warmup_candle_count")),
+        allow_insufficient_warmup: form.get("allow_insufficient_warmup") === "on",
         starting_capital: Number(form.get("starting_capital")),
         position_sizing_mode: String(form.get("position_sizing_mode")),
         risk_configuration: {
@@ -711,6 +731,25 @@ export function BacktestsLive({
               <input className={inputClass} name="end_at" type="datetime-local" defaultValue={coverageEndValue(selectedDataset)} required />
             </div>
 
+            <div className="grid grid-cols-3 gap-2 max-[720px]:grid-cols-1">
+              <select className={inputClass} name="warmup_mode" defaultValue="NONE">
+                <option>NONE</option>
+                <option>CANDLE_COUNT</option>
+              </select>
+              <input
+                className={inputClass}
+                name="warmup_candle_count"
+                type="number"
+                min="0"
+                step="1"
+                defaultValue="0"
+              />
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="allow_insufficient_warmup" />
+                Allow degraded warm-up
+              </label>
+            </div>
+
             <div className="grid grid-cols-4 gap-2 max-[720px]:grid-cols-2">
               <input className={inputClass} name="starting_capital" type="number" min="1" step="0.01" defaultValue="100000" />
               <select className={inputClass} name="position_sizing_mode" defaultValue="FIXED_UNITS">
@@ -812,7 +851,7 @@ export function BacktestsLive({
       {pending === "result" ? <DataIndicator state="loading" message="Loading persisted result..." /> : null}
       {result ? (
         <>
-          {result.run.status === "COMPLETED" ? (
+          {result.run.status === "COMPLETED" && result.metrics ? (
             <>
               <StatusStrip
                 items={[
@@ -859,7 +898,7 @@ export function BacktestsLive({
                       { key: "direction", header: "Side", render: (trade) => trade.direction },
                       { key: "open", header: "Open", render: (trade) => adaptivePrice(trade.open_price) },
                       { key: "close", header: "Close", render: (trade) => adaptivePrice(trade.close_price) },
-                      { key: "pnl", header: "Closed trade net P&L", render: (trade) => monetaryValue(trade.net_pnl, result.metrics.run) },
+                      { key: "pnl", header: "Closed trade net P&L", render: (trade) => monetaryValue(trade.net_pnl, result.metrics!.run) },
                       { key: "reason", header: "Exit", render: (trade) => trade.exit_reason },
                     ]}
                   />
@@ -872,8 +911,10 @@ export function BacktestsLive({
                     columns={[
                       { key: "instrument", header: "Instrument", render: (item) => item.instrument },
                       { key: "candles", header: "Candles", render: (item) => item.candle_count },
-                      { key: "trades", header: "Closed trades", render: (item) => numberValue(item.metrics.closed_trade_count) ?? 0 },
-                      { key: "pnl", header: "Total P&L", render: (item) => monetaryValue(item.metrics.total_pnl, item.metrics) },
+                      { key: "warmup", header: "Warm-up", render: (item) => item.warmup_candles_consumed },
+                      { key: "tradable", header: "First tradable", render: (item) => utcTimestampLabel(item.first_tradable_at) },
+                      { key: "trades", header: "Closed trades", render: (item) => item.metrics ? numberValue(item.metrics.closed_trade_count) ?? 0 : "Unavailable" },
+                      { key: "pnl", header: "Total P&L", render: (item) => item.metrics ? monetaryValue(item.metrics.total_pnl, item.metrics) : "Unavailable" },
                     ]}
                   />
                 </Panel>
@@ -888,6 +929,15 @@ export function BacktestsLive({
               <p className="text-sm">
                 {result.run.failure_reason ?? `Run status is ${result.run.status}.`}
               </p>
+              <CompactTable
+                rows={result.instruments}
+                emptyLabel="No per-instrument diagnostics were persisted."
+                columns={[
+                  { key: "instrument", header: "Instrument", render: (item) => item.instrument },
+                  { key: "warmup", header: "Warm-up consumed", render: (item) => item.warmup_candles_consumed },
+                  { key: "tradable", header: "First tradable", render: (item) => utcTimestampLabel(item.first_tradable_at) },
+                ]}
+              />
             </Panel>
           )}
 
@@ -899,14 +949,22 @@ export function BacktestsLive({
                 <p>Result checksum: <code>{result.run.result_checksum ?? "Unavailable"}</code></p>
                 <p>Pricing: {result.run.pricing_mode}</p>
                 <p>Boundary: {result.run.evaluation_boundary}</p>
+                <p>
+                  Warm-up: {result.run.warmup_mode} · {result.run.warmup_candle_count} candles
+                  · {result.run.warmup_sufficient ? "sufficient" : "insufficient"}
+                  {result.run.warmup_degraded ? " · degraded" : ""}
+                </p>
+                <p>Warm-up start: {utcTimestampLabel(result.run.warmup_start_at)}</p>
+                <p>Trading start: {utcTimestampLabel(result.run.trading_start_at)}</p>
                 <p>Spread: {result.run.spread_model} · {JSON.stringify(result.run.spread_assumption)}</p>
                 <p>Slippage: {result.run.slippage_model} · {JSON.stringify(result.run.slippage_assumption)}</p>
                 <p>Fees: {result.run.fee_model} · {JSON.stringify(result.run.fee_assumption)}</p>
                 <p>End treatment: {result.run.open_position_treatment}</p>
                 <p>Exposure: wall-clock union across open intervals</p>
                 <p>
-                  Monetary values: {result.metrics.run.account_currency ?? result.metrics.run.monetary_unit_label};
-                  no real account currency is persisted unless explicitly supplied.
+                  {result.metrics
+                    ? `Monetary values: ${result.metrics.run.account_currency ?? result.metrics.run.monetary_unit_label}; no real account currency is persisted unless explicitly supplied.`
+                    : "Completed-run monetary metrics are unavailable for this run status."}
                 </p>
                 <p>Price decimals are adaptive display formatting, not broker tick precision.</p>
               </div>
@@ -922,6 +980,13 @@ export function BacktestsLive({
               {result.run.failure_reason ? (
                 <p className="text-sm">{result.run.failure_reason}</p>
               ) : null}
+              {result.run.warmup_warnings.map((warning, index) => (
+                <p key={`warmup-${index}-${warning.instrument_id}`} className="text-sm">
+                  Warm-up {warning.severity === "ERROR" ? "error" : "warning"}:
+                  {" "}{warning.instrument_id} · {warning.available_warmup_candles} of
+                  {" "}{warning.requested_warmup_candles} candles · {warning.message}
+                </p>
+              ))}
               {result.warnings.length ? (
                 <ul className="flex flex-col gap-2 text-sm">
                   {result.warnings.map((warning) => (

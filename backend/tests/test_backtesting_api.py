@@ -8,9 +8,18 @@ from pydantic import TypeAdapter, ValidationError
 from sqlmodel import select
 
 from app.api.contracts.backtesting import UtcDateTime
+from app.backtesting.candles import HistoricalCandle, PriceBar
 from app.backtesting.storage import JsonlHistoricalDataRepository
-from app.models.backtest import BacktestRun, DatasetAvailability, HistoricalDataset
+from app.models.backtest import (
+    BacktestEquityPoint,
+    BacktestMetric,
+    BacktestRun,
+    BacktestTrade,
+    DatasetAvailability,
+    HistoricalDataset,
+)
 from app.services.backtest_service import BacktestService
+from app.services.historical_data_service import HistoricalDataService
 
 
 AUTH = {"Authorization": "Bearer expected-token"}
@@ -25,6 +34,105 @@ def _csv() -> str:
             f"{price},{price + 1},{price - 1},{price},10"
         )
     return "\n".join(rows)
+
+
+def _backtest_payload(
+    dataset_id: str,
+    *,
+    shortlist: list[str] | None = None,
+    warmup_mode: str = "NONE",
+    warmup_candle_count: int = 0,
+    allow_insufficient_warmup: bool = False,
+) -> dict[str, object]:
+    return {
+        "strategy_identifier": "smoke_test_hold",
+        "profile_name": "default",
+        "strategy_parameters": {
+            "warmup_ticks": 2,
+            "hold_minutes": 0.5,
+        },
+        "dataset_id": dataset_id,
+        "shortlist": shortlist or ["TEST_FX"],
+        "timeframe": "1m",
+        "start_at": START.isoformat(),
+        "end_at": (START + timedelta(minutes=6)).isoformat(),
+        "warmup_mode": warmup_mode,
+        "warmup_candle_count": warmup_candle_count,
+        "allow_insufficient_warmup": allow_insufficient_warmup,
+        "starting_capital": 1000,
+        "position_sizing_mode": "FIXED_UNITS",
+        "risk_configuration": {
+            "fixed_size": 1,
+            "max_open_positions": 1,
+        },
+        "spread_model": "FIXED_BPS",
+        "spread_assumption": {"value": 0},
+        "slippage_model": "NONE",
+        "slippage_assumption": {"value": 0},
+        "fee_model": "NONE",
+        "fee_assumption": {"value": 0},
+        "open_position_treatment": "CLOSE_AT_END",
+    }
+
+
+def _multi_instrument_dataset(
+    session,
+    repository: JsonlHistoricalDataRepository,
+    instruments: list[str],
+):
+    service = HistoricalDataService(session, repository=repository)
+    dataset = service._start_dataset(
+        display_name="multi-instrument API fixture",
+        provider="CSV",
+        venue="TEST",
+        market_type="SPOT_FX",
+        asset_class="FOREX",
+        timeframe="1m",
+        import_parameters={
+            "instruments": instruments,
+            "start_at": START.isoformat(),
+            "end_at": (START + timedelta(minutes=6)).isoformat(),
+            "timeframe": "1m",
+        },
+    )
+    prepared = []
+    for instrument in instruments:
+        candles = [
+            HistoricalCandle(
+                timestamp=START + timedelta(minutes=index),
+                instrument=instrument,
+                timeframe="1m",
+                trade=PriceBar(
+                    open=price,
+                    high=price + 1,
+                    low=price - 1,
+                    close=price,
+                ),
+                volume=10.0,
+            )
+            for index, price in enumerate([100.0, 101.0, 102.0, 103.0, 104.0, 105.0])
+        ]
+        prepared.append(
+            service._prepare_partition(
+                dataset=dataset,
+                instrument=instrument,
+                provider_instrument=instrument,
+                candles=candles,
+                requested_start=START,
+                requested_end=START + timedelta(minutes=6),
+                requested_timeframe="1m",
+                source_metadata={
+                    "provider": "CSV",
+                    "venue": "TEST",
+                    "provider_instrument": instrument,
+                },
+            )
+        )
+    return service._publish_dataset(
+        dataset=dataset,
+        prepared=prepared,
+        requested_instruments=instruments,
+    )
 
 
 def test_backtesting_response_timestamp_contract_rejects_naive_values():
@@ -220,11 +328,19 @@ def test_typed_dataset_and_backtest_route_flow(client_factory, session, tmp_path
         run = created.json()
         assert run["status"] == "COMPLETED"
         assert run["evaluation_boundary"] == "CANDLE_CLOSE_NEXT_OPEN"
-        assert run["result_manifest_version"] == "BACKTEST_RESULT_MANIFEST_V1"
+        assert run["result_manifest_version"] == "BACKTEST_RESULT_MANIFEST_V2"
         assert run["result_checksum"]
+        assert run["warmup_mode"] == "NONE"
+        assert run["warmup_candle_count"] == 0
+        assert run["warmup_start_at"] == run["trading_start_at"]
+        assert run["warmup_sufficient"] is True
+        assert run["warmup_degraded"] is False
+        assert run["warmup_warnings"] == []
         for field_name in (
             "requested_start_at",
             "requested_end_at",
+            "warmup_start_at",
+            "trading_start_at",
             "effective_start_at",
             "effective_end_at",
             "created_at",
@@ -275,6 +391,8 @@ def test_typed_dataset_and_backtest_route_flow(client_factory, session, tmp_path
         assert [row["instrument"] for row in instruments.json()] == sorted(
             row["instrument"] for row in instruments.json()
         )
+        assert instruments.json()[0]["warmup_candles_consumed"] == 0
+        assert instruments.json()[0]["first_tradable_at"] == run["trading_start_at"]
 
         persisted_run = session.get(BacktestRun, run["id"])
         assert persisted_run is not None
@@ -294,6 +412,158 @@ def test_typed_dataset_and_backtest_route_flow(client_factory, session, tmp_path
         assert [row["instrument"] for row in instruments.json()] == [
             row["instrument"] for row in manifest["instruments"]
         ]
+
+
+def test_degraded_candle_count_warmup_api_exposes_typed_warning(
+    client_factory, tmp_path
+):
+    with client_factory(
+        operator_api_token="expected-token",
+        historical_data_dir=str(tmp_path / "history"),
+    ) as client:
+        imported = client.post(
+            "/historical-data/imports/csv",
+            headers=AUTH,
+            json={
+                "display_name": "Degraded warm-up fixture",
+                "csv_text": _csv(),
+                "asset_class": "FOREX",
+                "venue": "TEST",
+                "market_type": "SPOT_FX",
+            },
+        )
+        created = client.post(
+            "/backtests",
+            headers=AUTH,
+            json=_backtest_payload(
+                imported.json()["id"],
+                warmup_mode="CANDLE_COUNT",
+                warmup_candle_count=2,
+                allow_insufficient_warmup=True,
+            ),
+        )
+
+    assert created.status_code == 201
+    run = created.json()
+    assert run["status"] == "COMPLETED"
+    assert run["warmup_degraded"] is True
+    assert run["warmup_warnings"] == [
+        {
+            "code": "INSUFFICIENT_WARMUP",
+            "severity": "WARNING",
+            "instrument_id": "TEST_FX",
+            "requested_warmup_candles": 2,
+            "available_warmup_candles": 0,
+            "message": "TEST_FX supplied 0 of 2 required warm-up candles.",
+            "first_available_at": None,
+            "trading_start_at": START.isoformat().replace("+00:00", "Z"),
+        }
+    ]
+
+
+def test_strict_multi_instrument_warmup_failure_is_observable_without_analytics(
+    client_factory, session, tmp_path
+):
+    repository = JsonlHistoricalDataRepository(tmp_path / "history")
+    dataset = _multi_instrument_dataset(
+        session,
+        repository,
+        ["ALPHA_FX", "BETA_FX"],
+    )
+    with client_factory(
+        operator_api_token="expected-token",
+        historical_data_dir=str(tmp_path / "history"),
+    ) as client:
+        created = client.post(
+            "/backtests",
+            headers=AUTH,
+            json=_backtest_payload(
+                dataset.id,
+                shortlist=["ALPHA_FX", "BETA_FX"],
+                warmup_mode="CANDLE_COUNT",
+                warmup_candle_count=2,
+            ),
+        )
+        assert created.status_code == 201
+        run_id = created.json()["id"]
+        detail = client.get(f"/backtests/{run_id}")
+        warnings = client.get(f"/backtests/{run_id}/warnings")
+        instruments = client.get(f"/backtests/{run_id}/instruments")
+        analytics = {
+            suffix: client.get(f"/backtests/{run_id}/{suffix}")
+            for suffix in ("metrics", "trades", "equity")
+        }
+
+    assert detail.status_code == 200
+    run = detail.json()
+    assert run["status"] == "FAILED"
+    assert "ALPHA_FX supplied 0 of 2" in run["failure_reason"]
+    assert "BETA_FX supplied 0 of 2" in run["failure_reason"]
+    assert {warning["instrument_id"] for warning in run["warmup_warnings"]} == {
+        "ALPHA_FX",
+        "BETA_FX",
+    }
+    assert all(warning["severity"] == "ERROR" for warning in run["warmup_warnings"])
+    assert warnings.status_code == 200
+    assert {warning["instrument"] for warning in warnings.json()} == {
+        "ALPHA_FX",
+        "BETA_FX",
+    }
+    assert instruments.status_code == 200
+    assert [item["instrument"] for item in instruments.json()] == [
+        "ALPHA_FX",
+        "BETA_FX",
+    ]
+    assert all(item["metrics"] is None for item in instruments.json())
+    assert all(
+        item["first_tradable_at"] == START.isoformat().replace("+00:00", "Z")
+        for item in instruments.json()
+    )
+    assert all(response.status_code == 409 for response in analytics.values())
+    assert (
+        session.exec(
+            select(BacktestMetric).where(BacktestMetric.run_id == run_id)
+        ).all()
+        == []
+    )
+    assert (
+        session.exec(select(BacktestTrade).where(BacktestTrade.run_id == run_id)).all()
+        == []
+    )
+    assert (
+        session.exec(
+            select(BacktestEquityPoint).where(BacktestEquityPoint.run_id == run_id)
+        ).all()
+        == []
+    )
+
+
+def test_openapi_exposes_stable_warmup_warning_shape(client_factory, tmp_path):
+    with client_factory(
+        operator_api_token="expected-token",
+        historical_data_dir=str(tmp_path / "history"),
+    ) as client:
+        schema = client.get("/openapi.json").json()
+
+    warning_schema = schema["components"]["schemas"]["BacktestWarmupWarningResponse"]
+    assert set(warning_schema["required"]) == {
+        "code",
+        "severity",
+        "instrument_id",
+        "requested_warmup_candles",
+        "available_warmup_candles",
+        "message",
+    }
+    assert set(warning_schema["properties"]) == {
+        "code",
+        "severity",
+        "instrument_id",
+        "requested_warmup_candles",
+        "available_warmup_candles",
+        "message",
+        "first_available_at",
+        "trading_start_at",
+    }
 
 
 def test_api_rejects_checksum_valid_completed_run_with_false_failure_reason(

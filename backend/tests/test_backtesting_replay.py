@@ -100,6 +100,17 @@ class SingleRoundTripStrategy(ImmediateHoldStrategy):
         self.has_entered = True
 
 
+class ReadyAfterUpdatesStrategy(SingleRoundTripStrategy):
+    def __init__(self, *, required_updates: int, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.required_updates = required_updates
+
+    def should_enter_trade(self) -> bool:
+        return (
+            len(self.updates) >= self.required_updates and super().should_enter_trade()
+        )
+
+
 def _candles(instrument: str) -> list[HistoricalCandle]:
     return [
         HistoricalCandle(
@@ -157,6 +168,133 @@ def _trade_candles(
                 )
             )
     return rows
+
+
+def _warmup_run(
+    *,
+    strategy: Strategy,
+    prices: list[float],
+    trading_start_at: datetime,
+    open_position_treatment: str = "CLOSE_AT_END",
+    order_log: list[str] | None = None,
+):
+    if order_log is not None and isinstance(strategy, ImmediateHoldStrategy):
+        strategy.order_log = order_log
+    return BacktestReplayEngine(
+        strategies={"A": strategy},
+        configuration=ReplayConfiguration(
+            starting_capital=1000,
+            position_sizing_mode="FIXED_UNITS",
+            risk_configuration={"fixed_size": 1, "max_open_positions": 1},
+            execution_assumptions=ExecutionAssumptions(spread_model="NONE"),
+            open_position_treatment=open_position_treatment,
+            trading_start_at=trading_start_at,
+            warmup_mode="CANDLE_COUNT",
+            warmup_candle_count=2,
+        ),
+        clock=SimulatedClock(START),
+    ).run({"A": _trade_candles("A", prices)})
+
+
+def test_warmup_updates_strategy_state_but_cannot_create_trades():
+    trading_start = START + timedelta(minutes=2)
+    strategy = ReadyAfterUpdatesStrategy(required_updates=2)
+
+    result = _warmup_run(
+        strategy=strategy,
+        prices=[90, 95, 100, 101, 102],
+        trading_start_at=trading_start,
+    )
+
+    assert strategy.updates[:2] == [90, 95]
+    assert result.trades
+    assert all(trade.position.open_time >= trading_start for trade in result.trades)
+    assert result.trades[0].position.open_time == trading_start + timedelta(minutes=1)
+    assert result.equity[0].timestamp == trading_start + timedelta(minutes=1)
+
+
+def test_warmup_is_excluded_from_exposure_and_drawdown_curve():
+    trading_start = START + timedelta(minutes=2)
+    result = _warmup_run(
+        strategy=HoldWithoutStopStrategy(),
+        prices=[10_000, 1, 100, 100, 90],
+        trading_start_at=trading_start,
+    )
+
+    assert len(result.equity) == 3
+    assert all(sample.timestamp > trading_start for sample in result.equity)
+    assert result.metrics["wall_clock_exposure_pct"] == pytest.approx(200 / 3)
+    assert result.metrics["maximum_drawdown"] == 10
+
+
+def test_zero_warmup_matches_existing_replay_behavior():
+    candles = {"A": _trade_candles("A", [100, 101, 102, 103])}
+    baseline = BacktestReplayEngine(
+        strategies={"A": ImmediateHoldStrategy()},
+        configuration=ReplayConfiguration(
+            starting_capital=1000,
+            position_sizing_mode="FIXED_UNITS",
+            risk_configuration={"fixed_size": 1, "max_open_positions": 1},
+            execution_assumptions=ExecutionAssumptions(spread_model="NONE"),
+            open_position_treatment="CLOSE_AT_END",
+        ),
+        clock=SimulatedClock(START),
+    ).run(candles)
+    explicit_none = BacktestReplayEngine(
+        strategies={"A": ImmediateHoldStrategy()},
+        configuration=ReplayConfiguration(
+            starting_capital=1000,
+            position_sizing_mode="FIXED_UNITS",
+            risk_configuration={"fixed_size": 1, "max_open_positions": 1},
+            execution_assumptions=ExecutionAssumptions(spread_model="NONE"),
+            open_position_treatment="CLOSE_AT_END",
+            trading_start_at=START,
+            warmup_mode="NONE",
+            warmup_candle_count=0,
+        ),
+        clock=SimulatedClock(START),
+    ).run(candles)
+
+    assert explicit_none.trades == baseline.trades
+    assert explicit_none.equity == baseline.equity
+    assert explicit_none.metrics == baseline.metrics
+
+
+def test_same_timestamp_ordering_is_preserved_during_warmup():
+    order_log: list[str] = []
+    result = BacktestReplayEngine(
+        strategies={
+            "B": ImmediateHoldStrategy(order_log=order_log),
+            "A": ImmediateHoldStrategy(order_log=order_log),
+        },
+        configuration=ReplayConfiguration(
+            starting_capital=1000,
+            position_sizing_mode="FIXED_UNITS",
+            risk_configuration={"fixed_size": 1, "max_open_positions": 2},
+            execution_assumptions=ExecutionAssumptions(spread_model="NONE"),
+            open_position_treatment="CLOSE_AT_END",
+            trading_start_at=START + timedelta(minutes=2),
+            warmup_mode="CANDLE_COUNT",
+            warmup_candle_count=2,
+        ),
+        clock=SimulatedClock(START),
+    ).run(
+        {
+            instrument: _trade_candles(instrument, [100, 101, 102, 103])
+            for instrument in ("A", "B")
+        }
+    )
+
+    assert order_log[:4] == [
+        f"{(START + timedelta(minutes=1)).isoformat()}:A",
+        f"{(START + timedelta(minutes=1)).isoformat()}:B",
+        f"{(START + timedelta(minutes=2)).isoformat()}:A",
+        f"{(START + timedelta(minutes=2)).isoformat()}:B",
+    ]
+    assert all(
+        trade.position.open_time >= START + timedelta(minutes=2)
+        for trade in result.trades
+    )
 
 
 def _execute_actual_fill_case(

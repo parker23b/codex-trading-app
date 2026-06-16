@@ -131,10 +131,10 @@ as `NO_CLOSED_TRADES`, `NO_LOSING_TRADES`, or `NO_WINNING_TRADES`.
 
 ## Verify a Result
 
-Completed runs persist `BACKTEST_RESULT_MANIFEST_V1` and its SHA-256 checksum.
+New completed runs persist `BACKTEST_RESULT_MANIFEST_V2` and its SHA-256 checksum.
 The manifest covers strategy and dataset identity, run assumptions,
 deterministically ordered trades and equity, metrics, warnings, open-position
-marks, and per-instrument results.
+marks, warm-up configuration and sufficiency, and per-instrument results.
 
 Run/row primary keys, run name and notes, wall-clock audit timestamps, and
 dataset partition database IDs are projection-only and intentionally excluded.
@@ -144,7 +144,12 @@ verification to fail. The checksum is tamper evidence for the covered
 projection, not a digital signature or proof of broker-grade accuracy.
 Completed rows must have `failure_reason=null`; the API and verifier reject a
 completed row with false failure text. Failed runs keep their failure reason
-but do not receive a completed-result manifest or checksum.
+and warm-up diagnostics but do not receive a completed-result manifest,
+checksum, trades, equity, or metrics.
+
+Historical `BACKTEST_RESULT_MANIFEST_V1` results remain verifiable with the
+original pre-warm-up projection. V2 verifies the warm-up-aware projection.
+Unknown versions and corrupted checksums are rejected.
 
 ## Current Limits
 
@@ -159,5 +164,30 @@ but do not receive a completed-result manifest or checksum.
 - Result checksums do not identify the exact source build unless build
   provenance is separately supplied.
 - Adaptive price formatting is not instrument precision metadata.
+- Warm-up currently supports `NONE` and target-timeframe `CANDLE_COUNT`.
+  Duration/session-calendar warm-up is not implemented.
 - This data-integrity foundation does not establish full backtesting
   production readiness.
+
+## Warm-up and Trading Period
+
+The requested start is the trading boundary. `CANDLE_COUNT` pre-roll loads the
+configured number of earlier target-timeframe candles per instrument. Those
+candles update strategy state and indicators but cannot create positions,
+pending executable decisions, exposure, or performance equity.
+
+Strict mode rejects a run if any instrument lacks the requested pre-roll.
+The failed run remains selectable and displays every requested instrument's
+diagnostics without requesting completed-run analytics.
+When degraded warm-up is explicitly allowed, the run persists
+`warmup_sufficient=false`, `warmup_degraded=true`, an
+`INSUFFICIENT_WARMUP` warning, the consumed count per instrument, and each
+instrument's first tradable timestamp.
+
+Warm-up warnings expose `code`, `severity`, `instrument_id`,
+`requested_warmup_candles`, `available_warmup_candles`, `message`, optional
+`first_available_at`, and optional `trading_start_at`.
+
+Returns use starting capital at `trading_start_at`. Exposure excludes pre-roll,
+and drawdown uses only the performance equity curve. Candle-count coverage is
+based on available candles rather than an exchange-session calendar.

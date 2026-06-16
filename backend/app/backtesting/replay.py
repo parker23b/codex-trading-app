@@ -35,6 +35,9 @@ class ReplayConfiguration:
     risk_configuration: dict[str, Any]
     execution_assumptions: ExecutionAssumptions
     open_position_treatment: str
+    trading_start_at: datetime | None = None
+    warmup_mode: str = "NONE"
+    warmup_candle_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +98,9 @@ class BacktestReplayEngine:
         )
         if not events:
             raise ValueError("Replay requires at least one candle.")
+        trading_start_at = self.configuration.trading_start_at or events[0].timestamp
+        if not any(candle.timestamp >= trading_start_at for candle in events):
+            raise ValueError("Replay requires at least one tradable candle.")
 
         positions: dict[str, SimulatedPosition] = {}
         pending_entries: dict[str, _PendingOrder] = {}
@@ -116,6 +122,7 @@ class BacktestReplayEngine:
         for timestamp in timestamps:
             self.clock.advance_to(timestamp)
             rows = sorted(by_timestamp[timestamp], key=lambda item: item.instrument)
+            trading_active = timestamp >= trading_start_at
             close_timestamps = {candle.close_timestamp for candle in rows}
             if len(close_timestamps) != 1:
                 raise ValueError(
@@ -127,122 +134,123 @@ class BacktestReplayEngine:
                 latest_candles[instrument] = candle
                 pricing_modes.add(self.execution.pricing_mode(candle))
 
-            # Execute every queued action at the shared candle open before any
-            # strategy can observe the current candle's high, low, or close.
-            for candle in rows:
-                instrument = candle.instrument
-                strategy = self.strategies[instrument]
+            if trading_active:
+                # Execute every queued action at the shared candle open before any
+                # strategy can observe the current candle's high, low, or close.
+                for candle in rows:
+                    instrument = candle.instrument
+                    strategy = self.strategies[instrument]
 
-                if instrument in pending_exits and instrument in positions:
-                    trade = self.execution.close_position(
-                        position=positions.pop(instrument),
-                        candle=candle,
-                        exit_reason="STRATEGY_EXIT_NEXT_OPEN",
-                    )
-                    cash += self._cash_settlement(trade)
-                    trades.append(trade)
-                    strategy.on_position_closed()
-                    del pending_exits[instrument]
-
-            for candle in rows:
-                instrument = candle.instrument
-                strategy = self.strategies[instrument]
-                if instrument in pending_entries and instrument not in positions:
-                    pending = pending_entries.pop(instrument)
-                    size, sizing_metadata = self._position_size(
-                        decision=pending.decision,
-                        candle=candle,
-                        equity=self._current_equity(
-                            cash=cash,
-                            positions=positions,
-                            latest_candles=latest_candles,
-                            open_timestamp=timestamp,
-                        ),
-                    )
-                    if size <= 0:
-                        strategy.on_entry_failed()
-                        warnings.append(
-                            ReplayWarning(
-                                code="ENTRY_REJECTED_SIZE",
-                                message="Signal was rejected because deterministic sizing returned zero.",
-                                instrument=instrument,
-                                timestamp=timestamp,
-                            )
-                        )
-                    elif len(positions) >= int(
-                        self.configuration.risk_configuration.get(
-                            "max_open_positions", len(self.strategies)
-                        )
-                    ):
-                        strategy.on_entry_failed()
-                        warnings.append(
-                            ReplayWarning(
-                                code="ENTRY_REJECTED_POSITION_LIMIT",
-                                message="Signal was rejected by the simulated open-position limit.",
-                                instrument=instrument,
-                                timestamp=timestamp,
-                            )
-                        )
-                    else:
-                        hints = pending.decision.hints
-                        if pending.decision.direction is None:
-                            raise ValueError(
-                                f"Entry decision for {instrument} has no direction."
-                            )
-                        position = self.execution.open_position(
-                            instrument=instrument,
-                            direction=pending.decision.direction,
-                            size=size,
+                    if instrument in pending_exits and instrument in positions:
+                        trade = self.execution.close_position(
+                            position=positions.pop(instrument),
                             candle=candle,
-                            stop_loss_price=(
-                                _optional_float(hints.get("stop_loss_price"))
-                                or _optional_float(
-                                    sizing_metadata.get("sizing_stop_price")
-                                )
-                            ),
-                            take_profit_price=_optional_float(
-                                hints.get("take_profit_price")
-                            ),
-                            metadata={
-                                "signal_at": pending.created_at.isoformat(),
-                                **sizing_metadata,
-                            },
+                            exit_reason="STRATEGY_EXIT_NEXT_OPEN",
                         )
-                        positions[instrument] = position
-                        cash -= position.entry_fee
-                        strategy.on_position_opened(
-                            direction=position.direction,
-                            entry_price=position.open_price,
-                        )
-
-            for candle in rows:
-                instrument = candle.instrument
-                strategy = self.strategies[instrument]
-                position = positions.get(instrument)
-                if position is not None:
-                    threshold_trade = self.execution.threshold_exit(
-                        position=position, candle=candle
-                    )
-                    if threshold_trade is not None:
-                        positions.pop(instrument)
-                        cash += self._cash_settlement(threshold_trade)
-                        trades.append(threshold_trade)
+                        cash += self._cash_settlement(trade)
+                        trades.append(trade)
                         strategy.on_position_closed()
-                        if threshold_trade.conservative_ambiguity:
+                        del pending_exits[instrument]
+
+                for candle in rows:
+                    instrument = candle.instrument
+                    strategy = self.strategies[instrument]
+                    if instrument in pending_entries and instrument not in positions:
+                        pending = pending_entries.pop(instrument)
+                        size, sizing_metadata = self._position_size(
+                            decision=pending.decision,
+                            candle=candle,
+                            equity=self._current_equity(
+                                cash=cash,
+                                positions=positions,
+                                latest_candles=latest_candles,
+                                open_timestamp=timestamp,
+                            ),
+                        )
+                        if size <= 0:
+                            strategy.on_entry_failed()
                             warnings.append(
                                 ReplayWarning(
-                                    code="CONSERVATIVE_INTRACANDLE_EXIT",
-                                    message=(
-                                        "Stop loss and take profit were both inside one candle; "
-                                        "the less favorable stop-loss outcome was used."
-                                    ),
+                                    code="ENTRY_REJECTED_SIZE",
+                                    message="Signal was rejected because deterministic sizing returned zero.",
                                     instrument=instrument,
                                     timestamp=timestamp,
-                                    details={
-                                        "trade_position_id": threshold_trade.position.id
-                                    },
                                 )
                             )
+                        elif len(positions) >= int(
+                            self.configuration.risk_configuration.get(
+                                "max_open_positions", len(self.strategies)
+                            )
+                        ):
+                            strategy.on_entry_failed()
+                            warnings.append(
+                                ReplayWarning(
+                                    code="ENTRY_REJECTED_POSITION_LIMIT",
+                                    message="Signal was rejected by the simulated open-position limit.",
+                                    instrument=instrument,
+                                    timestamp=timestamp,
+                                )
+                            )
+                        else:
+                            hints = pending.decision.hints
+                            if pending.decision.direction is None:
+                                raise ValueError(
+                                    f"Entry decision for {instrument} has no direction."
+                                )
+                            position = self.execution.open_position(
+                                instrument=instrument,
+                                direction=pending.decision.direction,
+                                size=size,
+                                candle=candle,
+                                stop_loss_price=(
+                                    _optional_float(hints.get("stop_loss_price"))
+                                    or _optional_float(
+                                        sizing_metadata.get("sizing_stop_price")
+                                    )
+                                ),
+                                take_profit_price=_optional_float(
+                                    hints.get("take_profit_price")
+                                ),
+                                metadata={
+                                    "signal_at": pending.created_at.isoformat(),
+                                    **sizing_metadata,
+                                },
+                            )
+                            positions[instrument] = position
+                            cash -= position.entry_fee
+                            strategy.on_position_opened(
+                                direction=position.direction,
+                                entry_price=position.open_price,
+                            )
+
+                for candle in rows:
+                    instrument = candle.instrument
+                    strategy = self.strategies[instrument]
+                    position = positions.get(instrument)
+                    if position is not None:
+                        threshold_trade = self.execution.threshold_exit(
+                            position=position, candle=candle
+                        )
+                        if threshold_trade is not None:
+                            positions.pop(instrument)
+                            cash += self._cash_settlement(threshold_trade)
+                            trades.append(threshold_trade)
+                            strategy.on_position_closed()
+                            if threshold_trade.conservative_ambiguity:
+                                warnings.append(
+                                    ReplayWarning(
+                                        code="CONSERVATIVE_INTRACANDLE_EXIT",
+                                        message=(
+                                            "Stop loss and take profit were both inside one candle; "
+                                            "the less favorable stop-loss outcome was used."
+                                        ),
+                                        instrument=instrument,
+                                        timestamp=timestamp,
+                                        details={
+                                            "trade_position_id": threshold_trade.position.id
+                                        },
+                                    )
+                                )
 
             self.clock.advance_to(close_timestamp)
             for candle in rows:
@@ -253,7 +261,7 @@ class BacktestReplayEngine:
                     update=self._price_update(candle),
                     has_open_position=instrument in positions,
                 )
-                if decision is not None:
+                if trading_active and decision is not None:
                     if (
                         decision.kind is StrategyDecisionKind.ENTRY
                         and instrument not in positions
@@ -271,20 +279,21 @@ class BacktestReplayEngine:
                             decision=decision, created_at=close_timestamp
                         )
 
-            equity_value = self._current_equity(
-                cash=cash,
-                positions=positions,
-                latest_candles=latest_candles,
-            )
-            equity.append(
-                EquitySample(
-                    timestamp=close_timestamp,
+            if trading_active:
+                equity_value = self._current_equity(
                     cash=cash,
-                    unrealized_pnl=equity_value - cash,
-                    equity=equity_value,
-                    open_position_count=len(positions),
+                    positions=positions,
+                    latest_candles=latest_candles,
                 )
-            )
+                equity.append(
+                    EquitySample(
+                        timestamp=close_timestamp,
+                        cash=cash,
+                        unrealized_pnl=equity_value - cash,
+                        equity=equity_value,
+                        open_position_count=len(positions),
+                    )
+                )
 
         final_timestamp = equity[-1].timestamp
         if positions and self.configuration.open_position_treatment == "CLOSE_AT_END":
@@ -331,7 +340,7 @@ class BacktestReplayEngine:
             trades=trades,
             equity=equity,
             open_positions=open_position_results,
-            period_start=timestamps[0],
+            period_start=trading_start_at,
             period_end=final_timestamp,
             open_position_treatment=self.configuration.open_position_treatment,
         )
@@ -339,7 +348,7 @@ class BacktestReplayEngine:
             starting_capital=self.configuration.starting_capital,
             trades=trades,
             open_positions=open_position_results,
-            period_start=timestamps[0],
+            period_start=trading_start_at,
             period_end=final_timestamp,
             open_position_treatment=self.configuration.open_position_treatment,
         )
@@ -352,7 +361,7 @@ class BacktestReplayEngine:
                     trades=[],
                     equity=[],
                     open_positions=[],
-                    period_start=timestamps[0],
+                    period_start=trading_start_at,
                     period_end=final_timestamp,
                     open_position_treatment=self.configuration.open_position_treatment,
                 ),

@@ -341,6 +341,14 @@ export type BacktestRun = {
   timeframe: string;
   requested_start_at: string;
   requested_end_at: string;
+  warmup_mode: "NONE" | "CANDLE_COUNT";
+  warmup_candle_count: number;
+  allow_insufficient_warmup: boolean;
+  warmup_start_at: string;
+  trading_start_at: string;
+  warmup_sufficient: boolean;
+  warmup_degraded: boolean;
+  warmup_warnings: BacktestWarmupWarning[];
   effective_start_at?: string | null;
   effective_end_at?: string | null;
   starting_capital: number;
@@ -363,6 +371,17 @@ export type BacktestRun = {
   result_manifest_version?: string | null;
   result_checksum?: string | null;
   result_summary: Record<string, unknown>;
+};
+
+export type BacktestWarmupWarning = {
+  code: "INSUFFICIENT_WARMUP";
+  severity: "WARNING" | "ERROR";
+  instrument_id: string;
+  requested_warmup_candles: number;
+  available_warmup_candles: number;
+  message: string;
+  first_available_at?: string | null;
+  trading_start_at?: string | null;
 };
 
 export type BacktestTrade = {
@@ -466,7 +485,9 @@ export type BacktestInstrument = {
   provider_instrument: string;
   dataset_partition_id: number;
   candle_count: number;
-  metrics: BacktestRunMetrics;
+  warmup_candles_consumed: number;
+  first_tradable_at: string;
+  metrics: BacktestRunMetrics | null;
 };
 
 export type StrategyMutationStatus = {

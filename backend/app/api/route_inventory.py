@@ -733,7 +733,7 @@ ROUTE_MANIFEST: tuple[RouteManifestEntry, ...] = (
         "app.api.routes.backtesting.get_backtest_metrics",
         RouteClassification.PASSIVE_READ,
         frontend_consumers=("getBacktestMetrics",),
-        notes="Backtest run and per-instrument metrics.",
+        notes="Completed-run metrics; failed runs return 409.",
     ),
     _entry(
         "GET",
@@ -741,7 +741,7 @@ ROUTE_MANIFEST: tuple[RouteManifestEntry, ...] = (
         "app.api.routes.backtesting.get_backtest_trades",
         RouteClassification.PASSIVE_READ,
         frontend_consumers=("getBacktestTrades",),
-        notes="Simulated trade ledger.",
+        notes="Completed-run simulated trade ledger; failed runs return 409.",
     ),
     _entry(
         "GET",
@@ -749,7 +749,7 @@ ROUTE_MANIFEST: tuple[RouteManifestEntry, ...] = (
         "app.api.routes.backtesting.get_backtest_equity",
         RouteClassification.PASSIVE_READ,
         frontend_consumers=("getBacktestEquity",),
-        notes="Persisted backtest equity and drawdown curve.",
+        notes="Completed-run equity and drawdown curve; failed runs return 409.",
     ),
     _entry(
         "GET",

@@ -1,14 +1,27 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from alembic import command
+from fastapi.testclient import TestClient
 from sqlalchemy import text
-from sqlmodel import create_engine
+from sqlmodel import Session, create_engine
 
+from app.core.config import Settings, get_settings
 from app.db.migrations import alembic_config
 from app.db.schema import load_sqlmodel_metadata
+from app.db.session import get_session
+from app.main import create_app
+from app.models.backtest import BacktestRun
+from app.services.backtest_service import (
+    BACKTEST_RESULT_MANIFEST_V1,
+    BacktestService,
+)
 from tests.migration_assertions import filtered_metadata_diffs
+
+
+START = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _migrated_engine(tmp_path, db_name: str = "migrated.sqlite"):
@@ -44,7 +57,7 @@ def test_migrations_apply_to_empty_sqlite_database(tmp_path):
     assert "openriskauthority" in table_names
     assert "historical_dataset" in table_names
     assert "backtest_run" in table_names
-    assert version == "20260615_01"
+    assert version == "20260615_02"
 
 
 def test_migrated_schema_matches_current_sqlmodel_metadata(tmp_path):
@@ -114,6 +127,181 @@ def test_backtest_result_integrity_migration_is_reversible(tmp_path):
     with engine.begin() as connection:
         config.attributes["connection"] = connection
         command.upgrade(config, "head")
+
+
+def test_warmup_migration_backfills_historical_instruments_and_route_survives(
+    tmp_path,
+):
+    engine = _migrated_engine(tmp_path, "warmup-backfill.sqlite")
+    config = alembic_config(str(engine.url))
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.downgrade(config, "20260615_01")
+        connection.execute(
+            text(
+                """
+                INSERT INTO backtest_run (
+                    id, strategy_identifier, strategy_version,
+                    strategy_configuration, dataset_id, dataset_checksum,
+                    shortlist, timeframe, requested_start_at, requested_end_at,
+                    starting_capital, position_sizing_mode, risk_configuration,
+                    spread_model, spread_assumption, slippage_model,
+                    slippage_assumption, fee_model, fee_assumption,
+                    open_position_treatment, pricing_mode, evaluation_boundary,
+                    status, created_at, failure_reason, result_manifest_version,
+                    result_checksum, result_summary
+                ) VALUES (
+                    :id, 'smoke_test_hold', '1', '{}', 'legacy-dataset',
+                    :dataset_checksum, '["LEGACY_FX"]', '1m', :start_at, :end_at,
+                    1000, 'FIXED_UNITS', '{"fixed_size": 1}',
+                    'FIXED_BPS', '{"value": 0}', 'NONE', '{"value": 0}',
+                    'NONE', '{"value": 0}', 'CLOSE_AT_END',
+                    'TRADE_WITH_SYNTHETIC_SPREAD', 'CANDLE_CLOSE_NEXT_OPEN',
+                    'COMPLETED', :created_at, NULL, 'BACKTEST_RESULT_MANIFEST_V1',
+                    :result_checksum, '{}'
+                )
+                """
+            ),
+            {
+                "id": "legacy-run",
+                "dataset_checksum": "a" * 64,
+                "start_at": START,
+                "end_at": START + timedelta(minutes=6),
+                "created_at": START + timedelta(hours=1),
+                "result_checksum": "b" * 64,
+            },
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO backtest_run_instrument (
+                    run_id, instrument, provider_instrument,
+                    dataset_partition_id, candle_count, metrics
+                ) VALUES (
+                    'legacy-run', 'LEGACY_FX', 'LEGACY_FX', 17, 6, '{}'
+                )
+                """
+            )
+        )
+        command.upgrade(config, "head")
+
+    with engine.begin() as connection:
+        first_tradable_at = connection.execute(
+            text(
+                """
+                SELECT first_tradable_at
+                FROM backtest_run_instrument
+                WHERE run_id = 'legacy-run'
+                """
+            )
+        ).scalar_one()
+        instrument_columns = {
+            row[1]: int(row[3])
+            for row in connection.execute(
+                text("PRAGMA table_info('backtest_run_instrument')")
+            ).fetchall()
+        }
+    assert datetime.fromisoformat(str(first_tradable_at)).replace(tzinfo=UTC) == START
+    assert instrument_columns["first_tradable_at"] == 1
+
+    with Session(engine) as session:
+        settings = Settings(
+            **{
+                **get_settings().model_dump(),
+                "operator_api_credentials": {
+                    "operator": {
+                        "token": "expected-token",
+                        "scopes": ["admin"],
+                    }
+                },
+                "operator_api_token": None,
+                "historical_data_dir": str(tmp_path / "history"),
+            }
+        )
+        app = create_app(active_settings=settings, enable_lifespan=False)
+
+        def override_get_session():
+            yield session
+
+        app.dependency_overrides[get_session] = override_get_session
+        with TestClient(app) as client:
+            response = client.get(
+                "/backtests/legacy-run/instruments",
+                headers={"Authorization": "Bearer expected-token"},
+            )
+
+    assert response.status_code == 200
+    assert response.json()[0]["first_tradable_at"].startswith("2026-01-01T00:00:00")
+
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.downgrade(config, "20260615_01")
+        command.upgrade(config, "head")
+        assert (
+            connection.execute(
+                text(
+                    """
+                SELECT first_tradable_at
+                FROM backtest_run_instrument
+                WHERE run_id = 'legacy-run'
+                """
+                )
+            ).scalar_one()
+            is not None
+        )
+
+
+def test_manifest_v1_verifies_before_and_after_warmup_migration_cycle(tmp_path):
+    engine = _migrated_engine(tmp_path, "manifest-v1.sqlite")
+    config = alembic_config(str(engine.url))
+    with Session(engine) as session:
+        run = BacktestRun(
+            id="manifest-v1-run",
+            strategy_identifier="smoke_test_hold",
+            strategy_version="1",
+            strategy_configuration={},
+            dataset_id="historical-dataset",
+            dataset_checksum="a" * 64,
+            shortlist=["TEST_FX"],
+            timeframe="1m",
+            requested_start_at=START,
+            requested_end_at=START + timedelta(minutes=6),
+            warmup_start_at=START,
+            trading_start_at=START,
+            effective_start_at=START,
+            effective_end_at=START + timedelta(minutes=6),
+            starting_capital=1000,
+            position_sizing_mode="FIXED_UNITS",
+            risk_configuration={"fixed_size": 1},
+            spread_model="FIXED_BPS",
+            spread_assumption={"value": 0},
+            slippage_model="NONE",
+            slippage_assumption={"value": 0},
+            fee_model="NONE",
+            fee_assumption={"value": 0},
+            open_position_treatment="CLOSE_AT_END",
+            pricing_mode="TRADE_WITH_SYNTHETIC_SPREAD",
+            status="COMPLETED",
+            result_manifest_version=BACKTEST_RESULT_MANIFEST_V1,
+        )
+        session.add(run)
+        session.commit()
+        service = BacktestService(session)
+        run.result_checksum = service.result_checksum(
+            run,
+            manifest_version=BACKTEST_RESULT_MANIFEST_V1,
+        )
+        session.add(run)
+        session.commit()
+        service.verify_backtest_result_checksum(run.id)
+
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.downgrade(config, "20260615_01")
+        command.upgrade(config, "head")
+
+    with Session(engine) as session:
+        BacktestService(session).verify_backtest_result_checksum("manifest-v1-run")
 
 
 def test_migration_schema_enforces_active_trade_intent_uniqueness_and_runtime_modes(

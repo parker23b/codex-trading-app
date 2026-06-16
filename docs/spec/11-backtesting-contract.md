@@ -26,6 +26,7 @@ The physical MVP partition format is deterministic gzip JSONL. `HistoricalDataRe
 | BT-PROVIDER-001 | External providers MUST be ingestion-only. Replay MUST perform no IG, OANDA, Binance, or other network calls. Optional credentials MUST remain provider-specific, and the application MUST remain usable with CSV and public Binance ingestion when optional credentials are absent. | P0 | Provider contracts, capability responses, isolation tests. |
 | BT-REPLAY-001 | Replay MUST NOT create or mutate live `TradeIntent`, `Execution`, `Position`, `Trade`, runtime, reconciliation, allocation-alert, telemetry, deployment, or broker state. | P0 | Persistence isolation tests and separate backtest tables. |
 | BT-REPLAY-002 | Replay MUST process events in timestamp order with stable instrument ordering, inject event time, evaluate at candle close, execute new decisions at the next candle open, and prevent future candle access. Identical inputs MUST produce identical results. | P0 | Determinism, same-timestamp ordering, next-open, simulated-clock, and no-look-ahead tests. |
+| BT-WARMUP-001 | Runs MUST distinguish warm-up from the tradable performance window. Warm-up candles may update strategy state but MUST NOT create positions, pending executable decisions, exposure, or performance equity. Warm-up configuration, sufficiency, warnings, per-instrument consumption, and first tradable timestamps MUST be persisted and checksummed. | P1 | Replay boundary, dataset coverage, checksum, API, UI, and degraded-warning tests. |
 | BT-EXEC-001 | Simulation MUST persist its pricing mode and spread, slippage, fee, sizing, and end-of-run assumptions. Historical bid/ask executes buys at ask and sells at bid. Mid/trade-only data requires explicit synthetic spread. Same-candle stop/target ambiguity uses the less favorable valid result. | P1 | Execution tests, warnings, run configuration persistence. |
 | BT-RESULT-001 | Completed result accounting MUST separate realised, unrealised, fee, fill-cost, cash, equity, open-position, and closed-trade values; ordering and the canonical result checksum MUST be deterministic. | P1 | Accounting identity, ordering, public checksum mutation, independent-database, API, and browser-label tests. |
 | BT-API-001 | Dataset and backtest routes MUST use explicit typed contracts. Run creation is a bounded simulation mutation, not a broker mutation. Result reads MUST remain passive. | P1 | Route inventory and API contract tests. |
@@ -40,12 +41,14 @@ The physical MVP partition format is deterministic gzip JSONL. `HistoricalDataRe
 
 Reused unchanged:
 
-- Production strategy classes, signal direction, warm-up behavior, and entry hints.
+- Production strategy classes, signal direction, internal readiness logic, and entry hints.
 - Registry compatibility metadata and profile resolution.
 - One-position-per-instrument behavior inherent in the simulation ledger.
 
 Adapted:
 
+- Explicit replay pre-roll feeds the production strategy evaluator while
+  suppressing all executable decisions until the trading boundary.
 - Position sizing uses fixed units or deterministic percent-risk sizing from simulated equity and a strategy/fallback stop.
 - Market availability is represented by immutable dataset coverage rather than a current broker status.
 - Freshness is represented by coverage, gaps, and snapshot provenance rather than wall-clock tick age.
@@ -61,6 +64,25 @@ Intentionally excluded:
 
 ## Price and event semantics
 
+- `requested_start_at` is the operator-requested trading boundary.
+  `warmup_start_at` is the effective first pre-roll candle,
+  `trading_start_at` is the first eligible trading-window candle, and
+  `requested_end_at` remains the exclusive requested end.
+- `warmup_mode=NONE` consumes no pre-roll. `warmup_mode=CANDLE_COUNT` consumes
+  the configured number of target-timeframe candles immediately before
+  `trading_start_at` for each instrument.
+- Warm-up candles call the shared strategy evaluator so rolling state and
+  indicators can mature, but all warm-up decisions are discarded. No pending
+  entry or exit crosses into the trading window.
+- Strict warm-up is the default. Insufficient pre-roll fails validation.
+  The failed run persists diagnostics for every requested instrument, including
+  consumed count, first tradable timestamp when known, and typed error details.
+  Failed strict runs do not persist trades, equity, or completed-run metrics.
+  `allow_insufficient_warmup=true` permits a completed but degraded run with
+  `INSUFFICIENT_WARMUP` warnings and exact per-instrument consumed counts.
+- Warm-up diagnostics use the stable fields `code`, `severity`,
+  `instrument_id`, `requested_warmup_candles`, `available_warmup_candles`,
+  `message`, optional `first_available_at`, and optional `trading_start_at`.
 - Strategy evaluation occurs after the current candle closes.
 - Entry and strategy-exit decisions become executable at the next candle open.
 - Every same-timestamp replay cycle executes queued exits, then queued entries,
@@ -115,9 +137,14 @@ losing closed trade. Otherwise it is `null`, with
 `NO_LOSING_TRADES`, or `NO_WINNING_TRADES`.
 
 Exposure is wall-clock exposure: the union of all position-open intervals
-divided by the interval from the first replay candle open to the final mark.
+divided by the interval from `trading_start_at` to the final mark.
 Overlapping instruments do not double-count time. Open-at-end positions run
 through the final mark.
+
+The performance equity curve begins only after the first trading-window candle
+closes. Warm-up candles do not create equity points, returns begin from
+`starting_capital` at `trading_start_at`, and maximum drawdown uses only that
+performance curve.
 
 Percent-risk sizing solves against the expected executable entry fill,
 configured entry and stop-exit slippage, and modeled entry/exit fees. A
@@ -130,10 +157,11 @@ regressions compare actual simulated net loss with the configured risk budget
 using that tolerance; sizing itself remains conservative at the budget
 boundary.
 
-Completed runs persist `BACKTEST_RESULT_MANIFEST_V1`. Its canonical projection
+New completed runs persist `BACKTEST_RESULT_MANIFEST_V2`. Its canonical projection
 covers strategy and dataset identity, configuration and assumptions, final
 status, accounting summary and open-position marks, deterministic trades,
-equity, metrics, warnings, and per-instrument results. Trades order by
+equity, metrics, warnings, warm-up configuration and sufficiency, and
+per-instrument warm-up/trading results. Trades order by
 `(open_time, instrument, deterministic_sequence)`; equity orders by timestamp;
 warnings use deterministic sequence; instruments and metrics use lexical keys.
 
@@ -145,6 +173,12 @@ verification envelope. The public verifier reconstructs the persisted
 projection and rejects authoritative-field mutation. Equal inputs copied into
 independent databases produce the same checksum even when run IDs and
 wall-clock timestamps differ.
+
+The verifier remains version-dispatched. Historical
+`BACKTEST_RESULT_MANIFEST_V1` results are reconstructed with the original V1
+projection, which excludes warm-up fields. V2 results use the warm-up-aware
+projection. Unknown versions and corrupted checksums fail verification; schema
+migration does not silently invalidate V1 audit artifacts.
 
 Completed runs are required to have `failure_reason=null`; the API and public
 verifier reject a completed row with a non-null failure reason even though
@@ -210,6 +244,9 @@ all of it is re-verified before replay.
   `TIMESTAMP WITH TIME ZONE`; the migration interprets legacy backtesting
   timestamps as UTC. PostgreSQL trigger behavior remains dependent on the
   environment-gated migration rehearsal.
+- The warm-up migration backfills historical instrument
+  `first_tradable_at` from the parent run's `trading_start_at`, falling back to
+  `requested_start_at`, before enforcing non-null storage.
 - Backend timestamps require `Z` or an explicit offset. Browser
   `datetime-local` values are separately interpreted in the browser timezone
   and converted to explicit UTC instants before API submission; backend values
@@ -237,6 +274,8 @@ Official references reviewed for this phase:
 - [Binance spot market-data endpoints](https://developers.binance.com/docs/binance-spot-api-docs/rest-api/market-data-endpoints)
 - [Binance public data archives](https://github.com/binance/binance-public-data)
 - [IG REST API guide](https://labs.ig.com/rest-trading-api-guide.html)
+- [QuantConnect warm-up periods](https://www.quantconnect.com/docs/v2/writing-algorithms/historical-data/warm-up-periods)
+- [Backtrader minimum-period lifecycle](https://www.backtrader.com/docu/operating/)
 
 These official sources were rechecked on June 14, 2026. OANDA still documents
 demo-account access, Binance documents public spot klines with a maximum of
@@ -252,6 +291,10 @@ existing-credentials validation path, not a dependency for general app use.
 - Completeness validation has no provider-specific exchange calendar. A range
   containing absent timeframe boundaries, including scheduled closures, is
   conservatively retained as partial rather than called complete.
+- Candle-count warm-up uses available target-timeframe candles, not a
+  provider-specific session calendar or duration model. Gaps can therefore
+  make strict warm-up insufficient even when wall-clock coverage looks long
+  enough.
 - Binance ingestion currently uses deterministic paginated REST. Automatic
   daily/monthly archive ingestion is not yet implemented, so very large
   backfills remain a documented next slice.

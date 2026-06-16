@@ -676,6 +676,9 @@ export async function createBacktest(payload: {
   timeframe: string;
   start_at: string;
   end_at: string;
+  warmup_mode: "NONE" | "CANDLE_COUNT";
+  warmup_candle_count: number;
+  allow_insufficient_warmup: boolean;
   starting_capital: number;
   position_sizing_mode: string;
   risk_configuration: Record<string, number>;

@@ -10,6 +10,7 @@ from pydantic import (
     ConfigDict,
     Field,
     FiniteFloat,
+    field_validator,
     model_validator,
 )
 
@@ -150,6 +151,9 @@ class BacktestRunCreateRequest(BaseModel):
     timeframe: Literal["S5", "1m", "M1", "5m", "M5", "15m", "M15", "30m", "1h", "H1"]
     start_at: AwareDatetime
     end_at: AwareDatetime
+    warmup_mode: Literal["NONE", "CANDLE_COUNT"] = "NONE"
+    warmup_candle_count: int = Field(default=0, ge=0)
+    allow_insufficient_warmup: bool = False
     starting_capital: FiniteFloat = Field(gt=0)
     position_sizing_mode: Literal["FIXED_UNITS", "PERCENT_RISK"] = "FIXED_UNITS"
     risk_configuration: dict[str, FiniteFloat] = Field(
@@ -175,6 +179,8 @@ class BacktestRunCreateRequest(BaseModel):
             raise ValueError("Backtest start must be before end.")
         if len(set(self.shortlist)) != len(self.shortlist):
             raise ValueError("Backtest shortlist cannot contain duplicates.")
+        if self.warmup_mode == "NONE" and self.warmup_candle_count != 0:
+            raise ValueError("NONE warm-up mode requires warmup_candle_count=0.")
         max_open_positions = self.risk_configuration.get("max_open_positions", 1)
         if max_open_positions <= 0 or not float(max_open_positions).is_integer():
             raise ValueError("max_open_positions must be a positive whole number.")
@@ -195,6 +201,19 @@ class BacktestRunCreateRequest(BaseModel):
         return self
 
 
+class BacktestWarmupWarningResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: Literal["INSUFFICIENT_WARMUP"]
+    severity: Literal["WARNING", "ERROR"]
+    instrument_id: str
+    requested_warmup_candles: int = Field(ge=0)
+    available_warmup_candles: int = Field(ge=0)
+    message: str
+    first_available_at: UtcDateTime | None = None
+    trading_start_at: UtcDateTime | None = None
+
+
 class BacktestRunResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", from_attributes=True)
 
@@ -210,6 +229,14 @@ class BacktestRunResponse(BaseModel):
     timeframe: str
     requested_start_at: UtcDateTime
     requested_end_at: UtcDateTime
+    warmup_mode: Literal["NONE", "CANDLE_COUNT"]
+    warmup_candle_count: int
+    allow_insufficient_warmup: bool
+    warmup_start_at: UtcDateTime
+    trading_start_at: UtcDateTime
+    warmup_sufficient: bool
+    warmup_degraded: bool
+    warmup_warnings: list[BacktestWarmupWarningResponse]
     effective_start_at: UtcDateTime | None
     effective_end_at: UtcDateTime | None
     starting_capital: float
@@ -355,4 +382,11 @@ class BacktestInstrumentResponse(BaseModel):
     provider_instrument: str
     dataset_partition_id: int
     candle_count: int
-    metrics: BacktestRunMetricsResponse
+    warmup_candles_consumed: int
+    first_tradable_at: UtcDateTime
+    metrics: BacktestRunMetricsResponse | None
+
+    @field_validator("metrics", mode="before")
+    @classmethod
+    def empty_failed_metrics_are_absent(cls, value: object) -> object:
+        return None if value == {} else value

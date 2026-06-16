@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, create_engine, select
 
+from app.backtesting.candles import HistoricalCandle, PriceBar
 from app.backtesting.storage import JsonlHistoricalDataRepository
 from app.models.backtest import (
     BacktestEquityPoint,
@@ -27,7 +28,10 @@ from app.services.backtest_service import (
     BACKTEST_RESULT_PROJECTION_ONLY_FIELDS,
     BACKTEST_RESULT_STATUS_CONSTRAINED_FIELDS,
     BACKTEST_RESULT_VERIFICATION_ENVELOPE_FIELDS,
+    BACKTEST_RESULT_MANIFEST_V1,
+    BACKTEST_RESULT_MANIFEST_V2,
     CANONICAL_BACKTEST_RESULT_MANIFEST_SCHEMA,
+    CANONICAL_BACKTEST_RESULT_MANIFEST_V1_SCHEMA,
     BacktestService,
 )
 from app.services.historical_data_service import HistoricalDataService
@@ -49,6 +53,16 @@ def _csv() -> str:
     for index, price in enumerate([100, 101, 102, 103, 104, 105]):
         rows.append(
             f"{(START + timedelta(minutes=index)).isoformat()},TEST_FX,1m,"
+            f"{price},{price + 1},{price - 1},{price},10"
+        )
+    return "\n".join(rows)
+
+
+def _csv_prices(start_at: datetime, prices: list[float]) -> str:
+    rows = ["timestamp,instrument,timeframe,open,high,low,close,volume"]
+    for index, price in enumerate(prices):
+        rows.append(
+            f"{(start_at + timedelta(minutes=index)).isoformat()},TEST_FX,1m,"
             f"{price},{price + 1},{price - 1},{price},10"
         )
     return "\n".join(rows)
@@ -77,6 +91,66 @@ def _run_kwargs(dataset_id: str) -> dict[str, object]:
         "fee_assumption": {"value": 0},
         "open_position_treatment": "CLOSE_AT_END",
     }
+
+
+def _multi_instrument_dataset(
+    session,
+    repository: JsonlHistoricalDataRepository,
+    instruments: list[str],
+):
+    service = HistoricalDataService(session, repository=repository)
+    dataset = service._start_dataset(
+        display_name="multi-instrument fixture",
+        provider="CSV",
+        venue="TEST",
+        market_type="SPOT_FX",
+        asset_class="FOREX",
+        timeframe="1m",
+        import_parameters={
+            "instruments": instruments,
+            "start_at": START.isoformat(),
+            "end_at": (START + timedelta(minutes=6)).isoformat(),
+            "timeframe": "1m",
+        },
+    )
+    prepared = []
+    for instrument in instruments:
+        candles = [
+            HistoricalCandle(
+                timestamp=START + timedelta(minutes=index),
+                instrument=instrument,
+                timeframe="1m",
+                trade=PriceBar(
+                    open=price,
+                    high=price + 1,
+                    low=price - 1,
+                    close=price,
+                ),
+                volume=10.0,
+            )
+            for index, price in enumerate([100.0, 101.0, 102.0, 103.0, 104.0, 105.0])
+        ]
+        prepared.append(
+            service._prepare_partition(
+                dataset=dataset,
+                instrument=instrument,
+                provider_instrument=instrument,
+                candles=candles,
+                requested_start=START,
+                requested_end=START + timedelta(minutes=6),
+                requested_timeframe="1m",
+                source_metadata={
+                    "provider": "CSV",
+                    "venue": "TEST",
+                    "provider_instrument": instrument,
+                },
+            )
+        )
+    return service._publish_dataset(
+        dataset=dataset,
+        prepared=prepared,
+        requested_instruments=instruments,
+    )
 
 
 def _completed_run(session, tmp_path: Path):
@@ -167,6 +241,207 @@ def test_identical_runs_produce_identical_metrics(session, tmp_path: Path):
     service.verify_backtest_result_checksum(second.id)
 
 
+def test_strict_warmup_requires_dataset_coverage_before_trading_start(
+    session, tmp_path: Path
+):
+    repository = JsonlHistoricalDataRepository(tmp_path / "history")
+    dataset = HistoricalDataService(session, repository=repository).import_csv(
+        display_name="fixture",
+        csv_text=_csv(),
+        asset_class="FOREX",
+        venue="TEST",
+        market_type="SPOT_FX",
+    )
+    kwargs = _run_kwargs(dataset.id)
+    kwargs.update(warmup_mode="CANDLE_COUNT", warmup_candle_count=2)
+    service = BacktestService(session, repository=repository)
+
+    run = service.create_and_run(**kwargs)
+
+    assert run.status == BacktestRunStatus.FAILED.value
+    assert "supplied 0 of 2 required warm-up candles" in str(run.failure_reason)
+    assert run.warmup_sufficient is False
+    assert run.warmup_degraded is False
+    assert run.warmup_warnings[0]["code"] == "INSUFFICIENT_WARMUP"
+    assert run.warmup_warnings[0]["severity"] == "ERROR"
+    assert run.warmup_warnings[0]["instrument_id"] == "TEST_FX"
+    assert run.warmup_warnings[0]["requested_warmup_candles"] == 2
+    assert run.warmup_warnings[0]["available_warmup_candles"] == 0
+    assert run.result_checksum is None
+    assert service.metrics(run.id) == {"run": {}, "by_instrument": {}}
+    assert service.trades(run.id) == []
+    assert service.equity(run.id) == []
+
+
+def test_strict_warmup_persists_diagnostics_for_every_requested_instrument(
+    session, tmp_path: Path
+):
+    repository = JsonlHistoricalDataRepository(tmp_path / "history")
+    dataset = _multi_instrument_dataset(
+        session,
+        repository,
+        ["ALPHA_FX", "BETA_FX"],
+    )
+    kwargs = _run_kwargs(dataset.id)
+    kwargs.update(
+        shortlist=["ALPHA_FX", "BETA_FX"],
+        warmup_mode="CANDLE_COUNT",
+        warmup_candle_count=2,
+    )
+    service = BacktestService(session, repository=repository)
+
+    run = service.create_and_run(**kwargs)
+
+    assert run.status == BacktestRunStatus.FAILED.value
+    assert {warning["instrument_id"] for warning in run.warmup_warnings} == {
+        "ALPHA_FX",
+        "BETA_FX",
+    }
+    assert all(warning["severity"] == "ERROR" for warning in run.warmup_warnings)
+    instruments = service.instruments(run.id)
+    assert [item.instrument for item in instruments] == ["ALPHA_FX", "BETA_FX"]
+    assert all(item.warmup_candles_consumed == 0 for item in instruments)
+    assert all(item.first_tradable_at == START for item in instruments)
+    assert all(item.metrics == {} for item in instruments)
+    assert {warning.instrument for warning in service.warnings(run.id)} == {
+        "ALPHA_FX",
+        "BETA_FX",
+    }
+    assert (
+        session.exec(
+            select(BacktestMetric).where(BacktestMetric.run_id == run.id)
+        ).all()
+        == []
+    )
+    assert (
+        session.exec(select(BacktestTrade).where(BacktestTrade.run_id == run.id)).all()
+        == []
+    )
+    assert (
+        session.exec(
+            select(BacktestEquityPoint).where(BacktestEquityPoint.run_id == run.id)
+        ).all()
+        == []
+    )
+
+
+def test_allowed_insufficient_warmup_is_persisted_as_degraded(session, tmp_path: Path):
+    repository = JsonlHistoricalDataRepository(tmp_path / "history")
+    dataset = HistoricalDataService(session, repository=repository).import_csv(
+        display_name="fixture",
+        csv_text=_csv(),
+        asset_class="FOREX",
+        venue="TEST",
+        market_type="SPOT_FX",
+    )
+    kwargs = _run_kwargs(dataset.id)
+    kwargs.update(
+        warmup_mode="CANDLE_COUNT",
+        warmup_candle_count=2,
+        allow_insufficient_warmup=True,
+    )
+    service = BacktestService(session, repository=repository)
+
+    run = service.create_and_run(**kwargs)
+    assert run.status == BacktestRunStatus.COMPLETED.value, run.failure_reason
+    instrument = service.instruments(run.id)[0]
+
+    assert run.warmup_sufficient is False
+    assert run.warmup_degraded is True
+    assert run.warmup_warnings[0]["code"] == "INSUFFICIENT_WARMUP"
+    assert run.warmup_warnings[0]["severity"] == "WARNING"
+    assert run.warmup_warnings[0]["instrument_id"] == "TEST_FX"
+    assert instrument.warmup_candles_consumed == 0
+    assert instrument.first_tradable_at == START
+    assert any(
+        warning.code == "INSUFFICIENT_WARMUP" for warning in service.warnings(run.id)
+    )
+
+
+def test_equivalent_selected_preroll_produces_same_trading_results(
+    session, tmp_path: Path
+):
+    repository = JsonlHistoricalDataRepository(tmp_path / "history")
+    historical = HistoricalDataService(session, repository=repository)
+    short_dataset = historical.import_csv(
+        display_name="short pre-roll",
+        csv_text=_csv_prices(
+            START - timedelta(minutes=2),
+            [98, 99, 100, 101, 102, 103, 104, 105],
+        ),
+        asset_class="FOREX",
+        venue="TEST",
+        market_type="SPOT_FX",
+    )
+    long_dataset = historical.import_csv(
+        display_name="long pre-roll",
+        csv_text=_csv_prices(
+            START - timedelta(minutes=4),
+            [10, 20, 98, 99, 100, 101, 102, 103, 104, 105],
+        ),
+        asset_class="FOREX",
+        venue="TEST",
+        market_type="SPOT_FX",
+    )
+    service = BacktestService(session, repository=repository)
+    runs = []
+    for dataset in (short_dataset, long_dataset):
+        kwargs = _run_kwargs(dataset.id)
+        kwargs.update(warmup_mode="CANDLE_COUNT", warmup_candle_count=2)
+        runs.append(service.create_and_run(**kwargs))
+
+    first_trades = [
+        (
+            trade.instrument,
+            trade.direction,
+            trade.open_time,
+            trade.close_time,
+            trade.open_price,
+            trade.close_price,
+            trade.net_pnl,
+        )
+        for trade in service.trades(runs[0].id)
+    ]
+    second_trades = [
+        (
+            trade.instrument,
+            trade.direction,
+            trade.open_time,
+            trade.close_time,
+            trade.open_price,
+            trade.close_price,
+            trade.net_pnl,
+        )
+        for trade in service.trades(runs[1].id)
+    ]
+    assert runs[0].result_summary == runs[1].result_summary
+    assert first_trades == second_trades
+    assert all(run.warmup_start_at == START - timedelta(minutes=2) for run in runs)
+
+
+def test_result_checksum_changes_when_warmup_settings_change(session, tmp_path: Path):
+    repository = JsonlHistoricalDataRepository(tmp_path / "history")
+    dataset = HistoricalDataService(session, repository=repository).import_csv(
+        display_name="fixture",
+        csv_text=_csv_prices(
+            START - timedelta(minutes=2),
+            [98, 99, 100, 101, 102, 103, 104, 105],
+        ),
+        asset_class="FOREX",
+        venue="TEST",
+        market_type="SPOT_FX",
+    )
+    service = BacktestService(session, repository=repository)
+    without_warmup = service.create_and_run(**_run_kwargs(dataset.id))
+    kwargs = _run_kwargs(dataset.id)
+    kwargs.update(warmup_mode="CANDLE_COUNT", warmup_candle_count=2)
+    with_warmup = service.create_and_run(**kwargs)
+
+    assert without_warmup.result_checksum != with_warmup.result_checksum
+    service.verify_backtest_result_checksum(without_warmup.id)
+    service.verify_backtest_result_checksum(with_warmup.id)
+
+
 def test_result_manifest_schema_and_exclusions_are_explicit(session, tmp_path):
     service, run = _completed_run(session, tmp_path)
     manifest = service.canonical_result_manifest(run)
@@ -222,6 +497,55 @@ def test_result_manifest_schema_and_exclusions_are_explicit(session, tmp_path):
     service.verify_backtest_result_checksum(run.id)
 
 
+def test_manifest_v1_and_v2_completed_results_both_verify(session, tmp_path):
+    service, run = _completed_run(session, tmp_path)
+
+    assert run.result_manifest_version == BACKTEST_RESULT_MANIFEST_V2
+    service.verify_backtest_result_checksum(run.id)
+
+    v1_manifest = service.canonical_result_manifest(
+        run,
+        manifest_version=BACKTEST_RESULT_MANIFEST_V1,
+    )
+    assert (
+        tuple(v1_manifest["run"])
+        == (CANONICAL_BACKTEST_RESULT_MANIFEST_V1_SCHEMA["run"])
+    )
+    assert (
+        tuple(v1_manifest["instruments"][0])
+        == (CANONICAL_BACKTEST_RESULT_MANIFEST_V1_SCHEMA["instrument"])
+    )
+    run.result_manifest_version = BACKTEST_RESULT_MANIFEST_V1
+    run.result_checksum = service.result_checksum(
+        run,
+        manifest_version=BACKTEST_RESULT_MANIFEST_V1,
+    )
+    session.add(run)
+    session.commit()
+
+    service.verify_backtest_result_checksum(run.id)
+
+
+def test_result_verifier_rejects_unknown_or_corrupted_manifest_version(
+    session, tmp_path
+):
+    service, run = _completed_run(session, tmp_path)
+    run.result_manifest_version = "BACKTEST_RESULT_MANIFEST_V999"
+    session.add(run)
+    session.commit()
+
+    with pytest.raises(ValueError, match="manifest version is unsupported"):
+        service.verify_backtest_result_checksum(run.id)
+
+    run.result_manifest_version = BACKTEST_RESULT_MANIFEST_V1
+    run.result_checksum = "0" * 64
+    session.add(run)
+    session.commit()
+
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        service.verify_backtest_result_checksum(run.id)
+
+
 def _mutated_value(field: str, value):
     if field == "status":
         return BacktestRunStatus.FAILED.value
@@ -244,6 +568,9 @@ def _mutated_value(field: str, value):
         "requested_end_at",
         "effective_start_at",
         "effective_end_at",
+        "warmup_start_at",
+        "trading_start_at",
+        "first_tradable_at",
         "open_time",
         "close_time",
         "timestamp",

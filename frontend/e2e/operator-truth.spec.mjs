@@ -63,6 +63,32 @@ test("BT-ACCOUNTING-001 backtest results render explicit accounting labels", asy
   await expect(page.getByText("Result checksum:", { exact: false })).toBeVisible();
   await expect(page.getByText("Exposure: wall-clock union across open intervals")).toBeVisible();
   await expect(page.getByText(/Price decimals are adaptive display formatting/)).toBeVisible();
+  await expect(page.getByText(/Warm-up: CANDLE_COUNT · 2 candles · insufficient · degraded/)).toBeVisible();
+  await expect(page.getByText(/Warm-up warning: TEST_FX · 1 of 2 candles/)).toBeVisible();
+});
+
+test("BT-WARMUP-FAIL-001 failed strict warm-up renders diagnostics without analytics requests", async ({ page, request }) => {
+  await setScenario(request, "backtests-strict-warmup-failed");
+
+  await page.goto("/backtests");
+
+  await expect(page.getByText("Run did not produce analytics")).toBeVisible();
+  await expect(page.getByText(/ALPHA_FX supplied 0 of 2 required warm-up candles/).first()).toBeVisible();
+  await expect(page.getByText(/BETA_FX supplied 0 of 2 required warm-up candles/).first()).toBeVisible();
+  await expect(page.getByText(/Warm-up error: ALPHA_FX · 0 of 2 candles/)).toBeVisible();
+  await expect(page.getByText(/Warm-up error: BETA_FX · 0 of 2 candles/)).toBeVisible();
+  await expect(page.getByText("Warm-up consumed", { exact: true })).toBeVisible();
+  await expect(page.getByText("Completed-run monetary metrics are unavailable for this run status.")).toBeVisible();
+
+  const requests = await getRequests(request);
+  for (const suffix of ["/metrics", "/trades", "/equity"]) {
+    expect(
+      requests.some(
+        (entry) =>
+          entry.pathname === `/backtests/run-strict-warmup-failed${suffix}`,
+      ),
+    ).toBeFalsy();
+  }
 });
 
 test("BT-DATA-001 provider and backtest datetime-local submissions send explicit UTC instants", async ({ browser, request, baseURL }) => {

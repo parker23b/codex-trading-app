@@ -50,6 +50,25 @@ def _existing_backtest_service(
     return service
 
 
+def _completed_backtest_service(
+    *,
+    run_id: str,
+    request: Request,
+    session: Session,
+) -> BacktestService:
+    service = _existing_backtest_service(
+        run_id=run_id,
+        request=request,
+        session=session,
+    )
+    if service.get_run(run_id).status != "COMPLETED":
+        raise HTTPException(
+            status_code=409,
+            detail="Completed-run analytics are unavailable for this backtest status.",
+        )
+    return service
+
+
 def _dataset_response(
     service: HistoricalDataService, dataset_id: str
 ) -> HistoricalDatasetResponse:
@@ -260,7 +279,7 @@ def get_backtest_metrics(
     request: Request,
     session: Session = Depends(get_session),
 ) -> BacktestMetricsResponse:
-    service = _existing_backtest_service(
+    service = _completed_backtest_service(
         run_id=run_id, request=request, session=session
     )
     return BacktestMetricsResponse(**service.metrics(run_id))
@@ -272,7 +291,7 @@ def get_backtest_trades(
     request: Request,
     session: Session = Depends(get_session),
 ) -> list[BacktestTradeResponse]:
-    service = _existing_backtest_service(
+    service = _completed_backtest_service(
         run_id=run_id, request=request, session=session
     )
     return [
@@ -289,7 +308,7 @@ def get_backtest_equity(
     request: Request,
     session: Session = Depends(get_session),
 ) -> list[BacktestEquityPointResponse]:
-    service = _existing_backtest_service(
+    service = _completed_backtest_service(
         run_id=run_id, request=request, session=session
     )
     return [
@@ -328,7 +347,21 @@ def get_backtest_instruments(
     service = _existing_backtest_service(
         run_id=run_id, request=request, session=session
     )
+    run = service.get_run(run_id)
+    fallback_first_tradable_at = run.trading_start_at or run.requested_start_at
     return [
-        BacktestInstrumentResponse.model_validate(item)
+        BacktestInstrumentResponse.model_validate(
+            {
+                "instrument": item.instrument,
+                "provider_instrument": item.provider_instrument,
+                "dataset_partition_id": item.dataset_partition_id,
+                "candle_count": item.candle_count,
+                "warmup_candles_consumed": item.warmup_candles_consumed,
+                "first_tradable_at": (
+                    item.first_tradable_at or fallback_first_tradable_at
+                ),
+                "metrics": item.metrics,
+            }
+        )
         for item in service.instruments(run_id)
     ]

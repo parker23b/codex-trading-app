@@ -302,6 +302,16 @@ because they may change without changing immutable snapshot identity.
 
 Choose exactly one registered strategy, one immutable dataset, one or more dataset instruments, timeframe, range, starting capital, sizing, spread, slippage, fees, and end-of-run treatment. Runs are bounded by `BACKTEST_MAX_CANDLES_PER_RUN`.
 
+The selected start is the trading boundary, not the beginning of indicator
+history. Choose `NONE` for no pre-roll or `CANDLE_COUNT` with a non-negative
+target-timeframe candle count. Warm-up candles update strategy state but cannot
+create trades or pending orders. Strict mode rejects insufficient earlier
+coverage. Enabling degraded warm-up allows the run to continue with persisted
+warnings, exact consumed counts per instrument, and `warmup_degraded=true`.
+Strict insufficiency persists a failed run with diagnostics for every requested
+instrument. The UI reads only its run, warning, and instrument records; it does
+not request completed-run metrics, trades, or equity.
+
 Date/time form values are browser-local wall times. The UI converts them to
 explicit UTC instants before submission. Timestamps returned by the backend
 must already contain `Z` or an explicit offset and are rejected if ambiguous.
@@ -311,6 +321,8 @@ Use `DATASET` spread only when both bid and ask are present. For midpoint or tra
 ## Interpret results
 
 - Signals use the completed candle and fill at the next candle open.
+- Warm-up candles are non-tradable. Performance equity, returns, exposure, and
+  drawdown begin at the trading boundary, not the warm-up start.
 - Same-timestamp cycles process queued exits, queued entries, stop/target
   handling, and close evaluation in that order, with stable instrument ordering.
 - Equity and drawdown use candle-resolution marks.
@@ -358,16 +370,21 @@ Profit factor is null unless both winning and losing closed trades exist. The
 typed API supplies `NO_CLOSED_TRADES`, `NO_LOSING_TRADES`, or
 `NO_WINNING_TRADES` as the null reason.
 
-Completed runs show a result checksum covering deterministic strategy,
+New completed runs show a `BACKTEST_RESULT_MANIFEST_V2` checksum covering deterministic strategy,
 dataset, assumptions, trades, equity, metrics, warnings, and per-instrument
-results. Database IDs, display name/notes, wall-clock audit timestamps, and
+results, including warm-up mode, count, effective start, trading start,
+sufficiency/degraded truth, warnings, consumed counts, and first tradable
+timestamps. Database IDs, display name/notes, wall-clock audit timestamps, and
 dataset partition row IDs are excluded. The checksum proves equality of the
 covered persisted projection, not source-build authenticity or broker realism.
+Historical `BACKTEST_RESULT_MANIFEST_V1` artifacts remain verifiable with the
+original pre-warm-up projection. Unknown versions and corrupted checksums fail
+verification.
 
 Completed runs must have no failure reason; the API and checksum verifier
 reject inconsistent completed rows. Failed runs retain the failure reason and
-configuration for diagnosis, but do not receive a completed-result manifest or
-checksum.
+configuration plus per-instrument warm-up diagnostics for diagnosis, but do not
+receive a completed-result manifest, checksum, or analytics rows.
 
 The Binance still-open-candle filter and staged import
 publication/reconciliation behavior are retained as explicitly reviewed

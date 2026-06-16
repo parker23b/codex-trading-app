@@ -94,7 +94,7 @@ def test_initialize_database_upgrades_legacy_sqlite_and_stamps_revision(
             ).fetchall()
         }
 
-    assert version == "20260615_01"
+    assert version == "20260615_02"
     assert "openriskauthority" in table_names
     assert "historical_dataset" in table_names
     assert "backtest_run" in table_names

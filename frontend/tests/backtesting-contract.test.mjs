@@ -27,6 +27,7 @@ test("backtesting client keeps typed dataset and result APIs explicit", () => {
   for (const typeName of [
     "HistoricalDataset",
     "BacktestRun",
+    "BacktestWarmupWarning",
     "BacktestTrade",
     "BacktestEquityPoint",
     "BacktestWarning",
@@ -65,6 +66,18 @@ test("backtesting UI renders empty, failed, warning, provenance, and limitation 
   }
   assert.match(source, /Result checksum/);
   assert.match(source, /Exposure: wall-clock union across open intervals/);
+  assert.match(source, /name="warmup_mode"/);
+  assert.match(source, /name="warmup_candle_count"/);
+  assert.match(source, /Allow degraded warm-up/);
+  assert.match(source, /result\.run\.warmup_sufficient/);
+  assert.match(source, /warning\.requested_warmup_candles/);
+  assert.match(source, /warning\.available_warmup_candles/);
+  assert.match(source, /warning\.instrument_id/);
+  assert.match(source, /warmup_candles_consumed/);
+  assert.match(source, /first_tradable_at/);
+  assert.match(source, /if \(run\.status === "COMPLETED"\)/);
+  assert.match(source, /metrics: null/);
+  assert.match(source, /No per-instrument diagnostics were persisted/);
   assert.match(source, /metrics\.monetary_unit_label/);
   assert.match(source, /adaptive display formatting, not broker tick precision/);
   assert.match(source, /function adaptivePrice/);
